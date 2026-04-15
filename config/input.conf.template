@@ -1,0 +1,64 @@
+#######################################################################################
+#                                                                                     #
+#                         ملف اختصارات mpv - input.conf                                #
+#                               (النسخة المصححة والنهائية)                              #
+#                                                                                     #
+#######################################################################################
+
+# **----- اختصارات تبديل مؤثرات Anime4K -----**
+
+# الوضع A
+CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A (Sharp)"
+
+# الوضع B
+CTRL+2 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B (Soft)"
+
+# الوضع C
+CTRL+3 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C (Denoise)"
+
+# الوضع A+A (تم التصحيح)
+CTRL+4 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A+A (Ultra Sharp)"
+
+# الوضع B+B (تم التصحيح)
+CTRL+5 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B+B (Ultra Soft)"
+
+# الوضع C+A (تم التصحيح)
+CTRL+6 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C+A (Denoise + Sharp)"
+
+# **----- اختصار لإلغاء جميع المؤثرات -----**
+CTRL+0 no-osd change-list glsl-shaders clr ""; show-text "Shaders Cleared"
+
+
+# **----- اختصارات مفيدة إضافية (تم التصحيح) -----**
+
+# F1: أخذ لقطة شاشة (Screenshot) بدون تضمين الترجمة.
+F1 no-osd screenshot video
+
+# F2: أخذ لقطة شاشة مع تضمين الترجمة.
+F2 no-osd screenshot
+
+# F3: تفعيل/تعطيل فلتر إزالة الشرائط اللونية (Debanding).
+F3 cycle deband
+
+# F4: تفعيل/تعطيل سلاسة الحركة (Interpolation).
+F4 cycle interpolation
+
+# F5: التبديل بين مسارات الصوت المتاحة.
+F5 cycle audio
+
+# F6: التبديل بين مسارات الترجمة المتاحة.
+F6 cycle sub
+
+# F7: إظهار/إخفاء الترجمة.
+F7 cycle sub-visibility
+
+
+# F8: (جديد) تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)
+# مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية
+F8 cycle-values af "lavfi=[dynaudnorm=f=250:g=31:p=0.5]" ""
+
+#######################################################################################
+#                                   نهاية الإعدادات                                   #
+#######################################################################################
+
+n script_binding autosubsync-menu

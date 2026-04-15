@@ -1,0 +1,20 @@
+# MPV Auto-Deploy — .gitignore
+
+# === Your running mpv config (not part of deploy system) ===
+mpv/
+
+# === Staging directory (temp download area) ===
+.staging/
+
+# === Python cache ===
+__pycache__/
+*.pyc
+*.pyo
+
+# === Runtime data ===
+.deploy.lock.json
+
+# === OS junk ===
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,28 @@
+# Absolute paths to the executables:
+
+# 1. ffmpeg
+ffmpeg_path={{FFMPEG_PATH}}
+
+# 2. ffsubsync
+ffsubsync_path={{FFSUBSYNC_PATH}}
+
+# 3. alass
+alass_path={{ALASS_PATH}}
+
+
+# Preferred retiming tool. Allowed options: 'ffsubsync', 'alass', 'ask'.
+
+# 1. Preferred tool for syncing to audio.
+audio_subsync_tool=ask
+
+# 2. Preferred tool for syncing to another subtitle.
+altsub_subsync_tool=ask
+
+
+# General Settings:
+
+# Unload old subs (yes,no)
+# unload_old_sub=yes
+
+# Overwrite the original subtitle file.
+overwrite_old_sub=yes
