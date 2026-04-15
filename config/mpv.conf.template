@@ -15,6 +15,7 @@ force-window        = immediate
 border              = no
 osd-bar             = no
 hwdec               = {{HWDEC}}
+hwdec-codecs        = all
 gpu-api             = {{GPU_API}}
 vo                  = {{VO}}
 {{#if GPU_CONTEXT}}
@@ -72,6 +73,10 @@ deband-grain=48
 [anime]
 profile-desc="ملف تعريف للأنمي (مع Anime4K)"
 glsl-shaders = "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"
+# Use lighter scalers with Anime4K — the shaders handle upscaling,
+# using heavy ewa_lanczossharp ON TOP of them causes frame drops
+scale=spline36
+cscale=spline36
 deband=yes
 video-sync=display-resample
 dither-depth=auto

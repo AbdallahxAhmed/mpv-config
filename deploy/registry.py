@@ -197,7 +197,7 @@ SYSTEM_DEPS = {
 
 PLATFORM_DEFAULTS = {
     "windows": {
-        "gpu_api": "d3d11", "hwdec": "auto", "gpu_context": "",
+        "gpu_api": "d3d11", "hwdec": "auto-copy", "gpu_context": "",
         "vo": "gpu-next", "shader_sep": ";",
         "config_dir": "%APPDATA%/mpv",
         "ffmpeg_path": "auto", "ffsubsync_path": "auto", "alass_path": "auto",
