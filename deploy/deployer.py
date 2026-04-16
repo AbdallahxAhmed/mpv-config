@@ -43,6 +43,105 @@ def backup_existing(config_dir):
         raise
 
 
+def list_backups(config_dir):
+    """Return available backup directories for config_dir (newest first)."""
+    parent = os.path.dirname(config_dir) or "."
+    base = os.path.basename(config_dir)
+    prefix = f"{base}.backup."
+
+    backups = []
+    if not os.path.isdir(parent):
+        return backups
+
+    for name in os.listdir(parent):
+        if not name.startswith(prefix):
+            continue
+        full_path = os.path.join(parent, name)
+        if os.path.isdir(full_path):
+            backups.append(full_path)
+
+    backups.sort(key=_safe_mtime, reverse=True)
+    return backups
+
+
+def _remove_path(path):
+    """Remove file/dir/symlink path safely."""
+    if os.path.islink(path) or os.path.isfile(path):
+        os.remove(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def _safe_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return float("-inf")
+
+
+def rollback_config(config_dir, backup_path=None, dry_run=False):
+    """
+    Restore config_dir from a backup.
+    If backup_path is None, restores from the latest available backup.
+    """
+    backup_source = backup_path
+    if backup_source:
+        backup_source = os.path.abspath(os.path.expanduser(backup_source))
+    else:
+        backups = list_backups(config_dir)
+        if not backups:
+            raise FileNotFoundError(f"No backups found for: {config_dir}")
+        backup_source = backups[0]
+
+    if not os.path.isdir(backup_source):
+        raise FileNotFoundError(f"Backup not found: {backup_source}")
+
+    if dry_run:
+        ui.info(f"[DRY RUN] Would rollback {config_dir} from {backup_source}")
+        return {
+            "name": "rollback",
+            "status": "skipped",
+            "detail": f"dry run ({backup_source})",
+        }
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    temp_restore = f"{config_dir}.rollback.tmp.{timestamp}"
+    safety_backup = None
+
+    try:
+        ui.step(f"Preparing rollback from: {backup_source}")
+        shutil.copytree(backup_source, temp_restore)
+
+        if os.path.isdir(config_dir):
+            safety_backup = f"{config_dir}.pre-rollback.{timestamp}"
+            ui.step(f"Saving current config → {safety_backup}")
+            shutil.move(config_dir, safety_backup)
+
+        shutil.move(temp_restore, config_dir)
+        ui.success(f"Rollback completed from: {backup_source}")
+        if safety_backup:
+            ui.success(f"Current config saved as: {safety_backup}")
+
+        return {
+            "name": "rollback",
+            "status": "ok",
+            "detail": backup_source,
+        }
+    except Exception as e:
+        ui.error(f"Rollback failed: {e}")
+        if os.path.isdir(temp_restore):
+            try:
+                _remove_path(temp_restore)
+            except Exception as cleanup_err:
+                ui.warn(f"Could not clean temporary rollback directory: {cleanup_err}")
+        if safety_backup and os.path.isdir(safety_backup):
+            ui.info(f"Restoring previous config from: {safety_backup}")
+            if os.path.lexists(config_dir):
+                _remove_path(config_dir)
+            shutil.move(safety_backup, config_dir)
+        raise
+
+
 # ─── Template Patching ─────────────────────────────────────────────────
 
 def _patch_mpv_conf(template_path, dest_path, env):

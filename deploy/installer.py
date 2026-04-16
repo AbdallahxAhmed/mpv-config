@@ -194,6 +194,80 @@ def _prepare_ffsubsync_build(env):
             ui.warn("Could not check for Visual C++ Build Tools")
 
 
+def _uninstall_one(name, dep_info, env):
+    """Uninstall a single dependency using the appropriate method."""
+    platform = env.platform_key
+    info = dep_info.get(platform, dep_info.get("all"))
+    if not info:
+        ui.warn(f"No uninstall method for {name} on {platform}")
+        return False
+
+    method = info["method"]
+
+    if method == "pacman":
+        return _run(["sudo", "pacman", "-Rns", "--noconfirm", info["pkg"]], check=False)
+    elif method == "apt":
+        return _run(["sudo", "apt", "remove", "-y", info["pkg"]], check=False)
+    elif method == "brew":
+        return _run(["brew", "uninstall", info["pkg"]], check=False)
+    elif method == "winget":
+        return _run(["winget", "uninstall", "--id", info["id"], "-e"], check=False)
+    elif method == "pip":
+        pip_args = _get_pip_args(env)
+        if pip_args is None:
+            ui.error("pip is not available and could not be detected automatically.")
+            return False
+        return _run(pip_args + ["uninstall", "-y", info["pkg"]], check=False)
+    elif method == "aur":
+        if env.aur_helper:
+            return _run([env.aur_helper, "-Rns", "--noconfirm", info["pkg"]], check=False)
+        ui.warn(f"{name} was installed from AUR; no AUR helper found for auto-uninstall.")
+        return False
+    elif method == "manual":
+        url = info.get("url", "")
+        ui.warn(f"{name} is manual install; remove manually if needed: {url}")
+        return False
+    else:
+        ui.warn(f"Unknown uninstall method '{method}' for {name}")
+        return False
+
+
+def uninstall_deps(env, remove_python=False, dry_run=False):
+    """
+    Uninstall dependencies managed by this installer.
+    Returns list of result dicts.
+    """
+    ui.header("Uninstalling System Dependencies")
+
+    managed = ["mpv", "yt-dlp", "ffmpeg", "ffsubsync", "alass"]
+    if remove_python:
+        managed.append("python")
+
+    results = []
+    for name in managed:
+        if not env.installed.get(name, False):
+            ui.info(f"{name}: not installed (skipping)")
+            results.append({"name": name, "status": "skipped", "detail": "not installed"})
+            continue
+
+        if dry_run:
+            ui.info(f"[DRY RUN] Would uninstall: {name}")
+            results.append({"name": name, "status": "skipped", "detail": "dry run"})
+            continue
+
+        ui.step(f"Uninstalling {name}...")
+        dep_info = SYSTEM_DEPS.get(name, {})
+        ok = _uninstall_one(name, dep_info, env)
+        if ok:
+            ui.success(f"{name}: uninstalled")
+            results.append({"name": name, "status": "ok", "detail": "uninstalled"})
+        else:
+            ui.warn(f"{name}: could not uninstall automatically")
+            results.append({"name": name, "status": "skipped", "detail": "manual/failed"})
+
+    return results
+
+
 def install_deps(env, dry_run=False):
     """
     Install all missing system dependencies.
