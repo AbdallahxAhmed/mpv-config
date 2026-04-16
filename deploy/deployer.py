@@ -64,6 +64,14 @@ def list_backups(config_dir):
     return backups
 
 
+def _remove_path(path):
+    """Remove file/dir/symlink path safely."""
+    if os.path.islink(path) or os.path.isfile(path):
+        os.remove(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
 def rollback_config(config_dir, backup_path=None, dry_run=False):
     """
     Restore config_dir from a backup.
@@ -116,15 +124,13 @@ def rollback_config(config_dir, backup_path=None, dry_run=False):
         ui.error(f"Rollback failed: {e}")
         if os.path.isdir(temp_restore):
             try:
-                shutil.rmtree(temp_restore)
+                _remove_path(temp_restore)
             except Exception as cleanup_err:
                 ui.warn(f"Could not clean temporary rollback directory: {cleanup_err}")
         if safety_backup and os.path.isdir(safety_backup):
             ui.info(f"Restoring previous config from: {safety_backup}")
-            if os.path.isdir(config_dir):
-                shutil.rmtree(config_dir)
-            elif os.path.exists(config_dir):
-                os.remove(config_dir)
+            if os.path.lexists(config_dir):
+                _remove_path(config_dir)
             shutil.move(safety_backup, config_dir)
         raise
 
