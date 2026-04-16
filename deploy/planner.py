@@ -194,7 +194,10 @@ def build_uninstall_plan(
             "scripts", "shaders", "fonts", "script-opts",
             "shader_cache", "chapters",
             "mpv.conf", "input.conf",
-            ".deploy.lock.json", ".audit-log.json",
+            ".deploy.lock.json",
+            # .audit-log.json is preserved during partial uninstall so future
+            # operations can still consult the history.  It is removed only
+            # when purge_config=True deletes the whole config directory.
         ]
         for name in managed:
             path = os.path.join(env.config_dir, name)

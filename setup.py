@@ -314,7 +314,9 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
         "mpv.conf",
         "input.conf",
         ".deploy.lock.json",
-        ".audit-log.json",
+        # NOTE: .audit-log.json is intentionally kept during partial uninstall
+        # so it can still be consulted by future install / rollback operations.
+        # It is only removed when purge_config=True wipes the entire config dir.
     ]
 
     if purge_config:
@@ -518,12 +520,12 @@ def _interactive_menu(args):
         args.remove_install_dir = True
         # Inform the user why removing Python is risky before asking
         print(
-            f"\n  {ui.C.YELLOW}!{ui.C.RESET}  Removing Python packages is potentially risky: other"
-            f" tools on your system may depend on the same packages."
+            f"\n  {ui.C.YELLOW}!{ui.C.RESET}  Removing Python packages is potentially risky:"
+            f" other tools on your system may depend on the same packages."
         )
         print(
-            f"  {ui.C.DIM}The audit log will be consulted — only packages installed"
-            f" by this tool will be removed.{ui.C.RESET}"
+            f"  {ui.C.DIM}The audit log will be consulted —"
+            f" only packages installed by this tool will be removed.{ui.C.RESET}"
         )
         args.remove_python = ui.confirm("  Also remove Python packages installed by this tool?")
     elif choice == "0":
