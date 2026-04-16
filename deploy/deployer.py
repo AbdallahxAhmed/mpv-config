@@ -60,7 +60,7 @@ def list_backups(config_dir):
         if os.path.isdir(full_path):
             backups.append(full_path)
 
-    backups.sort(reverse=True)
+    backups.sort(key=lambda p: os.path.getmtime(p), reverse=True)
     return backups
 
 

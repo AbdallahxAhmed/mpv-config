@@ -36,6 +36,8 @@ from deploy.fetcher import fetch_all
 from deploy.deployer import deploy, rollback_config
 from deploy.verifier import verify
 
+LATEST_BACKUP_SENTINEL = "__latest__"
+
 
 def cmd_install(args):
     """Full installation: detect → install deps → fetch → deploy → verify."""
@@ -178,7 +180,7 @@ def cmd_rollback(args):
     ui.banner()
     env = detect()
 
-    requested_backup = None if args.rollback == "__latest__" else args.rollback
+    requested_backup = None if args.rollback == LATEST_BACKUP_SENTINEL else args.rollback
 
     ui.header("Rollback Configuration")
     result = rollback_config(env.config_dir, backup_path=requested_backup, dry_run=args.dry_run)
@@ -199,7 +201,7 @@ def main():
     parser.add_argument(
         "--rollback",
         nargs="?",
-        const="__latest__",
+        const=LATEST_BACKUP_SENTINEL,
         metavar="BACKUP_DIR",
         help="Rollback to latest backup (or provide a specific backup directory)",
     )
