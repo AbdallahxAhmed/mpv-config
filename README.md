@@ -47,9 +47,21 @@ python setup.py              # Full install
 python setup.py --update     # Update scripts only
 python setup.py --rollback   # Rollback to latest backup
 python setup.py --rollback /path/to/backup   # Rollback to specific backup
+python setup.py --uninstall  # Remove deployed files (interactive confirm)
+python setup.py --uninstall --purge-config --remove-backups --remove-deps --remove-install-dir  # Full remove
 python setup.py --verify     # Verify installation
 python setup.py --status     # Show installed versions
 python setup.py --dry-run    # Preview without changes
+```
+
+You can also run interactively (menu options instead of flags):
+```bash
+python setup.py --interactive
+```
+
+After using `install.sh`, a launcher is created so you can run from any path:
+```bash
+mpv-config
 ```
 
 ## Platform Handling

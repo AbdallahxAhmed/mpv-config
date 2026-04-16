@@ -13,6 +13,8 @@ set -euo pipefail
 REPO="AbdallahxAhmed/mpv-config"
 BRANCH="main"
 INSTALL_DIR="${HOME}/.mpv-deploy"
+LAUNCHER_DIR="${HOME}/.local/bin"
+LAUNCHER_PATH="${LAUNCHER_DIR}/mpv-config"
 
 echo ""
 echo "╔══════════════════════════════════════════════╗"
@@ -119,9 +121,27 @@ echo ""
 cd "$INSTALL_DIR"
 $PYTHON setup.py
 
+# ─── Optional launcher (run from any path) ─────────────────────────
+echo ""
+echo "[+] Creating launcher command (mpv-config)..."
+mkdir -p "$LAUNCHER_DIR"
+cat > "$LAUNCHER_PATH" <<EOF
+#!/usr/bin/env bash
+exec $PYTHON "$INSTALL_DIR/setup.py" "\$@"
+EOF
+chmod +x "$LAUNCHER_PATH"
+echo "  ✓ Launcher created: $LAUNCHER_PATH"
+
+if [[ ":$PATH:" != *":$LAUNCHER_DIR:"* ]]; then
+    echo "  ! '$LAUNCHER_DIR' is not in PATH."
+    echo "    Add this line to your shell profile:"
+    echo "    export PATH=\"$LAUNCHER_DIR:\$PATH\""
+fi
+
 echo ""
 echo "─────────────────────────────────────────────────"
 echo "  Cleanup: install dir kept at $INSTALL_DIR"
-echo "  Re-run:  cd $INSTALL_DIR && $PYTHON setup.py"
-echo "  Update:  cd $INSTALL_DIR && $PYTHON setup.py --update"
+echo "  Re-run:  mpv-config"
+echo "  Update:  mpv-config --update"
+echo "  Remove:  mpv-config --uninstall --purge-config --remove-backups --remove-deps --remove-install-dir"
 echo "─────────────────────────────────────────────────"
