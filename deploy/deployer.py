@@ -60,7 +60,7 @@ def list_backups(config_dir):
         if os.path.isdir(full_path):
             backups.append(full_path)
 
-    backups.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    backups.sort(key=_safe_mtime, reverse=True)
     return backups
 
 
@@ -70,6 +70,13 @@ def _remove_path(path):
         os.remove(path)
     elif os.path.isdir(path):
         shutil.rmtree(path)
+
+
+def _safe_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0
 
 
 def rollback_config(config_dir, backup_path=None, dry_run=False):
