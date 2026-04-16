@@ -159,18 +159,26 @@ def _detect_python():
     python_cmd = "python" if sys.platform == "win32" else "python3"
     pip_cmd = "pip" if sys.platform == "win32" else "pip3"
 
-    # Verify
+    # Verify python command
     if not _which(python_cmd):
         if _which("python3"):
             python_cmd = "python3"
         elif _which("python"):
             python_cmd = "python"
 
+    # Verify pip command: try pip3, pip, then python -m pip
     if not _which(pip_cmd):
-        if _which("pip3"):
-            pip_cmd = "pip3"
-        elif _which("pip"):
-            pip_cmd = "pip"
+        found = False
+        for alt in ["pip3", "pip"]:
+            if _which(alt):
+                pip_cmd = alt
+                found = True
+                break
+        if not found:
+            # Check whether python -m pip works as a last resort
+            ok, _ = _run_silent([python_cmd, "-m", "pip", "--version"])
+            if ok:
+                pip_cmd = f"{python_cmd} -m pip"
 
     return python_cmd, pip_cmd
 

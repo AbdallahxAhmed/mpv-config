@@ -189,7 +189,7 @@ SYSTEM_DEPS = {
         "verify": ["ffsubsync", "--version"],
     },
     "alass": {
-        "arch":    {"method": "aur", "pkg": "alass-bin"},
+        "arch":    {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},
         "windows": {"method": "manual", "url": "https://github.com/kaegi/alass/releases"},
         "verify":  ["alass", "--version"],
     },
