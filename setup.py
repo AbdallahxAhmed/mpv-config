@@ -10,6 +10,8 @@ Usage:
     python setup.py                 # Full install (interactive)
     python setup.py --install       # Full install
     python setup.py --update        # Update scripts only
+    python setup.py --rollback      # Restore latest backup
+    python setup.py --rollback <backup_dir>  # Restore specific backup
     python setup.py --verify        # Verify current install
     python setup.py --status        # Show install status
     python setup.py --dry-run       # Preview without changes
@@ -31,7 +33,7 @@ from deploy.registry import SCRIPTS, SHADERS
 from deploy.detector import detect
 from deploy.installer import install_deps
 from deploy.fetcher import fetch_all
-from deploy.deployer import deploy, backup_existing
+from deploy.deployer import deploy, rollback_config
 from deploy.verifier import verify
 
 
@@ -171,6 +173,22 @@ def cmd_status(args):
     print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
 
 
+def cmd_rollback(args):
+    """Rollback current config from backup."""
+    ui.banner()
+    env = detect()
+
+    requested_backup = None if args.rollback == "__latest__" else args.rollback
+
+    ui.header("Rollback Configuration")
+    result = rollback_config(env.config_dir, backup_path=requested_backup, dry_run=args.dry_run)
+    ui.summary([result])
+
+    if result["status"] == "ok":
+        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}↩ Rollback complete!{ui.C.RESET}")
+        print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="MPV Auto-Deploy System — one command, full setup.",
@@ -178,6 +196,13 @@ def main():
     )
     parser.add_argument("--install", action="store_true", help="Full install (detect → deps → fetch → deploy → verify)")
     parser.add_argument("--update", action="store_true", help="Update scripts/shaders only")
+    parser.add_argument(
+        "--rollback",
+        nargs="?",
+        const="__latest__",
+        metavar="BACKUP_DIR",
+        help="Rollback to latest backup (or provide a specific backup directory)",
+    )
     parser.add_argument("--verify", action="store_true", help="Verify current deployment")
     parser.add_argument("--status", action="store_true", help="Show installed versions")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
@@ -185,11 +210,13 @@ def main():
     args = parser.parse_args()
 
     # Default to --install if no action specified
-    if not any([args.install, args.update, args.verify, args.status]):
+    if not any([args.install, args.update, args.verify, args.status, args.rollback is not None]):
         args.install = True
 
     try:
-        if args.verify:
+        if args.rollback is not None:
+            cmd_rollback(args)
+        elif args.verify:
             cmd_verify(args)
         elif args.status:
             cmd_status(args)

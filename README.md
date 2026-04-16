@@ -45,6 +45,8 @@ git clone https://github.com/AbdallahxAhmed/mpv-config.git
 cd mpv-config
 python setup.py              # Full install
 python setup.py --update     # Update scripts only
+python setup.py --rollback   # Rollback to latest backup
+python setup.py --rollback /path/to/backup   # Rollback to specific backup
 python setup.py --verify     # Verify installation
 python setup.py --status     # Show installed versions
 python setup.py --dry-run    # Preview without changes
