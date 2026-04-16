@@ -35,6 +35,11 @@ from deploy.installer import install_deps, uninstall_deps
 from deploy.fetcher import fetch_all
 from deploy.deployer import deploy, rollback_config, list_backups, _remove_path as remove_path_safe
 from deploy.verifier import verify
+from deploy.audit_log import AuditLog
+from deploy.planner import (
+    build_install_plan, build_update_plan, build_uninstall_plan,
+    display_plan, confirm_plan,
+)
 
 LATEST_BACKUP_SENTINEL = "__latest__"
 DEFAULT_INSTALL_DIR = os.path.expanduser("~/.mpv-deploy")
@@ -42,69 +47,105 @@ DEFAULT_LAUNCHER = os.path.expanduser("~/.local/bin/mpv-config")
 MENU_MAX_OPTION = 8
 
 
+def _audit_log_for(env):
+    """Return an AuditLog instance pointing at the config dir's log file."""
+    log_path = os.path.join(env.config_dir, ".audit-log.json")
+    return AuditLog(log_path)
+
+
 def cmd_install(args):
-    """Full installation: detect → install deps → fetch → deploy → verify."""
+    """Full installation: detect → plan → confirm → install deps → fetch → deploy → verify."""
     ui.banner()
 
     # 1. Detect environment
     env = detect()
 
-    # 2. Check connectivity
-    ui.header("Pre-flight Checks")
-    try:
-        import urllib.request
-        urllib.request.urlopen("https://api.github.com", timeout=5)
-        ui.success("Internet connectivity: OK")
-    except Exception:
-        ui.error("Cannot reach GitHub. Check your internet connection.")
-        if not args.dry_run:
-            sys.exit(1)
+    # 2. Build and display the pre-flight action plan so the user knows
+    #    exactly what will happen before anything is changed.
+    plan = build_install_plan(env)
+    display_plan(plan, "Installation Plan")
 
-    # 3. Install system dependencies
-    dep_results = install_deps(env, dry_run=args.dry_run)
+    # 3. Ask for explicit approval — skip only for dry-runs or non-interactive
+    #    sessions (e.g. piped into bash).
+    if not args.dry_run and _is_interactive_session():
+        if not confirm_plan(plan, "installation"):
+            ui.warn("Installation cancelled by user.")
+            return
 
-    # 4. Fetch scripts & shaders into a staging directory
-    staging_dir = os.path.join(SCRIPT_DIR, ".staging")
-    if os.path.exists(staging_dir):
-        shutil.rmtree(staging_dir)
-    os.makedirs(staging_dir)
+    # 4. Initialise audit log (creates the config dir early so the log can
+    #    be written even before deploy() runs).
+    os.makedirs(env.config_dir, exist_ok=True)
+    audit_log = _audit_log_for(env)
+    audit_log.start_session("install", env)
 
     try:
-        fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
+        # 5. Check connectivity
+        ui.header("Pre-flight Checks")
+        try:
+            import urllib.request
+            urllib.request.urlopen("https://api.github.com", timeout=5)
+            ui.success("Internet connectivity: OK")
+        except Exception:
+            ui.error("Cannot reach GitHub. Check your internet connection.")
+            if not args.dry_run:
+                audit_log.complete_session("failed")
+                sys.exit(1)
 
-        # 5. Deploy to config dir
-        deploy_results = deploy(staging_dir, env, SCRIPT_DIR, dry_run=args.dry_run)
+        # 6. Install system dependencies
+        dep_results = install_deps(env, dry_run=args.dry_run, audit_log=audit_log)
 
-        # 6. Save lockfile
-        if not args.dry_run:
-            lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
-            with open(lockfile_path, "w", encoding="utf-8") as f:
-                json.dump(lockfile, f, indent=2)
-            ui.success(f"Lockfile saved: {lockfile_path}")
-
-        # 7. Verify
-        if not args.dry_run:
-            verify_results = verify(env.config_dir, env)
-        else:
-            verify_results = []
-
-        # 8. Final summary
-        all_results = dep_results + fetch_results + deploy_results + verify_results
-        ui.summary(fetch_results)
-
-        # Done!
-        if not args.dry_run:
-            failed = sum(1 for r in fetch_results if r["status"] == "failed")
-            if failed == 0:
-                print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🎉 Deployment complete!{ui.C.RESET}")
-                print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
-            else:
-                print(f"\n  {ui.C.YELLOW}⚠ Deployment finished with {failed} issue(s).{ui.C.RESET}")
-                print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
-    finally:
-        # Clean up staging
+        # 7. Fetch scripts & shaders into a staging directory
+        staging_dir = os.path.join(SCRIPT_DIR, ".staging")
         if os.path.exists(staging_dir):
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            shutil.rmtree(staging_dir)
+        os.makedirs(staging_dir)
+
+        try:
+            fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
+
+            # 8. Deploy to config dir
+            deploy_results = deploy(staging_dir, env, SCRIPT_DIR, dry_run=args.dry_run, audit_log=audit_log)
+
+            # 9. Save lockfile
+            if not args.dry_run:
+                lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
+                with open(lockfile_path, "w", encoding="utf-8") as f:
+                    json.dump(lockfile, f, indent=2)
+                ui.success(f"Lockfile saved: {lockfile_path}")
+                audit_log.record_file(lockfile_path, "create", "ok", "script version lockfile")
+
+            # 10. Verify
+            if not args.dry_run:
+                verify_results = verify(env.config_dir, env)
+            else:
+                verify_results = []
+
+            # 11. Final summary
+            all_results = dep_results + fetch_results + deploy_results + verify_results
+            ui.summary(fetch_results)
+
+            # Done!
+            if not args.dry_run:
+                failed = sum(1 for r in fetch_results if r["status"] == "failed")
+                if failed == 0:
+                    print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🎉 Deployment complete!{ui.C.RESET}")
+                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    audit_log.complete_session("completed")
+                else:
+                    print(f"\n  {ui.C.YELLOW}⚠ Deployment finished with {failed} issue(s).{ui.C.RESET}")
+                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    audit_log.complete_session("completed_with_errors")
+        finally:
+            # Clean up staging
+            if os.path.exists(staging_dir):
+                shutil.rmtree(staging_dir, ignore_errors=True)
+
+    except Exception:
+        try:
+            audit_log.complete_session("failed")
+        except Exception:
+            pass
+        raise
 
 
 def cmd_update(args):
@@ -112,6 +153,18 @@ def cmd_update(args):
     ui.banner()
 
     env = detect()
+
+    # Show what will be updated
+    plan = build_update_plan(env)
+    display_plan(plan, "Update Plan")
+
+    if not args.dry_run and _is_interactive_session():
+        if not confirm_plan(plan, "update"):
+            ui.warn("Update cancelled by user.")
+            return
+
+    audit_log = _audit_log_for(env)
+    audit_log.start_session("update", env)
 
     staging_dir = os.path.join(SCRIPT_DIR, ".staging")
     if os.path.exists(staging_dir):
@@ -132,14 +185,23 @@ def cmd_update(args):
                 shutil.copytree(src, dst)
                 count = sum(len(f) for _, _, f in os.walk(dst))
                 ui.success(f"{item}/: {count} file(s) updated")
+                audit_log.record_file(dst, "copy", "ok", f"{count} file(s) updated")
 
         # Save lockfile
         lockfile_path = os.path.join(config_dir, ".deploy.lock.json")
         with open(lockfile_path, "w", encoding="utf-8") as f:
             json.dump(lockfile, f, indent=2)
+        audit_log.record_file(lockfile_path, "modify", "ok", "version lockfile updated")
 
         ui.summary(fetch_results)
         print(f"\n  {ui.C.GREEN}{ui.C.BOLD}✨ Update complete!{ui.C.RESET}\n")
+        audit_log.complete_session("completed")
+    except Exception:
+        try:
+            audit_log.complete_session("failed")
+        except Exception:
+            pass
+        raise
     finally:
         if os.path.exists(staging_dir):
             shutil.rmtree(staging_dir, ignore_errors=True)
@@ -174,6 +236,20 @@ def cmd_status(args):
         date = info.get("fetched_at", "")[:10]
         ui.success(f"{name}: {version} (fetched {date})")
 
+    # Also show audit log summary if available
+    audit_log = _audit_log_for(env)
+    sessions = audit_log.sessions()
+    if sessions:
+        last = sessions[-1]
+        ui.header("Last Installer Session")
+        ui.info(f"Operation : {last.get('operation', '?')}")
+        ui.info(f"Status    : {last.get('status', '?')}")
+        ui.info(f"Started   : {last.get('started_at', '?')}")
+        ui.info(f"Completed : {last.get('completed_at', '?') or '(in progress)'}")
+        pkg_safe = audit_log.get_packages_installed_by_us()
+        if pkg_safe:
+            ui.info(f"Installed by this tool (safe to remove): {', '.join(pkg_safe)}")
+
     print(f"\n  {ui.C.DIM}Lockfile: {lockfile_path}{ui.C.RESET}")
     print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
 
@@ -186,15 +262,45 @@ def cmd_rollback(args):
     requested_backup = None if args.rollback == LATEST_BACKUP_SENTINEL else args.rollback
 
     ui.header("Rollback Configuration")
-    result = rollback_config(env.config_dir, backup_path=requested_backup, dry_run=args.dry_run)
-    ui.summary([result])
 
-    if result["status"] == "ok":
-        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}↩ Rollback complete!{ui.C.RESET}")
-        print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+    # Explain what will happen
+    backups = list_backups(env.config_dir)
+    if not backups and not requested_backup:
+        ui.error("No backups found. Cannot rollback.")
+        sys.exit(1)
+
+    target_backup = requested_backup or (backups[0] if backups else None)
+    if target_backup:
+        ui.info(f"Will restore config from: {target_backup}")
+        ui.info(f"Current config will be saved as a pre-rollback snapshot.")
+
+    if not args.dry_run and _is_interactive_session():
+        if not ui.confirm("Proceed with rollback?"):
+            ui.warn("Rollback cancelled by user.")
+            return
+
+    audit_log = _audit_log_for(env)
+    audit_log.start_session("rollback", env)
+
+    try:
+        result = rollback_config(env.config_dir, backup_path=requested_backup, dry_run=args.dry_run, audit_log=audit_log)
+        ui.summary([result])
+
+        if result["status"] == "ok":
+            print(f"\n  {ui.C.GREEN}{ui.C.BOLD}↩ Rollback complete!{ui.C.RESET}")
+            print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+            audit_log.complete_session("completed")
+        else:
+            audit_log.complete_session("completed")
+    except Exception:
+        try:
+            audit_log.complete_session("failed")
+        except Exception:
+            pass
+        raise
 
 
-def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_run=False):
+def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_run=False, audit_log=None):
     results = []
     config_dir = env.config_dir
 
@@ -208,6 +314,9 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
         "mpv.conf",
         "input.conf",
         ".deploy.lock.json",
+        # NOTE: .audit-log.json is intentionally kept during partial uninstall
+        # so it can still be consulted by future install / rollback operations.
+        # It is only removed when purge_config=True wipes the entire config dir.
     ]
 
     if purge_config:
@@ -219,6 +328,8 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
                 remove_path_safe(config_dir)
                 ui.success(f"Removed config dir: {config_dir}")
                 results.append({"name": "config_dir", "status": "ok", "detail": "removed"})
+                if audit_log:
+                    audit_log.record_file(config_dir, "delete", "ok", "full config dir removed")
         else:
             results.append({"name": "config_dir", "status": "skipped", "detail": "not found"})
     else:
@@ -233,6 +344,8 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
                 remove_path_safe(path)
                 ui.success(f"Removed: {path}")
                 results.append({"name": name, "status": "ok", "detail": "removed"})
+                if audit_log:
+                    audit_log.record_file(path, "delete", "ok", "removed by uninstall")
 
     if remove_backups:
         backups = list_backups(config_dir)
@@ -246,11 +359,13 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
                 shutil.rmtree(backup)
                 ui.success(f"Removed backup: {backup}")
                 results.append({"name": "backup", "status": "ok", "detail": backup})
+                if audit_log:
+                    audit_log.record_file(backup, "delete", "ok", "backup removed by uninstall")
 
     return results
 
 
-def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False):
+def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False, audit_log=None):
     results = []
     if os.path.lexists(DEFAULT_LAUNCHER):
         if dry_run:
@@ -260,6 +375,8 @@ def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False):
             remove_path_safe(DEFAULT_LAUNCHER)
             ui.success(f"Removed launcher: {DEFAULT_LAUNCHER}")
             results.append({"name": "launcher", "status": "ok", "detail": "removed"})
+            if audit_log:
+                audit_log.record_file(DEFAULT_LAUNCHER, "delete", "ok", "launcher removed")
 
     if remove_install_dir and os.path.isdir(DEFAULT_INSTALL_DIR):
         if dry_run:
@@ -280,41 +397,71 @@ def cmd_uninstall(args):
 
     ui.header("Uninstall MPV Auto-Deploy")
 
-    should_continue = True
-    if not args.purge_config:
-        should_continue = ui.confirm("Remove deployed files only (keep the base mpv config directory)?")
-    if not should_continue:
-        ui.warn("Uninstall cancelled by user.")
-        return
+    # Load the audit log to find out which packages were pre-existing.
+    # If no log exists we fall back to the safe default (assume everything
+    # is pre-existing so nothing is auto-removed).
+    audit_log = _audit_log_for(env)
+    pre_existing_pkgs = audit_log.get_pre_existing_packages()
+
+    if not pre_existing_pkgs:
+        ui.warn("No audit log found — all packages assumed pre-existing.")
+        ui.warn("System packages will NOT be auto-removed even if --remove-deps is set.")
+
+    # Build and show the full uninstall plan so the user can review what
+    # will actually happen before anything is deleted.
+    plan = build_uninstall_plan(
+        env,
+        pre_existing_pkgs=pre_existing_pkgs,
+        purge_config=args.purge_config,
+        remove_backups=args.remove_backups,
+        remove_deps=args.remove_deps,
+        remove_python=getattr(args, "remove_python", False),
+    )
+    display_plan(plan, "Uninstall Plan")
+
+    # Ask for a single confirmation that covers everything.
+    if not args.dry_run:
+        if not confirm_plan(plan, "uninstall"):
+            ui.warn("Uninstall cancelled by user.")
+            return
+
+    # Start an audit session to record the uninstall
+    audit_log.start_session("uninstall", env)
 
     remove_results = _remove_deployed_files(
         env,
         purge_config=args.purge_config,
         remove_backups=args.remove_backups,
         dry_run=args.dry_run,
+        audit_log=audit_log,
     )
 
     dep_results = []
     if args.remove_deps:
-        proceed_deps = True
-        if not args.dry_run and _is_interactive_session():
-            proceed_deps = ui.confirm("Uninstall system dependencies too? This may remove shared tools.")
-        if proceed_deps:
-            dep_results = uninstall_deps(env, remove_python=args.remove_python, dry_run=args.dry_run)
-        else:
-            dep_results.append({"name": "dependencies", "status": "skipped", "detail": "user skipped"})
+        dep_results = uninstall_deps(
+            env,
+            remove_python=getattr(args, "remove_python", False),
+            dry_run=args.dry_run,
+            pre_existing_pkgs=pre_existing_pkgs,
+            audit_log=audit_log,
+        )
     else:
         dep_results.append({"name": "dependencies", "status": "skipped", "detail": "not requested"})
 
     cleanup_results = _remove_launcher_and_install_dir(
         remove_install_dir=args.remove_install_dir,
         dry_run=args.dry_run,
+        audit_log=audit_log,
     )
 
     all_results = remove_results + dep_results + cleanup_results
     ui.summary(all_results)
     if not args.dry_run:
         print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🧹 Uninstall completed.{ui.C.RESET}\n")
+        try:
+            audit_log.complete_session("completed")
+        except Exception:
+            pass
 
 
 def _is_interactive_session():
@@ -371,7 +518,16 @@ def _interactive_menu(args):
         args.remove_backups = True
         args.remove_deps = True
         args.remove_install_dir = True
-        args.remove_python = ui.confirm("  Also remove Python package (risky)?")
+        # Inform the user why removing Python is risky before asking
+        print(
+            f"\n  {ui.C.YELLOW}!{ui.C.RESET}  Removing Python packages is potentially risky:"
+            f" other tools on your system may depend on the same packages."
+        )
+        print(
+            f"  {ui.C.DIM}The audit log will be consulted —"
+            f" only packages installed by this tool will be removed.{ui.C.RESET}"
+        )
+        args.remove_python = ui.confirm("  Also remove Python packages installed by this tool?")
     elif choice == "0":
         raise KeyboardInterrupt
     else:
