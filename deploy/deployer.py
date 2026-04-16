@@ -112,10 +112,12 @@ def rollback_config(config_dir, backup_path=None, dry_run=False):
             "status": "ok",
             "detail": backup_source,
         }
-    except Exception:
+    except Exception as e:
+        ui.error(f"Rollback failed: {e}")
         if os.path.isdir(temp_restore):
             shutil.rmtree(temp_restore, ignore_errors=True)
         if safety_backup and not os.path.isdir(config_dir) and os.path.isdir(safety_backup):
+            ui.info(f"Restoring previous config from: {safety_backup}")
             shutil.move(safety_backup, config_dir)
         raise
 
