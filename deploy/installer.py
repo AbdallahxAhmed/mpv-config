@@ -5,6 +5,7 @@ Handles package installation via winget, pacman, apt, brew, and pip
 based on the detected environment.
 """
 
+import shutil
 import subprocess
 import sys
 
@@ -28,6 +29,67 @@ def _run(cmd, check=True):
     except subprocess.TimeoutExpired:
         ui.error(f"Command timed out: {' '.join(cmd)}")
         return False
+
+
+def _get_pip_args(env):
+    """
+    Return a list of command tokens for a working pip invocation.
+
+    Resolution order:
+    1. env.pip_cmd (may already be "python3 -m pip" from detector fallback)
+    2. pip3 / pip standalone binaries
+    3. <python_cmd> -m pip
+    4. Install python-pip (Arch) / python3-pip (Ubuntu/Debian) and retry
+    Returns a list suitable for use as the start of a subprocess command,
+    e.g. ["pip3"] or ["python3", "-m", "pip"].
+    Returns None if pip cannot be made available.
+    """
+    # env.pip_cmd may already encode "python3 -m pip" from detector
+    if " " in env.pip_cmd:
+        # It was stored as a space-joined string – split it back
+        import shlex
+        parts = shlex.split(env.pip_cmd)
+        if shutil.which(parts[0]):
+            return parts
+    elif shutil.which(env.pip_cmd):
+        return [env.pip_cmd]
+
+    # Try common standalone commands
+    for cmd in ["pip3", "pip"]:
+        if shutil.which(cmd):
+            return [cmd]
+
+    # Try python -m pip
+    for py in [env.python_cmd, "python3", "python"]:
+        if shutil.which(py):
+            try:
+                r = subprocess.run(
+                    [py, "-m", "pip", "--version"],
+                    capture_output=True, timeout=10,
+                )
+                if r.returncode == 0:
+                    return [py, "-m", "pip"]
+            except Exception:
+                pass
+
+    # Last resort: install pip via the distro package manager
+    if env.os == "linux":
+        if env.distro == "arch":
+            ui.step("pip not found — installing python-pip via pacman...")
+            if _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-pip"], check=False):
+                for cmd in ["pip3", "pip"]:
+                    if shutil.which(cmd):
+                        return [cmd]
+                return [env.python_cmd, "-m", "pip"]
+        elif env.distro in ("ubuntu", "debian"):
+            ui.step("pip not found — installing python3-pip via apt...")
+            if _run(["sudo", "apt", "install", "-y", "python3-pip"], check=False):
+                for cmd in ["pip3", "pip"]:
+                    if shutil.which(cmd):
+                        return [cmd]
+                return [env.python_cmd, "-m", "pip"]
+
+    return None
 
 
 def _install_one(name, dep_info, env):
@@ -58,14 +120,24 @@ def _install_one(name, dep_info, env):
         # Special handling for ffsubsync: pin setuptools first
         if name == "ffsubsync":
             _prepare_ffsubsync_build(env)
-        cmd = [env.pip_cmd, "install", info["pkg"]]
+        pip_args = _get_pip_args(env)
+        if pip_args is None:
+            ui.error(f"pip is not available and could not be installed automatically.")
+            return False
+        cmd = pip_args + ["install", info["pkg"]]
         flags = info.get("flags", [])
         cmd.extend(flags)
         return _run(cmd)
 
     elif method == "aur":
         if env.aur_helper:
-            return _run([env.aur_helper, "-S", "--noconfirm", info["pkg"]])
+            ok = _run([env.aur_helper, "-S", "--noconfirm", info["pkg"]], check=False)
+            if not ok:
+                fallback_pkg = info.get("fallback_pkg")
+                if fallback_pkg:
+                    ui.info(f"{info['pkg']} not found in AUR — trying fallback: {fallback_pkg}...")
+                    ok = _run([env.aur_helper, "-S", "--noconfirm", fallback_pkg])
+            return ok
         else:
             ui.warn(f"{name} requires an AUR helper (paru/yay). Install manually.")
             return False
@@ -88,9 +160,14 @@ def _prepare_ffsubsync_build(env):
     """
     ui.info("Preparing build environment for ffsubsync...")
 
-    # 1. Pin setuptools to a compatible version
-    ui.step("Pinning setuptools<74 (ffsubsync compatibility)...")
-    _run([env.pip_cmd, "install", "--quiet", "pip>=23.0", "setuptools<74.0", "wheel"], check=False)
+    # 1. Ensure pip is available
+    pip_args = _get_pip_args(env)
+    if pip_args is None:
+        ui.warn("pip is not available; skipping setuptools pin for ffsubsync")
+    else:
+        # Pin setuptools to a compatible version
+        ui.step("Pinning setuptools<74 (ffsubsync compatibility)...")
+        _run(pip_args + ["install", "--quiet", "pip>=23.0", "setuptools<74.0", "wheel"], check=False)
 
     # 2. Install build dependencies on Linux
     if env.os == "linux":
