@@ -132,7 +132,16 @@ EOF
 chmod +x "$LAUNCHER_PATH"
 echo "  ✓ Launcher created: $LAUNCHER_PATH"
 
-if [[ ":$PATH:" != *":$LAUNCHER_DIR:"* ]]; then
+IN_PATH=false
+IFS=':' read -r -a PATH_PARTS <<< "$PATH"
+for part in "${PATH_PARTS[@]}"; do
+    if [[ "$part" == "$LAUNCHER_DIR" ]]; then
+        IN_PATH=true
+        break
+    fi
+done
+
+if ! $IN_PATH; then
     echo "  ! '$LAUNCHER_DIR' is not in PATH."
     echo "    Add this line to your shell profile:"
     echo "    export PATH=\"$LAUNCHER_DIR:\$PATH\""

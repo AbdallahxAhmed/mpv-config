@@ -39,6 +39,7 @@ from deploy.verifier import verify
 LATEST_BACKUP_SENTINEL = "__latest__"
 DEFAULT_INSTALL_DIR = os.path.expanduser("~/.mpv-deploy")
 DEFAULT_LAUNCHER = os.path.expanduser("~/.local/bin/mpv-config")
+MENU_MAX_OPTION = 8
 
 
 def cmd_install(args):
@@ -295,7 +296,13 @@ def cmd_uninstall(args):
 
     dep_results = []
     if args.remove_deps:
-        dep_results = uninstall_deps(env, remove_python=args.remove_python, dry_run=args.dry_run)
+        proceed_deps = True
+        if not args.dry_run and _is_interactive_session():
+            proceed_deps = ui.confirm("Uninstall system dependencies too? This may remove shared tools.")
+        if proceed_deps:
+            dep_results = uninstall_deps(env, remove_python=args.remove_python, dry_run=args.dry_run)
+        else:
+            dep_results.append({"name": "dependencies", "status": "skipped", "detail": "user skipped"})
     else:
         dep_results.append({"name": "dependencies", "status": "skipped", "detail": "not requested"})
 
@@ -335,10 +342,10 @@ def _interactive_menu(args):
     print("  5) Verify installation")
     print("  6) Show status")
     print("  7) Uninstall deployed files")
-    print("  8) Full remove (files + backups + deps + install dir)")
+    print(f"  {MENU_MAX_OPTION}) Full remove (files + backups + deps + install dir)")
     print("  0) Exit")
 
-    choice = input("\n  Select option [0-8]: ").strip()
+    choice = input(f"\n  Select option [0-{MENU_MAX_OPTION}]: ").strip()
     if choice == "1":
         args.install = True
     elif choice == "2":
@@ -348,7 +355,7 @@ def _interactive_menu(args):
     elif choice == "4":
         path = input("  Backup path: ").strip()
         if not path:
-            raise ValueError("Backup path cannot be empty. Please enter a valid path or press Ctrl+C to cancel.")
+            raise ValueError("Backup path cannot be empty. Please enter a valid path.")
         args.rollback = path
     elif choice == "5":
         args.verify = True
@@ -358,7 +365,7 @@ def _interactive_menu(args):
         args.uninstall = True
         args.purge_config = ui.confirm("  Remove whole mpv config directory?")
         args.remove_backups = ui.confirm("  Remove rollback backups too?")
-    elif choice == "8":
+    elif choice == str(MENU_MAX_OPTION):
         args.uninstall = True
         args.purge_config = True
         args.remove_backups = True
@@ -368,7 +375,7 @@ def _interactive_menu(args):
     elif choice == "0":
         raise KeyboardInterrupt
     else:
-        raise ValueError("Invalid selection. Please choose a number between 0 and 8.")
+        raise ValueError(f"Invalid selection. Please choose a number between 0 and {MENU_MAX_OPTION}.")
 
 
 def main():
