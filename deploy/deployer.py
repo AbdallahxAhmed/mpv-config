@@ -76,7 +76,7 @@ def _safe_mtime(path):
     try:
         return os.path.getmtime(path)
     except OSError:
-        return 0
+        return float("-inf")
 
 
 def rollback_config(config_dir, backup_path=None, dry_run=False):

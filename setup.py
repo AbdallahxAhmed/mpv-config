@@ -33,7 +33,7 @@ from deploy.registry import SCRIPTS, SHADERS
 from deploy.detector import detect
 from deploy.installer import install_deps, uninstall_deps
 from deploy.fetcher import fetch_all
-from deploy.deployer import deploy, rollback_config, list_backups
+from deploy.deployer import deploy, rollback_config, list_backups, _remove_path as remove_path_safe
 from deploy.verifier import verify
 
 LATEST_BACKUP_SENTINEL = "__latest__"
@@ -193,13 +193,6 @@ def cmd_rollback(args):
         print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
 
 
-def _remove_path(path):
-    if os.path.islink(path) or os.path.isfile(path):
-        os.remove(path)
-    elif os.path.isdir(path):
-        shutil.rmtree(path)
-
-
 def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_run=False):
     results = []
     config_dir = env.config_dir
@@ -222,7 +215,7 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
                 ui.info(f"[DRY RUN] Would remove config dir: {config_dir}")
                 results.append({"name": "config_dir", "status": "skipped", "detail": "dry run"})
             else:
-                _remove_path(config_dir)
+                remove_path_safe(config_dir)
                 ui.success(f"Removed config dir: {config_dir}")
                 results.append({"name": "config_dir", "status": "ok", "detail": "removed"})
         else:
@@ -236,7 +229,7 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
                 ui.info(f"[DRY RUN] Would remove: {path}")
                 results.append({"name": name, "status": "skipped", "detail": "dry run"})
             else:
-                _remove_path(path)
+                remove_path_safe(path)
                 ui.success(f"Removed: {path}")
                 results.append({"name": name, "status": "ok", "detail": "removed"})
 
@@ -263,7 +256,7 @@ def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False):
             ui.info(f"[DRY RUN] Would remove launcher: {DEFAULT_LAUNCHER}")
             results.append({"name": "launcher", "status": "skipped", "detail": "dry run"})
         else:
-            _remove_path(DEFAULT_LAUNCHER)
+            remove_path_safe(DEFAULT_LAUNCHER)
             ui.success(f"Removed launcher: {DEFAULT_LAUNCHER}")
             results.append({"name": "launcher", "status": "ok", "detail": "removed"})
 
@@ -286,7 +279,10 @@ def cmd_uninstall(args):
 
     ui.header("Uninstall MPV Auto-Deploy")
 
-    if not args.purge_config and not ui.confirm("Remove deployed files only (keep the base mpv config directory)?"):
+    should_continue = True
+    if not args.purge_config:
+        should_continue = ui.confirm("Remove deployed files only (keep the base mpv config directory)?")
+    if not should_continue:
         ui.warn("Uninstall cancelled by user.")
         return
 
@@ -352,7 +348,7 @@ def _interactive_menu(args):
     elif choice == "4":
         path = input("  Backup path: ").strip()
         if not path:
-            raise ValueError("Backup path is required.")
+            raise ValueError("Backup path cannot be empty. Please enter a valid path or press Ctrl+C to cancel.")
         args.rollback = path
     elif choice == "5":
         args.verify = True
@@ -372,7 +368,7 @@ def _interactive_menu(args):
     elif choice == "0":
         raise KeyboardInterrupt
     else:
-        raise ValueError("Invalid selection.")
+        raise ValueError("Invalid selection. Please choose a number between 0 and 8.")
 
 
 def main():
