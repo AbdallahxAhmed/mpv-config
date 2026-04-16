@@ -119,7 +119,14 @@ echo "[4/4] Running MPV Auto-Deploy..."
 echo ""
 
 cd "$INSTALL_DIR"
-$PYTHON setup.py
+if [ -r /dev/tty ]; then
+    # When install.sh is run via `curl ... | bash`, stdin is a pipe.
+    # Reattach setup.py stdin to the terminal so interactive prompts work.
+    $PYTHON setup.py < /dev/tty
+else
+    # Fallback for environments without a controlling TTY.
+    $PYTHON setup.py
+fi
 
 # ─── Optional launcher (run from any path) ─────────────────────────
 echo ""
