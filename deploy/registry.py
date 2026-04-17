@@ -206,18 +206,18 @@ PLATFORM_DEFAULTS = {
         "gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto",
         "vo": "gpu-next", "shader_sep": ":",
         "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "ffsubsync", "alass_path": "alass",
+        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
     },
     "ubuntu": {
         "gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "",
         "vo": "gpu-next", "shader_sep": ":",
         "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "ffsubsync", "alass_path": "alass",
+        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
     },
     "macos": {
         "gpu_api": "auto", "hwdec": "videotoolbox", "gpu_context": "",
         "vo": "gpu-next", "shader_sep": ":",
         "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "ffmpeg", "ffsubsync_path": "ffsubsync", "alass_path": "alass",
+        "ffmpeg_path": "ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
     },
 }

@@ -245,11 +245,11 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
     ffsubsync_path = defaults.get("ffsubsync_path", "ffsubsync")
     alass_path = defaults.get("alass_path", "alass")
 
-    if ffmpeg_path == "auto":
+    if ffmpeg_path in ("auto", "ffmpeg"):
         ffmpeg_path = _find_binary("ffmpeg", env) or "ffmpeg"
-    if ffsubsync_path == "auto":
+    if ffsubsync_path in ("auto", "ffsubsync"):
         ffsubsync_path = _find_binary("ffsubsync", env) or "ffsubsync"
-    if alass_path == "auto":
+    if alass_path in ("auto", "alass", "alass-cli"):
         alass_path = _find_binary("alass", env) or _find_binary("alass-cli", env) or "alass"
 
     content = content.replace("{{FFMPEG_PATH}}", ffmpeg_path)
