@@ -195,29 +195,84 @@ SYSTEM_DEPS = {
     },
 }
 
-PLATFORM_DEFAULTS = {
+MPV_PROFILE_DEFAULT = "windows-like"
+
+MPV_EXPERIENCE_PROFILES = {
+    # Cross-platform baseline intended to make behavior as consistent as possible.
+    # Per-OS technical compatibility fallbacks are applied in deployer.py.
+    "windows-like": {
+        "gpu_api": "d3d11",
+        "hwdec": "auto-copy",
+        # Empty means no explicit override; let mpv pick a suitable context.
+        "gpu_context": "",
+        "vo": "gpu-next",
+    },
+    # Keeps old platform-specific behavior.
+    "native": {},
+}
+
+PLATFORM_NATIVE_MPV_DEFAULTS = {
     "windows": {
-        "gpu_api": "d3d11", "hwdec": "auto-copy", "gpu_context": "",
-        "vo": "gpu-next", "shader_sep": ";",
-        "config_dir": "%APPDATA%/mpv",
-        "ffmpeg_path": "auto", "ffsubsync_path": "auto", "alass_path": "auto",
+        "gpu_api": "d3d11",
+        "hwdec": "auto-copy",
+        "gpu_context": "",
+        "vo": "gpu-next",
     },
     "arch": {
-        "gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto",
-        "vo": "gpu-next", "shader_sep": ":",
-        "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
+        "gpu_api": "vulkan",
+        "hwdec": "auto-safe",
+        "gpu_context": "auto",
+        "vo": "gpu-next",
     },
     "ubuntu": {
-        "gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "",
-        "vo": "gpu-next", "shader_sep": ":",
-        "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "/usr/bin/ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
+        "gpu_api": "vulkan",
+        "hwdec": "auto-safe",
+        "gpu_context": "",
+        "vo": "gpu-next",
     },
     "macos": {
-        "gpu_api": "auto", "hwdec": "videotoolbox", "gpu_context": "",
-        "vo": "gpu-next", "shader_sep": ":",
-        "config_dir": "~/.config/mpv",
-        "ffmpeg_path": "ffmpeg", "ffsubsync_path": "auto", "alass_path": "auto",
+        "gpu_api": "auto",
+        "hwdec": "videotoolbox",
+        "gpu_context": "",
+        "vo": "gpu-next",
     },
+}
+
+PLATFORM_REQUIRED_DEFAULTS = {
+    # Platform-required values that are not user experience choices.
+    "windows": {
+        "shader_sep": ";",
+        "config_dir": "%APPDATA%/mpv",
+        "ffmpeg_path": "auto",
+        "ffsubsync_path": "auto",
+        "alass_path": "auto",
+    },
+    "arch": {
+        "shader_sep": ":",
+        "config_dir": "~/.config/mpv",
+        "ffmpeg_path": "/usr/bin/ffmpeg",
+        "ffsubsync_path": "auto",
+        "alass_path": "auto",
+    },
+    "ubuntu": {
+        "shader_sep": ":",
+        "config_dir": "~/.config/mpv",
+        "ffmpeg_path": "/usr/bin/ffmpeg",
+        "ffsubsync_path": "auto",
+        "alass_path": "auto",
+    },
+    "macos": {
+        "shader_sep": ":",
+        "config_dir": "~/.config/mpv",
+        "ffmpeg_path": "ffmpeg",
+        "ffsubsync_path": "auto",
+        "alass_path": "auto",
+    },
+}
+
+# Backward-compatible merged view for legacy callers.
+# NOTE: treat as read-only compatibility data.
+PLATFORM_DEFAULTS = {
+    key: {**PLATFORM_NATIVE_MPV_DEFAULTS[key], **PLATFORM_REQUIRED_DEFAULTS[key]}
+    for key in PLATFORM_NATIVE_MPV_DEFAULTS
 }

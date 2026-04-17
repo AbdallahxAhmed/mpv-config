@@ -29,7 +29,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from deploy import ui
-from deploy.registry import SCRIPTS, SHADERS
+from deploy.registry import SCRIPTS, SHADERS, MPV_EXPERIENCE_PROFILES, MPV_PROFILE_DEFAULT
 from deploy.detector import detect
 from deploy.installer import install_deps, uninstall_deps
 from deploy.fetcher import fetch_all
@@ -104,7 +104,15 @@ def cmd_install(args):
             fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
 
             # 8. Deploy to config dir
-            deploy_results = deploy(staging_dir, env, SCRIPT_DIR, dry_run=args.dry_run, audit_log=audit_log)
+            ui.info(f"mpv behavior profile: {args.mpv_profile}")
+            deploy_results = deploy(
+                staging_dir,
+                env,
+                SCRIPT_DIR,
+                dry_run=args.dry_run,
+                audit_log=audit_log,
+                mpv_profile=args.mpv_profile,
+            )
 
             # 9. Save lockfile
             if not args.dry_run:
@@ -558,6 +566,12 @@ def main():
     parser.add_argument("--remove-python", action="store_true", help="With --remove-deps: also try uninstalling python package")
     parser.add_argument("--remove-install-dir", action="store_true", help="With --uninstall: remove ~/.mpv-deploy and launcher")
     parser.add_argument("--dry-run", action="store_true", help="Preview without making changes")
+    parser.add_argument(
+        "--mpv-profile",
+        choices=sorted(MPV_EXPERIENCE_PROFILES.keys()),
+        default=MPV_PROFILE_DEFAULT,
+        help="mpv behavior profile: 'windows-like' (default unified experience) or 'native' (platform-specific behavior)",
+    )
 
     args = parser.parse_args()
 

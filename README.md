@@ -52,6 +52,7 @@ python setup.py --uninstall --purge-config --remove-backups --remove-deps --remo
 python setup.py --verify     # Verify installation
 python setup.py --status     # Show installed versions
 python setup.py --dry-run    # Preview without changes
+python setup.py --mpv-profile native   # Use platform-native mpv behavior
 ```
 
 You can also run interactively (menu options instead of flags):
@@ -66,15 +67,22 @@ mpv-config
 
 ## Platform Handling
 
-Settings are automatically configured per platform:
+By default, mpv behavior is now **unified** across Windows/Linux/macOS using:
 
-| Setting | Windows | Linux |
-|---------|---------|-------|
-| GPU API | `d3d11` | `vulkan` |
-| HW Decode | `auto` | `nvdec`/`vaapi` (GPU-specific) |
-| GPU Context | — | `waylandvk` / `x11vk` |
-| Shader separator | `;` | `:` |
-| Config dir | `%APPDATA%/mpv` | `~/.config/mpv` |
+- `--mpv-profile windows-like` (default)
+
+You can opt into old platform-native behavior with:
+
+- `--mpv-profile native`
+
+Platform-required values are still kept per OS:
+
+| Setting | Behavior |
+|---------|----------|
+| Shader separator | Windows: `;` / Linux+macOS: `:` |
+| Config dir | Windows: `%APPDATA%/mpv` / Linux+macOS: `~/.config/mpv` |
+| `windows-like` profile | Tries Windows-style behavior everywhere with compatibility fallback (`d3d11` → `vulkan` on Linux, `auto` on macOS) |
+| `native` profile | Uses platform-specific defaults (legacy behavior) |
 
 ## Architecture
 

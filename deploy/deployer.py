@@ -17,7 +17,12 @@ import shutil
 from datetime import datetime
 
 from deploy import ui
-from deploy.registry import PLATFORM_DEFAULTS
+from deploy.registry import (
+    MPV_EXPERIENCE_PROFILES,
+    MPV_PROFILE_DEFAULT,
+    PLATFORM_NATIVE_MPV_DEFAULTS,
+    PLATFORM_REQUIRED_DEFAULTS,
+)
 
 
 # ─── Backup ────────────────────────────────────────────────────────────
@@ -174,14 +179,40 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
 
 # ─── Template Patching ─────────────────────────────────────────────────
 
-def _patch_mpv_conf(template_path, dest_path, env):
-    """Patch mpv.conf.template with platform-specific values."""
-    defaults = PLATFORM_DEFAULTS.get(env.platform_key, {})
+def _resolve_mpv_profile(env, mpv_profile):
+    """Resolve selected profile into effective mpv behavior defaults."""
+    selected_profile = mpv_profile or MPV_PROFILE_DEFAULT
+    fallback_profile = MPV_EXPERIENCE_PROFILES.get(MPV_PROFILE_DEFAULT, {})
+    if selected_profile == "native":
+        defaults = dict(PLATFORM_NATIVE_MPV_DEFAULTS.get(env.platform_key, {}))
+    else:
+        defaults = dict(MPV_EXPERIENCE_PROFILES.get(selected_profile, fallback_profile))
+
+    # Technical compatibility fallbacks for unsupported values.
+    if defaults.get("gpu_api") == "d3d11":
+        if env.os == "linux":
+            defaults["gpu_api"] = "vulkan"
+        elif env.os == "macos":
+            defaults["gpu_api"] = "auto"
+
+    return selected_profile, defaults
+
+
+def _patch_mpv_conf(
+    template_path,
+    dest_path,
+    env,
+    selected_profile,
+    resolved_defaults,
+):
+    """Patch mpv.conf.template with profile-aware + platform-required values."""
+    defaults = resolved_defaults
+    required = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
 
     with open(template_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    shader_sep = defaults.get("shader_sep", ";")
+    shader_sep = required.get("shader_sep", ";")
 
     replacements = {
         "{{GPU_API}}": defaults.get("gpu_api", "auto"),
@@ -190,9 +221,10 @@ def _patch_mpv_conf(template_path, dest_path, env):
         "{{SHADER_SEP}}": shader_sep,
     }
 
-    # GPU context: detect wayland vs x11, adjust for GPU vendor
+    # GPU context: detect wayland vs x11 when profile requests automatic context.
     gpu_context = defaults.get("gpu_context", "")
-    hwdec = defaults.get("hwdec", "auto")
+    base_hwdec = defaults.get("hwdec", "auto")
+    hwdec = base_hwdec
 
     if gpu_context == "auto":
         if env.display == "wayland":
@@ -202,16 +234,14 @@ def _patch_mpv_conf(template_path, dest_path, env):
         else:
             gpu_context = ""
 
-    # GPU-vendor-specific performance tweaks
-    if env.gpu_vendor == "nvidia":
-        if env.os == "linux":
-            hwdec = "nvdec"         # Best NVIDIA decoder on Linux
-    elif env.gpu_vendor == "amd":
-        if env.os == "linux":
-            hwdec = "vaapi"         # Best AMD decoder on Linux
-    elif env.gpu_vendor == "intel":
-        if env.os == "linux":
-            hwdec = "vaapi"         # Intel iGPU uses VAAPI
+    # Keep legacy vendor-specific Linux hwdec optimization in native mode only.
+    if selected_profile == "native":
+        if env.gpu_vendor == "nvidia" and env.os == "linux":
+            hwdec = "nvdec"
+        elif env.gpu_vendor == "amd" and env.os == "linux":
+            hwdec = "vaapi"
+        elif env.gpu_vendor == "intel" and env.os == "linux":
+            hwdec = "vaapi"
 
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context
@@ -235,7 +265,7 @@ def _patch_mpv_conf(template_path, dest_path, env):
 
 def _patch_autosubsync_conf(template_path, dest_path, env):
     """Patch autosubsync.conf.template with platform-specific paths."""
-    defaults = PLATFORM_DEFAULTS.get(env.platform_key, {})
+    defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
 
     with open(template_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -265,7 +295,7 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
 
 def _patch_input_conf(template_path, dest_path, env):
     """Patch input.conf.template — replace shader separator placeholder."""
-    defaults = PLATFORM_DEFAULTS.get(env.platform_key, {})
+    defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
     shader_sep = defaults.get("shader_sep", ";")
 
     with open(template_path, "r", encoding="utf-8") as f:
@@ -317,7 +347,7 @@ def _normalize_line_endings(directory, env):
 
 # ─── Main Deploy ───────────────────────────────────────────────────────
 
-def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None):
+def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None, mpv_profile=MPV_PROFILE_DEFAULT):
     """
     Deploy everything from staging_dir + repo_dir/config/ to env.config_dir.
 
@@ -390,10 +420,22 @@ def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None):
         mpv_template = os.path.join(config_src, "mpv.conf.template")
         if os.path.isfile(mpv_template):
             dest = os.path.join(config_dir, "mpv.conf")
-            _patch_mpv_conf(mpv_template, dest, env)
-            sep = PLATFORM_DEFAULTS[env.platform_key]['shader_sep']
-            ui.success(f"mpv.conf patched & deployed (gpu-api={PLATFORM_DEFAULTS[env.platform_key]['gpu_api']}, shader-sep='{sep}')")
-            results.append({"name": "mpv.conf", "status": "ok", "detail": f"gpu-api={PLATFORM_DEFAULTS[env.platform_key]['gpu_api']}"})
+            selected_profile, resolved_defaults = _resolve_mpv_profile(env, mpv_profile)
+            _patch_mpv_conf(
+                mpv_template,
+                dest,
+                env,
+                selected_profile=selected_profile,
+                resolved_defaults=resolved_defaults,
+            )
+            sep = PLATFORM_REQUIRED_DEFAULTS[env.platform_key]["shader_sep"]
+            resolved_gpu_api = resolved_defaults.get("gpu_api", "auto")
+            ui.success(
+                f"mpv.conf patched & deployed (profile={selected_profile}, gpu-api={resolved_gpu_api}, shader-sep='{sep}')"
+            )
+            results.append(
+                {"name": "mpv.conf", "status": "ok", "detail": f"profile={selected_profile}, gpu-api={resolved_gpu_api}"}
+            )
             if audit_log:
                 audit_log.record_file(dest, "modify", "ok", "patched from template")
 
