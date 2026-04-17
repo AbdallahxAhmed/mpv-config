@@ -10,10 +10,18 @@ import sys
 import platform
 import subprocess
 import shutil
+import shlex
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 
 from deploy import ui
+
+HEALTH_CHECK_TIMEOUT_SECONDS = 10
+FFSUBSYNC_HEALTH_CHECK_MODULES = ("pkg_resources", "webrtcvad")
+MODULE_IMPORT_CHECK_SCRIPT = (
+    "import importlib, sys\n"
+    "importlib.import_module(sys.argv[1])\n"
+)
 
 
 @dataclass
@@ -199,6 +207,9 @@ def _resolve_config_dir(os_name):
 
 def _check_installed(dep_name, dep_info):
     """Check if a system dependency is already installed."""
+    if dep_name == "ffsubsync":
+        return _check_ffsubsync_installed()
+
     verify = dep_info.get("verify", [])
     if verify:
         ok, _ = _run_silent(verify)
@@ -209,6 +220,107 @@ def _check_installed(dep_name, dep_info):
         ok, _ = _run_silent(verify_alt)
         if ok:
             return True
+    return False
+
+
+def _check_ffsubsync_installed():
+    """
+    Check ffsubsync availability and basic runtime health.
+
+    Some environments report `ffsubsync --version` as working while runtime
+    imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
+    in the same interpreter environment as the ffsubsync launcher).
+    """
+    ok, _ = _run_silent(["ffsubsync", "--version"])
+    if not ok:
+        return False
+
+    launcher = shutil.which("ffsubsync")
+    if not launcher:
+        return False
+
+    # On Windows, ffsubsync is typically an .exe shim; we keep version check only.
+    if sys.platform == "win32":
+        return True
+
+    try:
+        with open(launcher, "r", encoding="utf-8", errors="replace") as f:
+            first_line = f.readline().strip()
+    except OSError:
+        return True
+
+    if not first_line.startswith("#!"):
+        return True
+
+    shebang = first_line[2:].strip()
+    if not shebang:
+        return True
+
+    try:
+        parts = shlex.split(shebang)
+    except ValueError:
+        return True
+    if not parts:
+        return True
+
+    if os.path.basename(parts[0]) == "env" and len(parts) > 1:
+        py = shutil.which(parts[1]) or parts[1]
+    else:
+        py = parts[0]
+
+    if not isinstance(py, str) or not py.strip():
+        return True
+    py_base = os.path.basename(py).lower()
+    if not _looks_like_python_interpreter(py_base):
+        return True
+
+    try:
+        run_kwargs = {"capture_output": True, "text": True, "timeout": HEALTH_CHECK_TIMEOUT_SECONDS}
+        if sys.platform == "win32":
+            no_window_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            run_kwargs["creationflags"] = no_window_flag
+
+        return all(_check_python_module_import(py, module, run_kwargs) for module in FFSUBSYNC_HEALTH_CHECK_MODULES)
+    except Exception:
+        # If we cannot introspect the interpreter, keep ffsubsync as installed
+        # and avoid false negatives.
+        return True
+
+
+def _looks_like_python_interpreter(py_base):
+    """
+    Return True when a shebang token looks like a Python executable name.
+
+    Intentionally accepts bare names (`python`, `python.exe`) and versioned
+    names (`python3`, `python3.12`, `python3.12.exe`).
+    """
+    if py_base.endswith(".exe"):
+        py_base = py_base[:-4]
+    if not py_base.startswith("python"):
+        return False
+    suffix = py_base[len("python"):]
+    if not suffix:
+        return True
+    if suffix[0] != "." and not suffix[0].isdigit():
+        return False
+    return all(ch.isdigit() or ch == "." for ch in suffix)
+
+
+def _check_python_module_import(py, module, run_kwargs):
+    """Return True if `module` imports successfully under the given interpreter."""
+    if module not in FFSUBSYNC_HEALTH_CHECK_MODULES:
+        ui.warn(f"ffsubsync health check skipped unexpected module name: {module!r}")
+        return True
+    r = subprocess.run([py, "-c", MODULE_IMPORT_CHECK_SCRIPT, module], **run_kwargs)
+    if r.returncode == 0:
+        return True
+    # Some wrappers may surface interpreter diagnostics on stdout instead of stderr.
+    diagnostic = (r.stderr or r.stdout or "").strip()
+    if diagnostic:
+        first_diagnostic_line = diagnostic.splitlines()[0]
+        ui.warn(f"ffsubsync health check failed ({module}): {first_diagnostic_line}")
+    else:
+        ui.warn(f"ffsubsync health check failed: could not import {module}")
     return False
 
 
