@@ -12,6 +12,8 @@ import sys
 from deploy import ui
 from deploy.registry import SYSTEM_DEPS
 
+FFSUBSYNC_SETUPTOOLS_PIN = "setuptools<74.0"
+
 
 def _run(cmd, check=True):
     """Run a command, showing output. Returns success bool."""
@@ -124,7 +126,13 @@ def _install_one(name, dep_info, env):
         if pip_args is None:
             ui.error(f"pip is not available and could not be installed automatically.")
             return False
-        cmd = pip_args + ["install", info["pkg"]]
+        cmd = pip_args + ["install"]
+        if name == "ffsubsync":
+            # Keep ffsubsync and its runtime environment healthy (pkg_resources lives
+            # in setuptools and is still imported by webrtcvad in some setups).
+            cmd += ["--upgrade", info["pkg"], FFSUBSYNC_SETUPTOOLS_PIN]
+        else:
+            cmd += [info["pkg"]]
         flags = info.get("flags", [])
         cmd.extend(flags)
         return _run(cmd)
@@ -167,7 +175,7 @@ def _prepare_ffsubsync_build(env):
     else:
         # Pin setuptools to a compatible version
         ui.step("Pinning setuptools<74 (ffsubsync compatibility)...")
-        _run(pip_args + ["install", "--quiet", "pip>=23.0", "setuptools<74.0", "wheel"], check=False)
+        _run(pip_args + ["install", "--quiet", "pip>=23.0", FFSUBSYNC_SETUPTOOLS_PIN, "wheel"], check=False)
 
     # 2. Install build dependencies on Linux
     if env.os == "linux":

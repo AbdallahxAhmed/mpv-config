@@ -10,10 +10,14 @@ import sys
 import platform
 import subprocess
 import shutil
+import shlex
+import re
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 
 from deploy import ui
+
+HEALTH_CHECK_TIMEOUT_SECONDS = 10
 
 
 @dataclass
@@ -199,6 +203,9 @@ def _resolve_config_dir(os_name):
 
 def _check_installed(dep_name, dep_info):
     """Check if a system dependency is already installed."""
+    if dep_name == "ffsubsync":
+        return _check_ffsubsync_installed()
+
     verify = dep_info.get("verify", [])
     if verify:
         ok, _ = _run_silent(verify)
@@ -210,6 +217,96 @@ def _check_installed(dep_name, dep_info):
         if ok:
             return True
     return False
+
+
+def _check_ffsubsync_installed():
+    """
+    Check ffsubsync availability and basic runtime health.
+
+    Some environments report `ffsubsync --version` as working while runtime
+    imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
+    in the same interpreter environment as the ffsubsync launcher).
+    """
+    ok, _ = _run_silent(["ffsubsync", "--version"])
+    if not ok:
+        return False
+
+    launcher = shutil.which("ffsubsync")
+    if not launcher:
+        return False
+
+    # On Windows, ffsubsync is typically an .exe shim; we keep version check only.
+    if sys.platform == "win32":
+        return True
+
+    try:
+        with open(launcher, "r", encoding="utf-8", errors="replace") as f:
+            first_line = f.readline().strip()
+    except OSError:
+        return True
+
+    if not first_line.startswith("#!"):
+        return True
+
+    shebang = first_line[2:].strip()
+    if not shebang:
+        return True
+
+    try:
+        parts = shlex.split(shebang)
+    except ValueError:
+        return True
+    if not parts:
+        return True
+
+    if os.path.basename(parts[0]) == "env" and len(parts) > 1:
+        py = shutil.which(parts[1]) or parts[1]
+    else:
+        py = parts[0]
+
+    py_base = os.path.basename(py).lower()
+    if not re.match(r"^python(\d+(\.\d+)*)?(\.exe)?$", py_base):
+        return True
+
+    try:
+        run_kwargs = {"capture_output": True, "text": True}
+        if sys.platform == "win32":
+            run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        run_kwargs["timeout"] = HEALTH_CHECK_TIMEOUT_SECONDS
+
+        def _check_pkg_resources():
+            r = subprocess.run([py, "-c", "import pkg_resources"], **run_kwargs)
+            if r.returncode == 0:
+                return True
+            diagnostic = (r.stderr or r.stdout or "").strip()
+            if diagnostic:
+                first_line = diagnostic.splitlines()[0]
+                ui.warn(f"ffsubsync health check failed (pkg_resources): {first_line}")
+            else:
+                ui.warn("ffsubsync health check failed: could not import pkg_resources")
+            return False
+
+        def _check_webrtcvad():
+            r = subprocess.run([py, "-c", "import webrtcvad"], **run_kwargs)
+            if r.returncode == 0:
+                return True
+            diagnostic = (r.stderr or r.stdout or "").strip()
+            if diagnostic:
+                first_line = diagnostic.splitlines()[0]
+                ui.warn(f"ffsubsync health check failed (webrtcvad): {first_line}")
+            else:
+                ui.warn("ffsubsync health check failed: could not import webrtcvad")
+            return False
+
+        if not _check_pkg_resources():
+            return False
+        if not _check_webrtcvad():
+            return False
+        return True
+    except Exception:
+        # If we cannot introspect the interpreter, keep ffsubsync as installed
+        # and avoid false negatives.
+        return True
 
 
 def detect():
