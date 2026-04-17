@@ -268,10 +268,9 @@ def _check_ffsubsync_installed():
         return True
 
     try:
-        run_kwargs = {"capture_output": True, "text": True}
+        run_kwargs = {"capture_output": True, "text": True, "timeout": HEALTH_CHECK_TIMEOUT_SECONDS}
         if sys.platform == "win32":
             run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        run_kwargs["timeout"] = HEALTH_CHECK_TIMEOUT_SECONDS
 
         if not _check_python_module_import(py, "pkg_resources", run_kwargs):
             return False
@@ -305,6 +304,9 @@ def _looks_like_python_interpreter(py_base):
 
 def _check_python_module_import(py, module, run_kwargs):
     """Return True if `module` imports successfully under the given interpreter."""
+    if not module or any(not part.isidentifier() for part in module.split(".")):
+        ui.warn(f"ffsubsync health check skipped invalid module name: {module!r}")
+        return False
     r = subprocess.run([py, "-c", f"import {module}"], **run_kwargs)
     if r.returncode == 0:
         return True
