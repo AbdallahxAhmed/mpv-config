@@ -17,6 +17,11 @@ from typing import Optional, Dict
 from deploy import ui
 
 HEALTH_CHECK_TIMEOUT_SECONDS = 10
+FFSUBSYNC_HEALTH_CHECK_MODULES = ("pkg_resources", "webrtcvad")
+MODULE_IMPORT_CHECK_SCRIPT = (
+    "import importlib, sys\n"
+    "importlib.import_module(sys.argv[1])\n"
+)
 
 
 @dataclass
@@ -263,6 +268,8 @@ def _check_ffsubsync_installed():
     else:
         py = parts[0]
 
+    if not isinstance(py, str) or not py.strip():
+        return True
     py_base = os.path.basename(py).lower()
     if not _looks_like_python_interpreter(py_base):
         return True
@@ -270,13 +277,10 @@ def _check_ffsubsync_installed():
     try:
         run_kwargs = {"capture_output": True, "text": True, "timeout": HEALTH_CHECK_TIMEOUT_SECONDS}
         if sys.platform == "win32":
-            run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            no_window_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            run_kwargs["creationflags"] = no_window_flag
 
-        if not _check_python_module_import(py, "pkg_resources", run_kwargs):
-            return False
-        if not _check_python_module_import(py, "webrtcvad", run_kwargs):
-            return False
-        return True
+        return all(_check_python_module_import(py, module, run_kwargs) for module in FFSUBSYNC_HEALTH_CHECK_MODULES)
     except Exception:
         # If we cannot introspect the interpreter, keep ffsubsync as installed
         # and avoid false negatives.
@@ -304,13 +308,13 @@ def _looks_like_python_interpreter(py_base):
 
 def _check_python_module_import(py, module, run_kwargs):
     """Return True if `module` imports successfully under the given interpreter."""
-    if not module or any(not part.isidentifier() for part in module.split(".")):
-        ui.warn(f"ffsubsync health check skipped invalid module name: {module!r}")
-        return False
-    check_script = "import importlib,sys; importlib.import_module(sys.argv[1])"
-    r = subprocess.run([py, "-c", check_script, module], **run_kwargs)
+    if module not in FFSUBSYNC_HEALTH_CHECK_MODULES:
+        ui.warn(f"ffsubsync health check skipped unexpected module name: {module!r}")
+        return True
+    r = subprocess.run([py, "-c", MODULE_IMPORT_CHECK_SCRIPT, module], **run_kwargs)
     if r.returncode == 0:
         return True
+    # Some wrappers may surface interpreter diagnostics on stdout instead of stderr.
     diagnostic = (r.stderr or r.stdout or "").strip()
     if diagnostic:
         first_diagnostic_line = diagnostic.splitlines()[0]
