@@ -11,7 +11,6 @@ import platform
 import subprocess
 import shutil
 import shlex
-import re
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 
@@ -265,7 +264,7 @@ def _check_ffsubsync_installed():
         py = parts[0]
 
     py_base = os.path.basename(py).lower()
-    if not re.match(r"^python(\d+(\.\d+)*)?(\.exe)?$", py_base):
+    if not _looks_like_python_interpreter(py_base):
         return True
 
     try:
@@ -274,39 +273,48 @@ def _check_ffsubsync_installed():
             run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         run_kwargs["timeout"] = HEALTH_CHECK_TIMEOUT_SECONDS
 
-        def _check_pkg_resources():
-            r = subprocess.run([py, "-c", "import pkg_resources"], **run_kwargs)
-            if r.returncode == 0:
-                return True
-            diagnostic = (r.stderr or r.stdout or "").strip()
-            if diagnostic:
-                first_line = diagnostic.splitlines()[0]
-                ui.warn(f"ffsubsync health check failed (pkg_resources): {first_line}")
-            else:
-                ui.warn("ffsubsync health check failed: could not import pkg_resources")
+        if not _check_python_module_import(py, "pkg_resources", run_kwargs):
             return False
-
-        def _check_webrtcvad():
-            r = subprocess.run([py, "-c", "import webrtcvad"], **run_kwargs)
-            if r.returncode == 0:
-                return True
-            diagnostic = (r.stderr or r.stdout or "").strip()
-            if diagnostic:
-                first_line = diagnostic.splitlines()[0]
-                ui.warn(f"ffsubsync health check failed (webrtcvad): {first_line}")
-            else:
-                ui.warn("ffsubsync health check failed: could not import webrtcvad")
-            return False
-
-        if not _check_pkg_resources():
-            return False
-        if not _check_webrtcvad():
+        if not _check_python_module_import(py, "webrtcvad", run_kwargs):
             return False
         return True
     except Exception:
         # If we cannot introspect the interpreter, keep ffsubsync as installed
         # and avoid false negatives.
         return True
+
+
+def _looks_like_python_interpreter(py_base):
+    """
+    Return True when a shebang token looks like a Python executable name.
+
+    Intentionally accepts bare names (`python`, `python.exe`) and versioned
+    names (`python3`, `python3.12`, `python3.12.exe`).
+    """
+    if py_base.endswith(".exe"):
+        py_base = py_base[:-4]
+    if not py_base.startswith("python"):
+        return False
+    suffix = py_base[len("python"):]
+    if not suffix:
+        return True
+    if suffix[0] != "." and not suffix[0].isdigit():
+        return False
+    return all(ch.isdigit() or ch == "." for ch in suffix)
+
+
+def _check_python_module_import(py, module, run_kwargs):
+    """Return True if `module` imports successfully under the given interpreter."""
+    r = subprocess.run([py, "-c", f"import {module}"], **run_kwargs)
+    if r.returncode == 0:
+        return True
+    diagnostic = (r.stderr or r.stdout or "").strip()
+    if diagnostic:
+        first_diagnostic_line = diagnostic.splitlines()[0]
+        ui.warn(f"ffsubsync health check failed ({module}): {first_diagnostic_line}")
+    else:
+        ui.warn(f"ffsubsync health check failed: could not import {module}")
+    return False
 
 
 def detect():
