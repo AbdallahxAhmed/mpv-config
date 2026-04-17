@@ -307,7 +307,8 @@ def _check_python_module_import(py, module, run_kwargs):
     if not module or any(not part.isidentifier() for part in module.split(".")):
         ui.warn(f"ffsubsync health check skipped invalid module name: {module!r}")
         return False
-    r = subprocess.run([py, "-c", f"import {module}"], **run_kwargs)
+    check_script = "import importlib,sys; importlib.import_module(sys.argv[1])"
+    r = subprocess.run([py, "-c", check_script, module], **run_kwargs)
     if r.returncode == 0:
         return True
     diagnostic = (r.stderr or r.stdout or "").strip()
