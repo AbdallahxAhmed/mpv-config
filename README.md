@@ -38,7 +38,24 @@ curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/inst
 | [pause-when-minimize](https://github.com/mpv-player/mpv) | Raw | Pause on minimize |
 | [Anime4K](https://github.com/bloc97/Anime4K) | Release | Real-time anime upscaling (v4.0.1) |
 
-## Manual Usage
+## Usage After Curl Install
+
+After using:
+```bash
+curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.sh | bash
+```
+
+Use the launcher command:
+```bash
+mpv-config                    # Full install
+mpv-config --update           # Update scripts only
+mpv-config --rollback         # Rollback to latest backup
+mpv-config --uninstall        # Remove deployed files
+mpv-config --verify           # Verify installation
+mpv-config --status           # Show installed versions
+```
+
+## Manual Usage (advanced)
 
 ```bash
 git clone https://github.com/AbdallahxAhmed/mpv-config.git

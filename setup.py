@@ -7,15 +7,17 @@ fetches scripts from their upstream sources, and deploys everything
 to the right place.
 
 Usage:
-    python setup.py                 # Full install (interactive)
-    python setup.py --install       # Full install
-    python setup.py --update        # Update scripts only
-    python setup.py --rollback      # Restore latest backup
-    python setup.py --rollback <backup_dir>  # Restore specific backup
-    python setup.py --uninstall     # Remove deployed files
-    python setup.py --verify        # Verify current install
-    python setup.py --status        # Show install status
-    python setup.py --dry-run       # Preview without changes
+    mpv-config                       # Full install (interactive, after install.sh)
+    mpv-config --install             # Full install
+    mpv-config --update              # Update scripts only
+    mpv-config --rollback            # Restore latest backup
+    mpv-config --rollback <backup_dir>  # Restore specific backup
+    mpv-config --uninstall           # Remove deployed files
+    mpv-config --verify              # Verify current install
+    mpv-config --status              # Show install status
+    mpv-config --dry-run             # Preview without changes
+    # Manual fallback:
+    python setup.py [flags]
 """
 
 import argparse
@@ -230,7 +232,7 @@ def cmd_status(args):
 
     lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
     if not os.path.isfile(lockfile_path):
-        ui.warn("No deployment lockfile found. Run 'setup.py --install' first.")
+        ui.warn("No deployment lockfile found. Run the curl installer first, then use 'mpv-config --install'.")
         return
 
     with open(lockfile_path, "r", encoding="utf-8") as f:
