@@ -148,24 +148,28 @@ fi
 _styled_echo "white" ""
 _styled_echo "white" "[2/4] Downloading mpv-config..."
 
-if [ -d "$INSTALL_DIR" ]; then
+if [ -e "$INSTALL_DIR" ]; then
     _styled_echo "dim" "  → Removing old install dir..."
     rm -rf "$INSTALL_DIR"
 fi
 
 if $USE_GIT; then
-    _gum_spin "Cloning repository..." git clone --depth=1 -b "$BRANCH" "https://github.com/${REPO}.git" "$INSTALL_DIR" 2>/dev/null
+    if ! _gum_spin "Cloning repository..." git clone --depth=1 -b "$BRANCH" "https://github.com/${REPO}.git" "$INSTALL_DIR" >/tmp/mpv-deploy-git.log 2>&1 < /dev/null; then
+        _styled_echo "red" "  ✗ Failed to clone repository. Error log:"
+        cat /tmp/mpv-deploy-git.log
+        exit 1
+    fi
     _styled_echo "green" "  ✓ Cloned successfully"
 else
     ZIPURL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.zip"
     TMPZIP=$(mktemp /tmp/mpv-config-XXXX.zip)
-    _gum_spin "Downloading zip archive..." curl -fsSL "$ZIPURL" -o "$TMPZIP"
+    _gum_spin "Downloading zip archive..." curl -fsSL "$ZIPURL" -o "$TMPZIP" < /dev/null
     mkdir -p "$INSTALL_DIR"
 
     if command -v unzip &>/dev/null; then
-        _gum_spin "Extracting archive..." unzip -q "$TMPZIP" -d /tmp/mpv-config-extract
+        _gum_spin "Extracting archive..." unzip -q "$TMPZIP" -d /tmp/mpv-config-extract < /dev/null
     elif $PYTHON -c "import zipfile" 2>/dev/null; then
-        _gum_spin "Extracting archive..." $PYTHON -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('/tmp/mpv-config-extract')" "$TMPZIP"
+        _gum_spin "Extracting archive..." $PYTHON -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall('/tmp/mpv-config-extract')" "$TMPZIP" < /dev/null
     fi
 
     mv /tmp/mpv-config-extract/mpv-config-${BRANCH}/* "$INSTALL_DIR/"
@@ -189,8 +193,8 @@ elif command -v brew &>/dev/null; then
     xcode-select --install 2>/dev/null || true
 fi
 
-_gum_spin "Installing pip requirements..." $PYTHON -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel 2>/dev/null || true
-_gum_spin "Installing rich..." $PYTHON -m pip install --quiet "rich>=13.0.0" 2>/dev/null || true
+_gum_spin "Installing pip requirements..." $PYTHON -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel >/tmp/mpv-deploy-pip.log 2>&1 < /dev/null || true
+_gum_spin "Installing rich..." $PYTHON -m pip install --quiet "rich>=13.0.0" >>/tmp/mpv-deploy-pip.log 2>&1 < /dev/null || true
 _styled_echo "green" "  ✓ Python dependencies installed"
 
 # ─── Step 4: Run the deployer ─────────────────────────────────────
