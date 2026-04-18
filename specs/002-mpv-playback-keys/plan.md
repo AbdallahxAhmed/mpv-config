@@ -18,29 +18,39 @@ Script-specific settings live in `config/script-opts/*.conf` and are copied as-i
 
 ### Keybinding Conflict Analysis
 
-Extracted from source code — all hardcoded default bindings across installed scripts:
+Full audit of **every** hardcoded default binding across all 9 installed scripts:
 
-| Key | Script | Binding Name | Action |
-|-----|--------|--------------|--------|
-| `h` | **memo** | `memo-history` | Open watch history |
-| `h` | **sponsorblock** | `upvote_segment` | Upvote SponsorBlock segment |
-| `H` | **sponsorblock** | `downvote_segment` | Downvote SponsorBlock segment |
-| `g` | **sponsorblock** | `set_segment` | Mark segment start/end |
-| `G` | **sponsorblock** | `submit_segment` | Submit segment to API |
-| `n` | **autosubsync** | `autosubsync-menu` | Open subtitle sync menu |
-| `RIGHT` | **evafast** | `evafast` | Hybrid fast-forward |
+| Key | Script | Binding Name | Action | Conflict? |
+|-----|--------|--------------|--------|-----------|
+| `h` | **memo** | `memo-history` | Open watch history | ⚠️ YES — same as sponsorblock |
+| `h` | **sponsorblock** | `upvote_segment` | Upvote segment | ⚠️ YES — same as memo |
+| `H` | **sponsorblock** | `downvote_segment` | Downvote segment | |
+| `g` | **sponsorblock** | `set_segment` | Mark segment start/end | |
+| `G` | **sponsorblock** | `submit_segment` | Submit segment | |
+| `n` | **autosubsync** | `autosubsync-menu` | Open subtitle sync menu | ⚠️ YES — same as SmartSkip |
+| `n` | **SmartSkip** | `cancel_autoskip_countdown` | Cancel autoskip countdown | ⚠️ YES — same as autosubsync |
+| `Shift+n` | **SmartSkip** | `add_chapter` | Add chapter at position | |
+| `Alt+n` | **SmartSkip** | `remove_chapter` | Remove current chapter | |
+| `Ctrl+n` | **SmartSkip** | `write_chapters` | Save chapters to file | |
+| `>` | **SmartSkip** | `smart_next` | Smart skip next | |
+| `<` | **SmartSkip** | `smart_prev` | Smart skip prev | |
+| `?` | **SmartSkip** | `silence_skip` | Trigger silence skip | |
+| `Ctrl+.` | **SmartSkip** | `toggle_autoskip` | Toggle autoskip | |
+| `Alt+.` | **SmartSkip** | `toggle_category_autoskip` | Toggle category autoskip | |
+| `Ctrl+RIGHT` | **SmartSkip** | `chapter_next` | Next chapter | |
+| `Ctrl+LEFT` | **SmartSkip** | `chapter_prev` | Previous chapter | |
+| `RIGHT` | **evafast** | `evafast` | Hybrid fast-forward | |
 
-**Conflict**: `h` is bound by both memo and sponsorblock.
+**Conflicts found: 2**
+1. `h` → memo vs sponsorblock
+2. `n` → autosubsync vs SmartSkip (cancel_autoskip_countdown)
 
 ### Resolution Strategy
 
-mpv's `input.conf` has **higher priority** than script-internal `mp.add_key_binding()` defaults. When a key is defined in `input.conf` via `script-binding <script-name>/<binding-name>`, it overrides the script's built-in default. This means:
+mpv's `input.conf` has **higher priority** than script-internal `mp.add_key_binding()` defaults. SmartSkip uses `script-opts/SmartSkip.conf` for its keybinds, so we fix that conflict there.
 
-1. We do **NOT** need to modify any Lua script source code.
-2. We do **NOT** need to patch `script-opts/memo.conf` (it has no keybinding options).
-3. We only need to add explicit `input.conf` entries that re-assign conflicting keys.
-
-SponsorBlock also registers named bindings (`sponsorblock_set_segment`, `sponsorblock_upvote`, etc.) with `nil` as the default key — these are already conflict-free. The conflict comes only from the convenience aliases (`g`, `h`, `H`, `G`) hardcoded alongside them.
+1. `input.conf.template` — override memo/sponsorblock `h` conflict
+2. `script-opts/SmartSkip.conf` — change `cancel_autoskip_countdown_keybind` from `["esc", "n"]` to `["esc"]` (remove `n`)
 
 ---
 
@@ -61,43 +71,93 @@ SponsorBlock also registers named bindings (`sponsorblock_set_segment`, `sponsor
 
 #### [MODIFY] [input.conf.template](file:///home/abdallahx/Desktop/mpv-config/config/input.conf.template)
 
-**Strategy**: Override conflicting defaults by explicitly assigning non-conflicting keys in `input.conf.template`.
+**Strategy**: Override conflicting defaults by explicitly assigning non-conflicting keys in `input.conf.template`. Design keys to be **intuitive** — each key is a mnemonic for its action.
 
-**Proposed Keybinding Map (complete, conflict-free)**:
-
-| Key | Action | Script | Rationale |
-|-----|--------|--------|-----------|
-| `CTRL+1..6` | Anime4K modes A/B/C/A+A/B+B/C+A | *(existing)* | Unchanged |
-| `CTRL+0` | Clear shaders | *(existing)* | Unchanged |
-| `F1` | Screenshot (video only) | mpv built-in | Unchanged |
-| `F2` | Screenshot (with subs) | mpv built-in | Unchanged |
-| `F3` | Toggle deband | mpv built-in | Unchanged |
-| `F4` | Toggle interpolation | mpv built-in | Unchanged |
-| `F5` | Cycle audio track | mpv built-in | Unchanged |
-| `F6` | Cycle subtitle track | mpv built-in | Unchanged |
-| `F7` | Toggle subtitle visibility | mpv built-in | Unchanged |
-| `F8` | Dynamic audio normalizer | mpv built-in | Unchanged |
-| `h` | **Memo: watch history** | memo | **Keep** — most frequently used |
-| `g` | Set SponsorBlock segment | sponsorblock | Keep (rarely used, power-user) |
-| `G` | Submit SponsorBlock segment | sponsorblock | Keep (rarely used, power-user) |
-| `B` | **SponsorBlock: upvote** | sponsorblock | **Moved from `h`** — `B` for "Block/vote" |
-| `SHIFT+B` | **SponsorBlock: downvote** | sponsorblock | **Moved from `H`** — consistent with `B` |
-| `n` | Autosubsync menu | autosubsync | Unchanged |
-| `RIGHT` | Evafast | evafast | Unchanged |
-
-**Implementation**: Add these lines to `input.conf.template`:
+**Complete Keybinding Reference (conflict-free, intuitive)**:
 
 ```
-# ─── Conflict Resolution: SponsorBlock voting moved from h/H to B/Shift+B ───
+┌─────────────────────────────────────────────────────────────────┐
+│                    MPV Keybinding Quick Reference                │
+├─────────────┬───────────────────────────────────────────────────┤
+│             │  🎨 Anime4K Shaders (CTRL + number)              │
+│ CTRL+1      │  Mode A (Sharp)                                  │
+│ CTRL+2      │  Mode B (Soft)                                   │
+│ CTRL+3      │  Mode C (Denoise)                                │
+│ CTRL+4      │  Mode A+A (Ultra Sharp)                          │
+│ CTRL+5      │  Mode B+B (Ultra Soft)                           │
+│ CTRL+6      │  Mode C+A (Denoise + Sharp)                      │
+│ CTRL+0      │  Clear all shaders                               │
+├─────────────┼───────────────────────────────────────────────────┤
+│             │  📸 Screenshots & Display (F-keys)               │
+│ F1          │  Screenshot (video only, no subs)                │
+│ F2          │  Screenshot (with subtitles)                     │
+│ F3          │  Toggle deband filter                            │
+│ F4          │  Toggle interpolation (motion smoothing)         │
+│ F5          │  Cycle audio track                               │
+│ F6          │  Cycle subtitle track                            │
+│ F7          │  Show/hide subtitles                             │
+│ F8          │  Night mode (normalize loud audio)               │
+├─────────────┼───────────────────────────────────────────────────┤
+│             │  📜 Scripts — Everyday (single letter)           │
+│ h           │  History — open watch history (memo)             │
+│ n           │  Subtitle syNc menu (autosubsync)                │
+│ RIGHT       │  Fast-forward (evafast)                          │
+├─────────────┼───────────────────────────────────────────────────┤
+│             │  ⏭️  SmartSkip (>, <, ?, Ctrl/Shift/Alt+N)       │
+│ >           │  Smart next (skip intro/outro/silence)           │
+│ <           │  Smart previous                                  │
+│ ?           │  Trigger silence skip                            │
+│ Ctrl+.      │  Toggle autoskip on/off                          │
+│ Alt+.       │  Toggle category autoskip                        │
+│ Ctrl+RIGHT  │  Next chapter                                    │
+│ Ctrl+LEFT   │  Previous chapter                                │
+│ Shift+n     │  Add chapter at current position                 │
+│ Alt+n       │  Remove current chapter                          │
+│ Ctrl+n      │  Save chapters to file                           │
+├─────────────┼───────────────────────────────────────────────────┤
+│             │  🚫 SponsorBlock (B = Block)                     │
+│ g           │  Mark segment start/end                          │
+│ G           │  Submit segment to SponsorBlock API              │
+│ B           │  Upvote segment (👍 = B for Block)               │
+│ Shift+B     │  Downvote segment (👎)                           │
+└─────────────┴───────────────────────────────────────────────────┘
+```
+
+**Why these choices are intuitive**:
+- **`h` = History** — mnemonic, most used daily feature
+- **`n` = syNc** — already established, stays for autosubsync
+- **`B` = Block** — SponsorBlock voting, `B` for "Block" is obvious
+- **`>` / `<`** — forward/backward arrows are natural for skip
+- **F-keys** — system-level functions, like a "function row" on a keyboard
+- **CTRL+number** — shader presets, like preset slots on audio equipment
+- **SmartSkip** uses `n`-family (`Shift+n`, `Alt+n`, `Ctrl+n`) — all chapter operations logically grouped
+
+**Implementation in `input.conf.template`**:
+
+```
+# ─── Script Keybindings (conflict-free) ──────────────────────────
+
+# History (memo) — h = History
+h    script-binding memo-history
+
+# SponsorBlock voting — B = Block (moved from h/H to avoid memo conflict)  
 B    script-binding sponsorblock_upvote
 Shift+B  script-binding sponsorblock_downvote
-h    script-binding memo-history
+
+# Subtitle sync (autosubsync) — n = syNc
+n    script-binding autosubsync-menu
 ```
 
-This approach:
-- Keeps `h` for memo (most common use — watch history)
-- Moves SponsorBlock voting to `B` / `Shift+B` (mnemonic: "Block")
-- Does not touch `g`/`G` (no conflict — memo doesn't use them)
+#### [MODIFY] [SmartSkip.conf](file:///home/abdallahx/Desktop/mpv-config/config/script-opts/SmartSkip.conf)
+
+Remove `n` from SmartSkip's cancel countdown keybind (conflicts with autosubsync's `n`):
+
+```diff
+-cancel_autoskip_countdown_keybind=["esc", "n"]
++cancel_autoskip_countdown_keybind=["esc"]
+```
+
+`esc` alone is sufficient and more intuitive for "cancel"
 
 ---
 
@@ -204,5 +264,6 @@ python3 setup.py --verify
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `config/input.conf.template` | MODIFY | Add conflict-resolution keybindings for SponsorBlock voting |
+| `config/input.conf.template` | MODIFY | Add conflict-resolution keybindings (`h`→memo, `B`→sponsorblock) |
 | `config/mpv.conf.template` | MODIFY | Add screenshot settings block + YouTube streaming profile |
+| `config/script-opts/SmartSkip.conf` | MODIFY | Remove `n` from cancel_autoskip to resolve autosubsync conflict |
