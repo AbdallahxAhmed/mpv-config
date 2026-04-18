@@ -11,7 +11,7 @@
 set -euo pipefail
 
 REPO="AbdallahxAhmed/mpv-config"
-BRANCH="main"
+BRANCH="${MPV_BRANCH:-main}"
 INSTALL_DIR="${HOME}/.mpv-deploy"
 LAUNCHER_DIR="${HOME}/.local/bin"
 LAUNCHER_PATH="${LAUNCHER_DIR}/mpv-config"
@@ -154,7 +154,7 @@ if [ -d "$INSTALL_DIR" ]; then
 fi
 
 if $USE_GIT; then
-    _gum_spin "Cloning repository..." git clone --depth=1 "https://github.com/${REPO}.git" "$INSTALL_DIR" 2>/dev/null
+    _gum_spin "Cloning repository..." git clone --depth=1 -b "$BRANCH" "https://github.com/${REPO}.git" "$INSTALL_DIR" 2>/dev/null
     _styled_echo "green" "  ✓ Cloned successfully"
 else
     ZIPURL="https://github.com/${REPO}/archive/refs/heads/${BRANCH}.zip"
