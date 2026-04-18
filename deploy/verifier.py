@@ -90,14 +90,13 @@ def verify(config_dir, env):
 
     ui.step("Checking scripts...")
     check_dir("uosc", "scripts/uosc", min_files=1)
-    if env.os == "linux":
-        ziggy = os.path.join(config_dir, "scripts", "uosc", "bin", "ziggy-linux")
-        check("uosc ziggy (linux)", os.path.isfile(ziggy), "scripts/uosc/bin/ziggy-linux")
-        check("uosc ziggy executable (linux)", os.access(ziggy, os.X_OK), "must be executable")
-    elif env.os == "macos":
-        ziggy = os.path.join(config_dir, "scripts", "uosc", "bin", "ziggy-darwin")
-        check("uosc ziggy (macos)", os.path.isfile(ziggy), "scripts/uosc/bin/ziggy-darwin")
-        check("uosc ziggy executable (macos)", os.access(ziggy, os.X_OK), "must be executable")
+    ziggy_by_os = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}
+    ziggy_name = ziggy_by_os.get(env.os)
+    if ziggy_name:
+        rel = f"scripts/uosc/bin/{ziggy_name}"
+        ziggy = os.path.join(config_dir, rel)
+        check(f"uosc {ziggy_name}", os.path.isfile(ziggy), rel)
+        check(f"uosc {ziggy_name} executable", os.access(ziggy, os.X_OK), "must be executable")
     check_file("thumbfast", "scripts/thumbfast.lua")
     check_file("SmartSkip", "scripts/SmartSkip.lua")
     check_file("sponsorblock", "scripts/sponsorblock.lua")
