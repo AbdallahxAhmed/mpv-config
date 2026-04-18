@@ -13,6 +13,7 @@ irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.sh | bash
 ```
+*(Features a fully interactive, styled UI powered by [Gum](https://github.com/charmbracelet/gum))*
 
 ## What It Does
 
@@ -123,7 +124,9 @@ Platform-required values are still kept per OS:
 
 ## Requirements
 
-- **Python 3.8+** (no external packages needed)
+- **Python 3.8+**
+- **Rich** (`pip install rich`) — installed automatically by bootstrap scripts
+- **Gum** (optional, installed automatically by `install.sh` for beautiful shell UI)
 - **Internet connection** (to fetch scripts from GitHub)
 
 ## License

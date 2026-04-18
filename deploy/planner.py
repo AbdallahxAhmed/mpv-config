@@ -184,10 +184,12 @@ def build_uninstall_plan(
 
     # ── Config files ─────────────────────────────────────────────────
     if purge_config:
-        if os.path.isdir(env.config_dir):
+        if os.path.lexists(env.config_dir):
+            is_symlink = os.path.islink(env.config_dir)
+            kind = "symlink" if is_symlink else "entire directory"
             plan.append(PlanEntry(
                 "file", "remove", env.config_dir,
-                "entire mpv config directory — all contents deleted",
+                f"entire mpv config {kind} — all contents deleted",
             ))
     else:
         managed = [
@@ -202,9 +204,11 @@ def build_uninstall_plan(
         for name in managed:
             path = os.path.join(env.config_dir, name)
             if os.path.lexists(path):
+                is_symlink = os.path.islink(path)
+                kind = "symlink" if is_symlink else "file/dir"
                 plan.append(PlanEntry(
                     "file", "remove", path,
-                    "deployed by this installer",
+                    f"deployed {kind}",
                 ))
 
     # ── Backups ──────────────────────────────────────────────────────
@@ -253,17 +257,6 @@ _CATEGORY_LABELS: Dict[str, str] = {
     "file":    "Configuration Files",
 }
 
-# (ANSI color, icon char, fixed-width label)
-_ACTION_STYLE: Dict[str, Tuple[str, str, str]] = {
-    "install": (ui._C.YELLOW, "+", "INSTALL"),
-    "remove":  (ui._C.RED,    "-", "REMOVE "),
-    "fetch":   (ui._C.CYAN,   "↓", "FETCH  "),
-    "deploy":  (ui._C.GREEN,  "→", "DEPLOY "),
-    "backup":  (ui._C.BLUE,   "⊙", "BACKUP "),
-    "create":  (ui._C.GREEN,  "+", "CREATE "),
-    "skip":    (ui._C.DIM,    "=", "SKIP   "),
-}
-
 
 def _short_path(path: str) -> str:
     """Replace the home directory prefix with ``~`` for compact display."""
@@ -275,11 +268,11 @@ def _short_path(path: str) -> str:
 
 def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     """
-    Print the action plan grouped by category with colour-coded action types.
+    Print the action plan grouped by category using a Rich table.
     Nothing is executed — this is purely informational output.
     """
     ui.header(title)
-    print(f"  {ui._C.DIM}The following actions will be performed:{ui._C.RESET}\n")
+    ui.info("The following actions will be performed:")
 
     # Collect categories in the order they first appear
     seen_cats: List[str] = []
@@ -297,23 +290,24 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     for cat in ordered:
         entries = categories[cat]
         label = _CATEGORY_LABELS.get(cat, cat.title())
-        print(f"  {ui._C.BOLD}{label}:{ui._C.RESET}")
+        
+        rows = []
         for entry in entries:
-            color, icon, action_label = _ACTION_STYLE.get(
-                entry.action,
-                (ui._C.WHITE, "?", entry.action.upper()[:7].ljust(7)),
-            )
+            act = entry.action.upper()
+            if entry.action == "install": act_styled = f"[yellow]+ {act}[/yellow]"
+            elif entry.action == "remove": act_styled = f"[red]- {act}[/red]"
+            elif entry.action == "fetch": act_styled = f"[cyan]↓ {act}[/cyan]"
+            elif entry.action == "deploy": act_styled = f"[green]→ {act}[/green]"
+            elif entry.action == "backup": act_styled = f"[blue]⊙ {act}[/blue]"
+            elif entry.action == "create": act_styled = f"[green]+ {act}[/green]"
+            elif entry.action == "skip": act_styled = f"[dim]= {act}[/dim]"
+            else: act_styled = act
+            
             target = _short_path(entry.target)
-            detail_str = (
-                f"  {ui._C.DIM}# {entry.detail}{ui._C.RESET}"
-                if entry.detail else ""
-            )
-            print(
-                f"    {color}[{icon}]{ui._C.RESET} "
-                f"{ui._C.DIM}{action_label}{ui._C.RESET} "
-                f"{target}{detail_str}"
-            )
-        print()
+            detail = f"[dim]{entry.detail}[/dim]" if entry.detail else ""
+            rows.append([act_styled, target, detail])
+            
+        ui.table(label, ["Action", "Target", "Detail"], rows)
 
 
 def confirm_plan(plan: List[PlanEntry], operation: str = "install") -> bool:
@@ -326,20 +320,9 @@ def confirm_plan(plan: List[PlanEntry], operation: str = "install") -> bool:
     active = [e for e in plan if e.action != "skip"]
     skipped = len(plan) - len(active)
 
-    print(
-        f"  {ui._C.BOLD}Summary:{ui._C.RESET} "
-        f"{ui._C.GREEN}{len(active)}{ui._C.RESET} action(s) pending"
-        + (f", {ui._C.DIM}{skipped} skipped{ui._C.RESET}" if skipped else "")
-        + ".\n"
-    )
+    summary = f"{len(active)} action(s) pending"
+    if skipped:
+        summary += f", {skipped} skipped"
+    ui.info(f"Summary: {summary}")
 
-    try:
-        reply = input(
-            f"  {ui._C.YELLOW}?{ui._C.RESET}  "
-            f"Proceed with {operation}? "
-            f"{ui._C.BOLD}[Y/n]{ui._C.RESET} "
-        ).strip().lower()
-        return reply in ("", "y", "yes")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
+    return ui.confirm(f"Proceed with {operation}?")

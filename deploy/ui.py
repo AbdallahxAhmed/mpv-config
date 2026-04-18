@@ -229,6 +229,21 @@ def confirm(text):
             print()
             return False
 
+def ask_choice(text, choices):
+    if _RICH_AVAILABLE:
+        from rich.prompt import IntPrompt
+        return str(IntPrompt.ask(f"[yellow]?[/yellow] {text}", choices=choices))
+    else:
+        while True:
+            try:
+                reply = input(f"  {_C.YELLOW}?{_C.RESET} {text} [{'/'.join(choices)}]: ").strip()
+                if reply in choices:
+                    return reply
+                print(f"  {_C.RED}Invalid choice.{_C.RESET}")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                sys.exit(0)
+
 @contextmanager
 def spinner(text):
     """Show a spinner during an operation."""

@@ -58,5 +58,6 @@ Expected: All 20+ checks pass (✓ green).
 |---------|----------|
 | "Cannot reach GitHub" | Check internet connection. If behind proxy, set `HTTP_PROXY`. |
 | "pip not found" | Install Python 3.8+ first, then re-run. |
+| Text is unstyled/plain | `rich` module failed to install. The script falls back to plain ANSI text safely. |
 | mpv doesn't launch | Run `mpv-config --verify` to see which files are missing. |
 | Want old config back | Run `mpv-config --rollback` to restore the backup. |
