@@ -329,68 +329,84 @@ def detect():
     ui.header("Detecting Environment")
 
     env = Environment()
+    rows = []
 
-    # OS
-    env.os = _detect_os()
-    ui.success(f"OS: {env.os} ({platform.platform()})")
+    with ui.spinner("Detecting environment..."):
+        # OS
+        env.os = _detect_os()
+        rows.append(["OS", f"{env.os} ({platform.platform()})"])
 
-    # Distro (Linux only)
-    if env.os == "linux":
-        env.distro = _detect_distro()
-        ui.success(f"Distro: {env.distro or 'unknown'}")
+        # Distro (Linux only)
+        if env.os == "linux":
+            env.distro = _detect_distro()
+            rows.append(["Distro", env.distro or "unknown"])
 
-    # Platform key for registry lookup
-    if env.os == "windows":
-        env.platform_key = "windows"
-    elif env.os == "macos":
-        env.platform_key = "macos"
-    elif env.distro in ("arch",):
-        env.platform_key = "arch"
-    elif env.distro in ("ubuntu", "debian"):
-        env.platform_key = "ubuntu"
-    else:
-        env.platform_key = "ubuntu"  # fallback to ubuntu-like
-        ui.warn(f"Unknown distro '{env.distro}', using ubuntu-like defaults")
-
-    # Display server
-    if env.os == "linux":
-        env.display = _detect_display()
-        ui.success(f"Display: {env.display or 'unknown'}")
-
-    # GPU
-    env.gpu_vendor = _detect_gpu()
-    if env.gpu_vendor:
-        ui.success(f"GPU: {env.gpu_vendor}")
-
-    # Package manager
-    env.pkg_manager = _detect_pkg_manager(env.os, env.distro)
-    ui.success(f"Package manager: {env.pkg_manager or 'none detected'}")
-
-    # AUR helper
-    if env.distro == "arch":
-        env.aur_helper = _detect_aur_helper()
-        if env.aur_helper:
-            ui.success(f"AUR helper: {env.aur_helper}")
-
-    # Python/pip
-    env.python_cmd, env.pip_cmd = _detect_python()
-
-    # Git
-    env.has_git = _which("git")
-
-    # Config dir
-    env.config_dir = _resolve_config_dir(env.os)
-    ui.success(f"mpv config dir: {env.config_dir}")
-
-    # Check installed deps
-    from deploy.registry import SYSTEM_DEPS
-    ui.step("Checking installed dependencies...")
-    for name, info in SYSTEM_DEPS.items():
-        env.installed[name] = _check_installed(name, info)
-        status = "installed" if env.installed[name] else "missing"
-        if env.installed[name]:
-            ui.success(f"{name}: {status}")
+        # Platform key for registry lookup
+        if env.os == "windows":
+            env.platform_key = "windows"
+        elif env.os == "macos":
+            env.platform_key = "macos"
+        elif env.distro in ("arch",):
+            env.platform_key = "arch"
+        elif env.distro in ("ubuntu", "debian"):
+            env.platform_key = "ubuntu"
         else:
-            ui.warn(f"{name}: {status}")
+            env.platform_key = "ubuntu"  # fallback to ubuntu-like
+            ui.warn(f"Unknown distro '{env.distro}', using ubuntu-like defaults")
+
+        # Display server
+        if env.os == "linux":
+            env.display = _detect_display()
+            rows.append(["Display", env.display or "unknown"])
+
+        # GPU
+        env.gpu_vendor = _detect_gpu()
+        if env.gpu_vendor:
+            rows.append(["GPU", env.gpu_vendor])
+        else:
+            ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")
+            env.gpu_vendor = ""
+
+        # Package manager
+        env.pkg_manager = _detect_pkg_manager(env.os, env.distro)
+        rows.append(["Package manager", env.pkg_manager or "none detected"])
+
+        # AUR helper
+        if env.distro == "arch":
+            env.aur_helper = _detect_aur_helper()
+            if env.aur_helper:
+                rows.append(["AUR helper", env.aur_helper])
+
+        # Python/pip
+        env.python_cmd, env.pip_cmd = _detect_python()
+
+        # Git
+        env.has_git = _which("git")
+
+        # Config dir
+        env.config_dir = _resolve_config_dir(env.os)
+        rows.append(["mpv config dir", env.config_dir])
+
+        # Check installed deps
+        from deploy.registry import SYSTEM_DEPS
+        for name, info in SYSTEM_DEPS.items():
+            env.installed[name] = _check_installed(name, info)
+
+    # Output detection results
+    ui.table("Detection Results", ["Property", "Value"], rows)
+    
+    # Validation
+    _validate_env(env)
 
     return env
+
+
+def _validate_env(env: Environment):
+    if not env.os:
+        env.os = "linux"
+    if not os.path.isabs(env.config_dir):
+        raise ValueError("config_dir must be an absolute path")
+    from deploy.registry import SYSTEM_DEPS
+    for k in SYSTEM_DEPS.keys():
+        if k not in env.installed:
+            env.installed[k] = False

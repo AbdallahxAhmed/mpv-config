@@ -18,6 +18,7 @@ def _run_check(cmd):
         subprocess.run(
             cmd, capture_output=True, timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            check=True,
         )
         return True
     except Exception:
@@ -40,10 +41,8 @@ def verify(config_dir, env):
         checks_total += 1
         if condition:
             checks_passed += 1
-            ui.success(name)
             results.append({"name": name, "status": "ok", "detail": detail})
         else:
-            ui.error(name)
             results.append({"name": name, "status": "failed", "detail": detail})
 
     def check_file(name, rel_path):
@@ -62,6 +61,15 @@ def verify(config_dir, env):
     def check_binary(name, cmd):
         ok = _run_check(cmd)
         check(f"{name} binary", ok)
+
+    def check_symlink(name, rel_path):
+        path = os.path.join(config_dir, rel_path)
+        is_symlink = os.path.islink(path)
+        is_valid = os.path.exists(path)
+        if not is_symlink:
+            check(f"{name} symlink", False, "not a symlink")
+        else:
+            check(f"{name} symlink", is_valid, "valid symlink" if is_valid else "broken symlink")
 
     # ─── Binary checks ──────────────────────────────────────────────
 
@@ -89,6 +97,9 @@ def verify(config_dir, env):
     # ─── Scripts ─────────────────────────────────────────────────────
 
     ui.step("Checking scripts...")
+    if env.os in ("linux", "macos"):
+        check_symlink("scripts dir", "scripts")
+        
     check_dir("uosc", "scripts/uosc", min_files=1)
     # env.os is normalized by detector.py to "windows" | "linux" | "macos".
     ziggy_by_os = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}
@@ -111,6 +122,9 @@ def verify(config_dir, env):
     # ─── Shaders ─────────────────────────────────────────────────────
 
     ui.step("Checking shaders...")
+    if env.os in ("linux", "macos"):
+        check_symlink("shaders dir", "shaders")
+        
     check_dir("Anime4K shaders", "shaders", min_files=10)
 
     # ─── Fonts ───────────────────────────────────────────────────────
@@ -151,6 +165,15 @@ def verify(config_dir, env):
     check("mpv launch test", mpv_ok, "mpv runs without errors")
 
     # ─── Summary ─────────────────────────────────────────────────────
+
+    rows = []
+    for r in results:
+        status_styled = "[green]OK[/green]" if r["status"] == "ok" else "[red]FAILED[/red]"
+        if r["status"] == "skipped": status_styled = "[dim]SKIPPED[/dim]"
+        detail = f"[dim]{r['detail']}[/dim]" if r['detail'] else ""
+        rows.append([status_styled, r["name"], detail])
+        
+    ui.table("Verification Results", ["Status", "Check", "Detail"], rows)
 
     print()
     if checks_passed == checks_total:

@@ -85,7 +85,8 @@ def cmd_install(args):
         ui.header("Pre-flight Checks")
         try:
             import urllib.request
-            urllib.request.urlopen("https://api.github.com", timeout=5)
+            with ui.spinner("Checking internet connectivity..."):
+                urllib.request.urlopen("https://api.github.com", timeout=5)
             ui.success("Internet connectivity: OK")
         except Exception:
             ui.error("Cannot reach GitHub. Check your internet connection.")
@@ -127,6 +128,10 @@ def cmd_install(args):
             # 10. Verify
             if not args.dry_run:
                 verify_results = verify(env.config_dir, env)
+                failed_checks = sum(1 for r in verify_results if r["status"] == "failed")
+                if failed_checks > 0:
+                    report = audit_log.generate_diagnostic_report()
+                    ui.panel(report, title="Diagnostic Report", style="yellow")
             else:
                 verify_results = []
 
@@ -138,12 +143,10 @@ def cmd_install(args):
             if not args.dry_run:
                 failed = sum(1 for r in fetch_results if r["status"] == "failed")
                 if failed == 0:
-                    print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🎉 Deployment complete!{ui.C.RESET}")
-                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    ui.panel(f"Deployment complete!\n[dim]Config dir: {env.config_dir}[/dim]", title="✅ Success", style="green")
                     audit_log.complete_session("completed")
                 else:
-                    print(f"\n  {ui.C.YELLOW}⚠ Deployment finished with {failed} issue(s).{ui.C.RESET}")
-                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    ui.panel(f"Deployment finished with {failed} issue(s).\n[dim]Config dir: {env.config_dir}[/dim]", title="⚠️ Warning", style="yellow")
                     audit_log.complete_session("completed_with_errors")
         finally:
             # Clean up staging
@@ -204,7 +207,7 @@ def cmd_update(args):
         audit_log.record_file(lockfile_path, "modify", "ok", "version lockfile updated")
 
         ui.summary(fetch_results)
-        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}✨ Update complete!{ui.C.RESET}\n")
+        ui.panel("Update complete!", title="✨ Success", style="green")
         audit_log.complete_session("completed")
     except Exception:
         try:
@@ -260,8 +263,7 @@ def cmd_status(args):
         if pkg_safe:
             ui.info(f"Installed by this tool (safe to remove): {', '.join(pkg_safe)}")
 
-    print(f"\n  {ui.C.DIM}Lockfile: {lockfile_path}{ui.C.RESET}")
-    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+    ui.panel(f"Lockfile: {lockfile_path}\nConfig dir: {env.config_dir}", title="Environment Info", style="dim")
 
 
 def cmd_rollback(args):
@@ -297,8 +299,7 @@ def cmd_rollback(args):
         ui.summary([result])
 
         if result["status"] == "ok":
-            print(f"\n  {ui.C.GREEN}{ui.C.BOLD}↩ Rollback complete!{ui.C.RESET}")
-            print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+            ui.panel(f"Rollback complete!\n[dim]Config dir: {env.config_dir}[/dim]", title="↩ Success", style="green")
             audit_log.complete_session("completed")
         else:
             audit_log.complete_session("completed")
@@ -330,16 +331,21 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
     ]
 
     if purge_config:
-        if os.path.exists(config_dir):
+        if os.path.lexists(config_dir):
+            is_symlink = os.path.islink(config_dir)
+            kind = "symlink" if is_symlink else "config dir"
             if dry_run:
-                ui.info(f"[DRY RUN] Would remove config dir: {config_dir}")
+                ui.info(f"[DRY RUN] Would remove {kind}: {config_dir}")
                 results.append({"name": "config_dir", "status": "skipped", "detail": "dry run"})
             else:
-                remove_path_safe(config_dir)
-                ui.success(f"Removed config dir: {config_dir}")
-                results.append({"name": "config_dir", "status": "ok", "detail": "removed"})
+                if is_symlink:
+                    os.unlink(config_dir)
+                else:
+                    remove_path_safe(config_dir)
+                ui.success(f"Removed {kind}: {config_dir}")
+                results.append({"name": "config_dir", "status": "ok", "detail": f"removed {kind}"})
                 if audit_log:
-                    audit_log.record_file(config_dir, "delete", "ok", "full config dir removed")
+                    audit_log.record_file(config_dir, "delete", "ok", f"full {kind} removed")
         else:
             results.append({"name": "config_dir", "status": "skipped", "detail": "not found"})
     else:
@@ -347,15 +353,20 @@ def _remove_deployed_files(env, purge_config=False, remove_backups=False, dry_ru
             path = os.path.join(config_dir, name)
             if not os.path.lexists(path):
                 continue
+            is_symlink = os.path.islink(path)
+            kind = "symlink" if is_symlink else "file/dir"
             if dry_run:
-                ui.info(f"[DRY RUN] Would remove: {path}")
+                ui.info(f"[DRY RUN] Would remove {kind}: {path}")
                 results.append({"name": name, "status": "skipped", "detail": "dry run"})
             else:
-                remove_path_safe(path)
-                ui.success(f"Removed: {path}")
-                results.append({"name": name, "status": "ok", "detail": "removed"})
+                if is_symlink:
+                    os.unlink(path)
+                else:
+                    remove_path_safe(path)
+                ui.success(f"Removed {kind}: {path}")
+                results.append({"name": name, "status": "ok", "detail": f"removed {kind}"})
                 if audit_log:
-                    audit_log.record_file(path, "delete", "ok", "removed by uninstall")
+                    audit_log.record_file(path, "delete", "ok", f"removed {kind} by uninstall")
 
     if remove_backups:
         backups = list_backups(config_dir)
@@ -466,8 +477,14 @@ def cmd_uninstall(args):
 
     all_results = remove_results + dep_results + cleanup_results
     ui.summary(all_results)
+    
+    failed = sum(1 for r in all_results if r["status"] == "failed")
+    if failed > 0:
+        report = audit_log.generate_diagnostic_report()
+        ui.panel(report, title="Diagnostic Report", style="yellow")
+        
     if not args.dry_run:
-        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🧹 Uninstall completed.{ui.C.RESET}\n")
+        ui.panel("Uninstall completed.", title="🧹 Success", style="green")
         try:
             audit_log.complete_session("completed")
         except Exception:
@@ -491,18 +508,22 @@ def _has_explicit_action(args):
 
 def _interactive_menu(args):
     ui.banner()
-    ui.header("Choose Action")
-    print("  1) Full install")
-    print("  2) Update scripts/shaders")
-    print("  3) Rollback (latest backup)")
-    print("  4) Rollback (specific backup path)")
-    print("  5) Verify installation")
-    print("  6) Show status")
-    print("  7) Uninstall deployed files")
-    print(f"  {MENU_MAX_OPTION}) Full remove (files + backups + deps + install dir)")
-    print("  0) Exit")
+    menu_text = (
+        "  [cyan]1)[/cyan] Full install  [dim]detect → deps → fetch → deploy → verify[/dim]\n"
+        "  [cyan]2)[/cyan] Update scripts/shaders  [dim]re-fetch and deploy latest versions[/dim]\n"
+        "  [cyan]3)[/cyan] Rollback (latest backup)  [dim]restore config to previous state[/dim]\n"
+        "  [cyan]4)[/cyan] Rollback (specific backup path)  [dim]restore config from specific path[/dim]\n"
+        "  [cyan]5)[/cyan] Verify installation  [dim]run self-diagnostic checks[/dim]\n"
+        "  [cyan]6)[/cyan] Show status  [dim]list installed script and shader versions[/dim]\n"
+        "  [cyan]7)[/cyan] Uninstall deployed files  [dim]remove MPV files deployed by this tool[/dim]\n"
+        f"  [cyan]{MENU_MAX_OPTION})[/cyan] Full remove  [dim]uninstall files + backups + deps + install dir[/dim]\n"
+        "  [cyan]0)[/cyan] Exit  [dim]quit without doing anything[/dim]"
+    )
+    ui.panel(menu_text, title="Main Menu", style="blue")
 
-    choice = input(f"\n  Select option [0-{MENU_MAX_OPTION}]: ").strip()
+    choices = [str(i) for i in range(MENU_MAX_OPTION + 1)]
+    choice = ui.ask_choice("Select option", choices=choices)
+
     if choice == "1":
         args.install = True
     elif choice == "2":
@@ -520,28 +541,19 @@ def _interactive_menu(args):
         args.status = True
     elif choice == "7":
         args.uninstall = True
-        args.purge_config = ui.confirm("  Remove whole mpv config directory?")
-        args.remove_backups = ui.confirm("  Remove rollback backups too?")
+        args.purge_config = ui.confirm("[red]Remove whole mpv config directory?[/red]")
+        args.remove_backups = ui.confirm("[red]Remove rollback backups too?[/red]")
     elif choice == str(MENU_MAX_OPTION):
         args.uninstall = True
         args.purge_config = True
         args.remove_backups = True
         args.remove_deps = True
         args.remove_install_dir = True
-        # Inform the user why removing Python is risky before asking
-        print(
-            f"\n  {ui.C.YELLOW}!{ui.C.RESET}  Removing Python packages is potentially risky:"
-            f" other tools on your system may depend on the same packages."
-        )
-        print(
-            f"  {ui.C.DIM}The audit log will be consulted —"
-            f" only packages installed by this tool will be removed.{ui.C.RESET}"
-        )
-        args.remove_python = ui.confirm("  Also remove Python packages installed by this tool?")
+        ui.warn("Removing Python packages is potentially risky: other tools on your system may depend on the same packages.")
+        ui.info("The audit log will be consulted — only packages installed by this tool will be removed.")
+        args.remove_python = ui.confirm("[red]Also remove Python packages installed by this tool?[/red]")
     elif choice == "0":
         raise KeyboardInterrupt
-    else:
-        raise ValueError(f"Invalid selection. Please choose a number between 0 and {MENU_MAX_OPTION}.")
 
 
 def main():
@@ -598,7 +610,7 @@ def main():
         else:
             cmd_install(args)
     except KeyboardInterrupt:
-        print(f"\n\n  {ui.C.YELLOW}Interrupted by user.{ui.C.RESET}\n")
+        ui.warn("Interrupted by user.")
         sys.exit(130)
     except Exception as e:
         ui.error(f"Fatal error: {e}")

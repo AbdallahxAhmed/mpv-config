@@ -101,21 +101,22 @@ def fetch_raw(script_entry, staging_dir):
     ui.step(f"Fetching {name} from {repo}...")
 
     fetched = []
-    for f in files:
-        url = GITHUB_RAW.format(repo=repo, branch=branch, path=f["src"])
-        dest = os.path.join(staging_dir, f["dest"])
-        _ensure_dir(dest)
+    with ui.spinner(f"Downloading {name}..."):
+        for f in files:
+            url = GITHUB_RAW.format(repo=repo, branch=branch, path=f["src"])
+            dest = os.path.join(staging_dir, f["dest"])
+            _ensure_dir(dest)
 
-        try:
-            data = _request(url, binary=True)
-            with open(dest, "wb") as fh:
-                fh.write(data)
-            fetched.append(f["dest"])
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"File not found: {f['src']} in {repo}. "
-                f"The repository structure may have changed."
-            )
+            try:
+                data = _request(url, binary=True)
+                with open(dest, "wb") as fh:
+                    fh.write(data)
+                fetched.append(f["dest"])
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"File not found: {f['src']} in {repo}. "
+                    f"The repository structure may have changed."
+                )
 
     ui.success(f"{name}: {len(fetched)} file(s) downloaded")
 
@@ -179,8 +180,8 @@ def fetch_release(entry, staging_dir, is_shader=False):
             f"Available: {[a['name'] for a in assets]}"
         )
 
-    ui.step(f"Downloading {asset_name} ({tag})...")
-    zip_data = _request(asset_url, binary=True)
+    with ui.spinner(f"Downloading {asset_name} ({tag})..."):
+        zip_data = _request(asset_url, binary=True)
 
     # Extract
     extracted_count = 0
@@ -264,44 +265,66 @@ def fetch_all(scripts, shaders, staging_dir):
 
     ui.header("Fetching Scripts & Shaders")
 
-    # Fetch scripts
-    for script in scripts:
-        current += 1
-        ui.progress(current, total, script["name"])
+    prog = ui.get_progress()
+    if prog:
+        task_id = prog.add_task("Fetching components...", total=total)
+        prog.start()
 
-        source_type = script["source"]["type"]
-        try:
-            if source_type == "github_raw":
-                meta = fetch_raw(script, staging_dir)
-            elif source_type == "github_release":
-                meta = fetch_release(script, staging_dir)
-            elif source_type == "github_clone":
-                # Fallback: try raw download for clone-type
-                meta = fetch_raw(script, staging_dir)
-            else:
-                ui.warn(f"Unknown source type '{source_type}' for {script['name']}")
-                results.append({"name": script["name"], "status": "failed", "detail": f"unknown source type: {source_type}"})
-                continue
-
-            results.append({"name": script["name"], "status": "ok", "detail": meta.get("version", "latest")})
-            lockfile["scripts"][script["name"]] = meta
-
-        except (FileNotFoundError, ConnectionError, zipfile.BadZipFile) as e:
-            ui.error(f"{script['name']}: {e}")
-            results.append({"name": script["name"], "status": "failed", "detail": str(e)})
-        except Exception as e:
-            ui.error(f"{script['name']}: unexpected error: {e}")
-            results.append({"name": script["name"], "status": "failed", "detail": str(e)})
-
-    # Fetch shaders
-    current += 1
-    ui.progress(current, total, shaders["name"])
     try:
-        meta = fetch_release(shaders, staging_dir, is_shader=True)
-        results.append({"name": shaders["name"], "status": "ok", "detail": meta.get("version", "")})
-        lockfile["scripts"][shaders["name"]] = meta
-    except Exception as e:
-        ui.error(f"{shaders['name']}: {e}")
-        results.append({"name": shaders["name"], "status": "failed", "detail": str(e)})
+        # Fetch scripts
+        for script in scripts:
+            current += 1
+            if prog:
+                prog.update(task_id, description=f"Fetching {script['name']}")
+            else:
+                ui.progress(current, total, script["name"])
+
+            source_type = script["source"]["type"]
+            try:
+                if source_type == "github_raw":
+                    meta = fetch_raw(script, staging_dir)
+                elif source_type == "github_release":
+                    meta = fetch_release(script, staging_dir)
+                elif source_type == "github_clone":
+                    # Fallback: try raw download for clone-type
+                    meta = fetch_raw(script, staging_dir)
+                else:
+                    ui.warn(f"Unknown source type '{source_type}' for {script['name']}")
+                    results.append({"name": script["name"], "status": "failed", "detail": f"unknown source type: {source_type}"})
+                    if prog: prog.advance(task_id)
+                    continue
+
+                results.append({"name": script["name"], "status": "ok", "detail": meta.get("version", "latest")})
+                lockfile["scripts"][script["name"]] = meta
+
+            except (FileNotFoundError, ConnectionError, zipfile.BadZipFile) as e:
+                ui.error(f"{script['name']}: {e}")
+                results.append({"name": script["name"], "status": "failed", "detail": str(e)})
+            except Exception as e:
+                ui.error(f"{script['name']}: unexpected error: {e}")
+                results.append({"name": script["name"], "status": "failed", "detail": str(e)})
+                
+            if prog: prog.advance(task_id)
+
+        # Fetch shaders
+        current += 1
+        if prog:
+            prog.update(task_id, description=f"Fetching {shaders['name']}")
+        else:
+            ui.progress(current, total, shaders["name"])
+            
+        try:
+            meta = fetch_release(shaders, staging_dir, is_shader=True)
+            results.append({"name": shaders["name"], "status": "ok", "detail": meta.get("version", "")})
+            lockfile["scripts"][shaders["name"]] = meta
+        except Exception as e:
+            ui.error(f"{shaders['name']}: {e}")
+            results.append({"name": shaders["name"], "status": "failed", "detail": str(e)})
+            
+        if prog: prog.advance(task_id)
+
+    finally:
+        if prog:
+            prog.stop()
 
     return results, lockfile

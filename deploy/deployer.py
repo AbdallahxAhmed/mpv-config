@@ -65,7 +65,7 @@ def backup_existing(config_dir, audit_log=None):
 
     ui.step(f"Backing up existing config → {backup_dir}")
     try:
-        shutil.copytree(config_dir, backup_dir)
+        shutil.copytree(config_dir, backup_dir, symlinks=False)
         ui.success(f"Backup created: {backup_dir}")
         if audit_log:
             audit_log.record_backup(backup_dir)
@@ -162,6 +162,18 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
             shutil.move(config_dir, safety_backup)
 
         shutil.move(temp_restore, config_dir)
+        
+        # Clean up any leftover symlinks pointing to 'deployed'
+        try:
+            for item in os.listdir(config_dir):
+                p = os.path.join(config_dir, item)
+                if os.path.islink(p):
+                    target = os.readlink(p)
+                    if "deployed" in target:
+                        os.unlink(p)
+        except Exception as e:
+            ui.warn(f"Failed to clean up remaining symlinks: {e}")
+            
         ui.success(f"Rollback completed from: {backup_source}")
         if safety_backup:
             ui.success(f"Current config saved as: {safety_backup}")
@@ -352,9 +364,12 @@ def _normalize_line_endings(directory, env):
 
     count = 0
     for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
         for fname in files:
             if fname.endswith((".lua", ".conf", ".py", ".sh", ".glsl")):
                 fpath = os.path.join(root, fname)
+                if os.path.islink(fpath):
+                    continue
                 try:
                     with open(fpath, "rb") as f:
                         data = f.read()
@@ -368,6 +383,53 @@ def _normalize_line_endings(directory, env):
 
     if count > 0:
         ui.success(f"Normalized line endings for {count} file(s)")
+
+
+# ─── Deploy Directory (Symlink/Copy) ───────────────────────────────────
+
+def _is_symlink_safe(dst):
+    """
+    Check if target exists:
+    if symlink pointing elsewhere -> safe to replace (return True)
+    if real directory -> needs backup first (return False)
+    if file -> raise error (unexpected state)
+    if not exists -> safe (return True)
+    """
+    if not os.path.exists(dst) and not os.path.islink(dst):
+        return True
+    if os.path.islink(dst):
+        return True
+    if os.path.isdir(dst):
+        return False
+    raise RuntimeError(f"Unexpected file at target: {dst}")
+
+def _deploy_directory(src, dst, env, audit_log=None):
+    """
+    Deploy a directory using symlinks on Linux/macOS and copytree on Windows.
+    src must be an absolute path to the deployed staging folder (e.g. <config_dir>/deployed/scripts).
+    dst is the target link/folder (e.g. <config_dir>/scripts).
+    """
+    if env.os in ("linux", "macos"):
+        # OS-conditional: Symlink
+        if not _is_symlink_safe(dst):
+            # Target is a real dir, remove it since we already backed up the config
+            shutil.rmtree(dst)
+        elif os.path.islink(dst):
+            os.unlink(dst)
+        
+        os.symlink(src, dst)
+        method = "symlink"
+    else:
+        # Windows: Copy
+        if os.path.exists(dst) or os.path.islink(dst):
+            _remove_path(dst)
+        shutil.copytree(src, dst)
+        method = "copy"
+        
+    count = sum(len(files) for _, _, files in os.walk(src))
+    if audit_log:
+        audit_log.record_file(dst, method, "ok", f"{count} file(s) deployed via {method}")
+    return count, method
 
 
 # ─── Main Deploy ───────────────────────────────────────────────────────
@@ -403,20 +465,21 @@ def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None, mpv_profil
     # 2. Create config dir
     os.makedirs(config_dir, exist_ok=True)
 
-    # 3. Copy fetched scripts/shaders from staging
+    # 3. Move staging to persistent deployed/ dir
+    deployed_dir = os.path.join(config_dir, "deployed")
+    if os.path.exists(deployed_dir):
+        shutil.rmtree(deployed_dir)
+    # The caller manages staging_dir, so we copy it to deployed_dir
+    shutil.copytree(staging_dir, deployed_dir, symlinks=False)
+
     ui.step("Deploying scripts & shaders...")
     for item in ("scripts", "shaders", "fonts"):
-        src = os.path.join(staging_dir, item)
+        src = os.path.join(deployed_dir, item)
         dst = os.path.join(config_dir, item)
         if os.path.isdir(src):
-            if os.path.exists(dst):
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
-            count = sum(len(files) for _, _, files in os.walk(dst))
-            ui.success(f"{item}/: {count} file(s) deployed")
-            results.append({"name": item, "status": "ok", "detail": f"{count} files"})
-            if audit_log:
-                audit_log.record_file(dst, "copy", "ok", f"{count} file(s) deployed")
+            count, method = _deploy_directory(src, dst, env, audit_log)
+            ui.success(f"{item}/: {count} file(s) deployed via {method}")
+            results.append({"name": item, "status": "ok", "detail": f"{count} files via {method}"})
 
     # 4. Copy config files from repo
     config_src = os.path.join(repo_dir, "config")

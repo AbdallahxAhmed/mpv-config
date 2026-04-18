@@ -99,6 +99,7 @@ class AuditLog:
                 "platform_key": getattr(env, "platform_key", ""),
                 "config_dir": getattr(env, "config_dir", ""),
             },
+            "initial_package_state": getattr(env, "installed", {}).copy() if hasattr(env, "installed") else {},
             "packages": {},
             "files": [],
             "backups": [],
@@ -139,6 +140,7 @@ class AuditLog:
         action: str,
         status: str,
         detail: str = "",
+        error_context: Optional[Dict[str, Any]] = None,
     ):
         """
         Record the state and outcome for a system package.
@@ -155,14 +157,20 @@ class AuditLog:
             ``"ok"``, ``"failed"``, or ``"skipped"``.
         detail:
             Optional human-readable note.
+        error_context:
+            Optional dictionary with error details (type, traceback, env).
         """
-        self._require_session()["packages"][name] = {
+        entry: Dict[str, Any] = {
             "was_pre_existing": was_pre_existing,
             "action": action,
             "status": status,
             "detail": detail,
             "recorded_at": _now_iso(),
         }
+        if error_context:
+            entry["error_context"] = error_context
+            
+        self._require_session()["packages"][name] = entry
         self.save()
 
     def record_file(
@@ -172,6 +180,7 @@ class AuditLog:
         status: str,
         detail: str = "",
         backup_path: Optional[str] = None,
+        error_context: Optional[Dict[str, Any]] = None,
     ):
         """
         Record a file or directory operation.
@@ -181,13 +190,15 @@ class AuditLog:
         path:
             Absolute path of the affected file / directory.
         operation:
-            ``"copy"``, ``"modify"``, ``"delete"``, ``"backup"``, ``"create"``.
+            ``"copy"``, ``"modify"``, ``"delete"``, ``"backup"``, ``"create"``, ``"symlink"``.
         status:
             ``"ok"`` or ``"failed"``.
         detail:
             Optional note (e.g. number of files, error message).
         backup_path:
             If a backup copy was made, its path.
+        error_context:
+            Optional dictionary with error details (type, traceback, env).
         """
         entry: Dict[str, Any] = {
             "path": path,
@@ -198,6 +209,9 @@ class AuditLog:
         }
         if backup_path:
             entry["backup_path"] = backup_path
+        if error_context:
+            entry["error_context"] = error_context
+            
         self._require_session()["files"].append(entry)
         self.save()
 
@@ -254,3 +268,41 @@ class AuditLog:
     def sessions(self) -> List[Dict[str, Any]]:
         """Return a copy of all recorded sessions."""
         return list(self._data["sessions"])
+
+    def generate_diagnostic_report(self) -> str:
+        """
+        Iterate latest session, collect all entries where status == "failed",
+        group by category (packages/files), return formatted markdown string suitable for Rich rendering.
+        """
+        if not self._data.get("sessions"):
+            return "No sessions available."
+            
+        latest = self._data["sessions"][-1]
+        lines = []
+        
+        failed_pkgs = {k: v for k, v in latest.get("packages", {}).items() if v.get("status") == "failed"}
+        if failed_pkgs:
+            lines.append("[bold red]Failed Packages:[/bold red]")
+            for k, v in failed_pkgs.items():
+                err = v.get("error_context", {}).get("type", "")
+                err_str = f" ({err})" if err else ""
+                detail = v.get("detail", "")
+                lines.append(f"  • [yellow]{k}[/yellow]: {detail}{err_str}")
+                
+        failed_files = [f for f in latest.get("files", []) if f.get("status") == "failed"]
+        if failed_files:
+            if lines:
+                lines.append("")
+            lines.append("[bold red]Failed Files:[/bold red]")
+            for f in failed_files:
+                path = f.get("path", "")
+                op = f.get("operation", "")
+                err = f.get("error_context", {}).get("type", "")
+                err_str = f" ({err})" if err else ""
+                detail = f.get("detail", "")
+                lines.append(f"  • [yellow]{op}[/yellow] on {path}: {detail}{err_str}")
+                
+        if not lines:
+            return "[green]No failures in latest session.[/green]"
+            
+        return "\n".join(lines)

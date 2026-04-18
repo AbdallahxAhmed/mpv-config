@@ -395,34 +395,52 @@ def install_deps(env, dry_run=False, audit_log=None):
 
     # Install core
     for name in to_install:
-        ui.step(f"Installing {name}...")
-        dep_info = SYSTEM_DEPS.get(name, {})
-        ok = _install_one(name, dep_info, env)
-        if ok:
-            ui.success(f"{name}: installed successfully")
-            results.append({"name": name, "status": "ok", "detail": "freshly installed"})
+        try:
+            with ui.spinner(f"Installing {name}..."):
+                dep_info = SYSTEM_DEPS.get(name, {})
+                ok = _install_one(name, dep_info, env)
+            if ok:
+                ui.success(f"{name}: installed successfully")
+                results.append({"name": name, "status": "ok", "detail": "freshly installed"})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "ok", "freshly installed")
+            else:
+                ui.error(f"{name}: installation failed")
+                results.append({"name": name, "status": "failed", "detail": "install failed"})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "failed", "install failed")
+        except Exception as e:
+            ui.error(f"{name}: unexpected error: {e}")
+            results.append({"name": name, "status": "failed", "detail": str(e)})
             if audit_log:
-                audit_log.record_package(name, False, "install", "ok", "freshly installed")
-        else:
-            ui.error(f"{name}: installation failed")
-            results.append({"name": name, "status": "failed", "detail": "install failed"})
-            if audit_log:
-                audit_log.record_package(name, False, "install", "failed", "install failed")
+                audit_log.record_package(
+                    name, False, "install", "failed", str(e),
+                    error_context={"type": type(e).__name__, "traceback": str(e), "env": getattr(env, "platform_key", "")}
+                )
 
     # Install optional (don't fail the whole process)
     for name in optional_missing:
-        ui.step(f"Installing {name} (optional)...")
-        dep_info = SYSTEM_DEPS.get(name, {})
-        ok = _install_one(name, dep_info, env)
-        if ok:
-            ui.success(f"{name}: installed successfully")
-            results.append({"name": name, "status": "ok", "detail": "freshly installed"})
+        try:
+            with ui.spinner(f"Installing {name} (optional)..."):
+                dep_info = SYSTEM_DEPS.get(name, {})
+                ok = _install_one(name, dep_info, env)
+            if ok:
+                ui.success(f"{name}: installed successfully")
+                results.append({"name": name, "status": "ok", "detail": "freshly installed"})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "ok", "freshly installed (optional)")
+            else:
+                ui.warn(f"{name}: skipped (optional)")
+                results.append({"name": name, "status": "skipped", "detail": "optional, install failed"})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "skipped", "optional, install failed")
+        except Exception as e:
+            ui.warn(f"{name}: skipped (optional) due to error: {e}")
+            results.append({"name": name, "status": "skipped", "detail": str(e)})
             if audit_log:
-                audit_log.record_package(name, False, "install", "ok", "freshly installed (optional)")
-        else:
-            ui.warn(f"{name}: skipped (optional)")
-            results.append({"name": name, "status": "skipped", "detail": "optional, install failed"})
-            if audit_log:
-                audit_log.record_package(name, False, "install", "skipped", "optional, install failed")
+                audit_log.record_package(
+                    name, False, "install", "failed", str(e),
+                    error_context={"type": type(e).__name__, "traceback": str(e), "env": getattr(env, "platform_key", "")}
+                )
 
     return results

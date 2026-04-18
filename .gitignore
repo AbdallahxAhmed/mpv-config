@@ -18,3 +18,13 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# === Virtualenvs and builds ===
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# === IDEs ===
+.vscode/
+.idea/
