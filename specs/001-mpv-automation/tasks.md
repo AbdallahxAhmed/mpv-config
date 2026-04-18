@@ -19,9 +19,9 @@
 
 **Purpose**: Install Rich dependency and prepare the project for the UI migration
 
-- [ ] T001 Add `rich` to project requirements in `requirements.txt` (create file if absent)
-- [ ] T002 [P] Add `rich` install step to `install.sh` bootstrap script via `pip install rich`
-- [ ] T003 [P] Add `rich` install step to `install.ps1` bootstrap script via `pip install rich`
+- [x] T001 Add `rich` to project requirements in `requirements.txt` (create file if absent)
+- [x] T002 [P] Add `rich` install step to `install.sh` bootstrap script via `pip install rich`
+- [x] T003 [P] Add `rich` install step to `install.ps1` bootstrap script via `pip install rich`
 
 ---
 
@@ -31,22 +31,22 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T004 Add Rich import with try/except fallback at top of `deploy/ui.py` — set `_RICH_AVAILABLE` flag and create `_console = Console()` if Rich is available; preserve existing `C` class and ANSI functions as fallback
-- [ ] T005 Migrate `ui.banner()` in `deploy/ui.py` — replace raw `print()` ASCII art with `rich.panel.Panel` containing styled banner text; fallback to current ANSI implementation when `_RICH_AVAILABLE is False`
-- [ ] T006 Migrate `ui.header(text)` in `deploy/ui.py` — replace ANSI bold+underline with `rich.rule.Rule` or `rich.panel.Panel(title=text)`; preserve fallback
-- [ ] T007 Migrate `ui.step(text)` in `deploy/ui.py` — replace `print(f"{C.CYAN}>{C.RESET} {text}")` with `_console.print(f"[cyan]>[/cyan] {text}")` ; preserve fallback
-- [ ] T008 [P] Migrate `ui.success(text)` in `deploy/ui.py` — replace ANSI green checkmark with `_console.print(f"[green]  ✓[/green] {text}")`; preserve fallback
-- [ ] T009 [P] Migrate `ui.warn(text)` in `deploy/ui.py` — replace ANSI yellow warning with `_console.print(f"[yellow]  ![/yellow] {text}")`; preserve fallback
-- [ ] T010 [P] Migrate `ui.error(text)` in `deploy/ui.py` — replace ANSI red with `_console.print(Panel(text, title="Error", border_style="red"))`; preserve fallback
-- [ ] T011 [P] Migrate `ui.info(text)` in `deploy/ui.py` — replace ANSI dim with `_console.print(f"[dim]  ℹ[/dim] {text}")`; preserve fallback
-- [ ] T012 Migrate `ui.progress(current, total, label)` in `deploy/ui.py` — replace ANSI progress bar with `rich.progress.Progress` using `BarColumn`, `TaskProgressColumn`, and `TextColumn`; preserve fallback
-- [ ] T013 Migrate `ui.summary(results)` in `deploy/ui.py` — replace `print()` loop with `rich.table.Table` having columns `[Name, Status, Detail]` with color-coded status cells; preserve fallback
-- [ ] T014 Migrate `ui.confirm(question)` in `deploy/ui.py` — replace `input()` call with `rich.prompt.Confirm.ask(question)` returning bool; preserve `input()` fallback
-- [ ] T015 Add new `ui.spinner(text)` context manager in `deploy/ui.py` — wrap `rich.status.Status` returning a context manager; fallback is a no-op context manager that prints the text
-- [ ] T016 Add new `ui.table(title, columns, rows)` helper in `deploy/ui.py` — wrap `rich.table.Table(title=title)` adding columns and rows; fallback prints tab-separated plain text
-- [ ] T017 Add new `ui.panel(text, title, style)` helper in `deploy/ui.py` — wrap `rich.panel.Panel(text, title=title, border_style=style)`; fallback prints boxed text with ANSI
-- [ ] T018 Remove the `C` ANSI color class from public API of `deploy/ui.py` — internalize it as `_C` for fallback use only; update `planner.py` references to `ui.C.` to use new `ui.*` wrappers instead
-- [ ] T019 Verify all callers of `deploy/ui.py` still work — run `python -c "from deploy import ui; ui.banner(); ui.success('test'); ui.warn('test'); ui.error('test')"` from project root
+- [x] T004 Add Rich import with try/except fallback at top of `deploy/ui.py` — set `_RICH_AVAILABLE` flag and create `_console = Console()` if Rich is available; preserve existing `C` class and ANSI functions as fallback
+- [x] T005 Migrate `ui.banner()` in `deploy/ui.py` — replace raw `print()` ASCII art with `rich.panel.Panel` containing styled banner text; fallback to current ANSI implementation when `_RICH_AVAILABLE is False`
+- [x] T006 Migrate `ui.header(text)` in `deploy/ui.py` — replace ANSI bold+underline with `rich.rule.Rule` or `rich.panel.Panel(title=text)`; preserve fallback
+- [x] T007 Migrate `ui.step(text)` in `deploy/ui.py` — replace `print(f"{C.CYAN}>{C.RESET} {text}")` with `_console.print(f"[cyan]>[/cyan] {text}")` ; preserve fallback
+- [x] T008 [P] Migrate `ui.success(text)` in `deploy/ui.py` — replace ANSI green checkmark with `_console.print(f"[green]  ✓[/green] {text}")`; preserve fallback
+- [x] T009 [P] Migrate `ui.warn(text)` in `deploy/ui.py` — replace ANSI yellow warning with `_console.print(f"[yellow]  ![/yellow] {text}")`; preserve fallback
+- [x] T010 [P] Migrate `ui.error(text)` in `deploy/ui.py` — replace ANSI red with `_console.print(Panel(text, title="Error", border_style="red"))`; preserve fallback
+- [x] T011 [P] Migrate `ui.info(text)` in `deploy/ui.py` — replace ANSI dim with `_console.print(f"[dim]  ℹ[/dim] {text}")`; preserve fallback
+- [x] T012 Migrate `ui.progress(current, total, label)` in `deploy/ui.py` — replace ANSI progress bar with `rich.progress.Progress` using `BarColumn`, `TaskProgressColumn`, and `TextColumn`; preserve fallback
+- [x] T013 Migrate `ui.summary(results)` in `deploy/ui.py` — replace `print()` loop with `rich.table.Table` having columns `[Name, Status, Detail]` with color-coded status cells; preserve fallback
+- [x] T014 Migrate `ui.confirm(question)` in `deploy/ui.py` — replace `input()` call with `rich.prompt.Confirm.ask(question)` returning bool; preserve `input()` fallback
+- [x] T015 Add new `ui.spinner(text)` context manager in `deploy/ui.py` — wrap `rich.status.Status` returning a context manager; fallback is a no-op context manager that prints the text
+- [x] T016 Add new `ui.table(title, columns, rows)` helper in `deploy/ui.py` — wrap `rich.table.Table(title=title)` adding columns and rows; fallback prints tab-separated plain text
+- [x] T017 Add new `ui.panel(text, title, style)` helper in `deploy/ui.py` — wrap `rich.panel.Panel(text, title=title, border_style=style)`; fallback prints boxed text with ANSI
+- [x] T018 Remove the `C` ANSI color class from public API of `deploy/ui.py` — internalize it as `_C` for fallback use only; update `planner.py` references to `ui.C.` to use new `ui.*` wrappers instead
+- [x] T019 Verify all callers of `deploy/ui.py` still work — run `python -c "from deploy import ui; ui.banner(); ui.success('test'); ui.warn('test'); ui.error('test')"` from project root
 
 **Checkpoint**: Rich migration complete — all `deploy/*.py` modules produce Rich output with ANSI fallback. No public API signatures changed.
 
@@ -58,10 +58,10 @@
 
 **Independent Test**: Run `python -c "from deploy.detector import detect; env = detect(); print(vars(env))"` on each platform and verify all fields are populated with correct values
 
-- [ ] T020 [US3] Update `detector.py` detection output to use `ui.table()` — replace the `ui.success()` calls in `detect()` function with a single `ui.table("Detection Results", ["Property", "Value"], rows)` call at the end of detection in `deploy/detector.py`
-- [ ] T021 [US3] Add `ui.spinner("Detecting environment...")` wrapper around the detection phase in `deploy/detector.py` — wrap the main detection block with `with ui.spinner(...):`
-- [ ] T022 [US3] Add GPU detection fallback logging in `deploy/detector.py` — when `gpu_vendor` is empty, log `ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")` and ensure empty string (not None) is stored
-- [ ] T023 [US3] Validate `Environment` fields in `deploy/detector.py` — add a `_validate_env(env)` function at end of `detect()` that asserts: `os` is never empty (default `"linux"`), `config_dir` is absolute path, `installed` keys match `SYSTEM_DEPS` keys
+- [x] T020 [US3] Update `detector.py` detection output to use `ui.table()` — replace the `ui.success()` calls in `detect()` function with a single `ui.table("Detection Results", ["Property", "Value"], rows)` call at the end of detection in `deploy/detector.py`
+- [x] T021 [US3] Add `ui.spinner("Detecting environment...")` wrapper around the detection phase in `deploy/detector.py` — wrap the main detection block with `with ui.spinner(...):`
+- [x] T022 [US3] Add GPU detection fallback logging in `deploy/detector.py` — when `gpu_vendor` is empty, log `ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")` and ensure empty string (not None) is stored
+- [x] T023 [US3] Validate `Environment` fields in `deploy/detector.py` — add a `_validate_env(env)` function at end of `detect()` that asserts: `os` is never empty (default `"linux"`), `config_dir` is absolute path, `installed` keys match `SYSTEM_DEPS` keys
 
 **Checkpoint**: Detection works on Linux, outputs a Rich table, handles missing GPU gracefully
 

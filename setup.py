@@ -138,12 +138,12 @@ def cmd_install(args):
             if not args.dry_run:
                 failed = sum(1 for r in fetch_results if r["status"] == "failed")
                 if failed == 0:
-                    print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🎉 Deployment complete!{ui.C.RESET}")
-                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    print(f"\n  {ui._C.GREEN}{ui._C.BOLD}🎉 Deployment complete!{ui._C.RESET}")
+                    print(f"  {ui._C.DIM}Config dir: {env.config_dir}{ui._C.RESET}\n")
                     audit_log.complete_session("completed")
                 else:
-                    print(f"\n  {ui.C.YELLOW}⚠ Deployment finished with {failed} issue(s).{ui.C.RESET}")
-                    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+                    print(f"\n  {ui._C.YELLOW}⚠ Deployment finished with {failed} issue(s).{ui._C.RESET}")
+                    print(f"  {ui._C.DIM}Config dir: {env.config_dir}{ui._C.RESET}\n")
                     audit_log.complete_session("completed_with_errors")
         finally:
             # Clean up staging
@@ -204,7 +204,7 @@ def cmd_update(args):
         audit_log.record_file(lockfile_path, "modify", "ok", "version lockfile updated")
 
         ui.summary(fetch_results)
-        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}✨ Update complete!{ui.C.RESET}\n")
+        print(f"\n  {ui._C.GREEN}{ui._C.BOLD}✨ Update complete!{ui._C.RESET}\n")
         audit_log.complete_session("completed")
     except Exception:
         try:
@@ -260,8 +260,8 @@ def cmd_status(args):
         if pkg_safe:
             ui.info(f"Installed by this tool (safe to remove): {', '.join(pkg_safe)}")
 
-    print(f"\n  {ui.C.DIM}Lockfile: {lockfile_path}{ui.C.RESET}")
-    print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+    print(f"\n  {ui._C.DIM}Lockfile: {lockfile_path}{ui._C.RESET}")
+    print(f"  {ui._C.DIM}Config dir: {env.config_dir}{ui._C.RESET}\n")
 
 
 def cmd_rollback(args):
@@ -297,8 +297,8 @@ def cmd_rollback(args):
         ui.summary([result])
 
         if result["status"] == "ok":
-            print(f"\n  {ui.C.GREEN}{ui.C.BOLD}↩ Rollback complete!{ui.C.RESET}")
-            print(f"  {ui.C.DIM}Config dir: {env.config_dir}{ui.C.RESET}\n")
+            print(f"\n  {ui._C.GREEN}{ui._C.BOLD}↩ Rollback complete!{ui._C.RESET}")
+            print(f"  {ui._C.DIM}Config dir: {env.config_dir}{ui._C.RESET}\n")
             audit_log.complete_session("completed")
         else:
             audit_log.complete_session("completed")
@@ -467,7 +467,7 @@ def cmd_uninstall(args):
     all_results = remove_results + dep_results + cleanup_results
     ui.summary(all_results)
     if not args.dry_run:
-        print(f"\n  {ui.C.GREEN}{ui.C.BOLD}🧹 Uninstall completed.{ui.C.RESET}\n")
+        print(f"\n  {ui._C.GREEN}{ui._C.BOLD}🧹 Uninstall completed.{ui._C.RESET}\n")
         try:
             audit_log.complete_session("completed")
         except Exception:
@@ -530,12 +530,12 @@ def _interactive_menu(args):
         args.remove_install_dir = True
         # Inform the user why removing Python is risky before asking
         print(
-            f"\n  {ui.C.YELLOW}!{ui.C.RESET}  Removing Python packages is potentially risky:"
+            f"\n  {ui._C.YELLOW}!{ui._C.RESET}  Removing Python packages is potentially risky:"
             f" other tools on your system may depend on the same packages."
         )
         print(
-            f"  {ui.C.DIM}The audit log will be consulted —"
-            f" only packages installed by this tool will be removed.{ui.C.RESET}"
+            f"  {ui._C.DIM}The audit log will be consulted —"
+            f" only packages installed by this tool will be removed.{ui._C.RESET}"
         )
         args.remove_python = ui.confirm("  Also remove Python packages installed by this tool?")
     elif choice == "0":
@@ -598,7 +598,7 @@ def main():
         else:
             cmd_install(args)
     except KeyboardInterrupt:
-        print(f"\n\n  {ui.C.YELLOW}Interrupted by user.{ui.C.RESET}\n")
+        print(f"\n\n  {ui._C.YELLOW}Interrupted by user.{ui._C.RESET}\n")
         sys.exit(130)
     except Exception as e:
         ui.error(f"Fatal error: {e}")

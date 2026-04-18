@@ -88,6 +88,9 @@ Write-Host "[3/4] Ensuring build dependencies..." -ForegroundColor White
 Write-Host "  > Upgrading pip and pinning setuptools..." -ForegroundColor Gray
 & $python -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel 2>$null
 
+Write-Host "  > Installing CLI UI dependencies (rich)..." -ForegroundColor Gray
+& $python -m pip install --quiet "rich>=13.0.0" 2>$null
+
 # Check for Visual C++ Build Tools (needed for webrtcvad in ffsubsync)
 $hasVCTools = $false
 $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"

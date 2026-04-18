@@ -1,12 +1,14 @@
 """
 ui.py — Beautiful terminal output with colors and status indicators.
 
-Provides a consistent, clean interface for all user-facing messages
-without any external dependencies. Handles Windows cp1252 gracefully.
+Provides a consistent, clean interface for all user-facing messages.
+Uses Rich if available, falling back to basic ANSI otherwise.
+Handles Windows cp1252 gracefully.
 """
 
 import sys
 import os
+from contextlib import contextmanager
 
 # ─── Force UTF-8 on Windows ──────────────────────────────────────────
 
@@ -17,14 +19,27 @@ if sys.platform == "win32":
     except Exception:
         pass  # Fallback: ASCII symbols will be used
 
-# ─── ANSI Color Support Detection ─────────────────────────────────────
+# ─── Rich Integration ─────────────────────────────────────────────────
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.progress import Progress, BarColumn, TaskProgressColumn, TextColumn
+    from rich.prompt import Confirm
+    from rich.status import Status
+    from rich.rule import Rule
+    _RICH_AVAILABLE = True
+    _console = Console()
+except ImportError:
+    _RICH_AVAILABLE = False
+    _console = None
+
+# ─── ANSI Fallback Infrastructure ─────────────────────────────────────
 
 def _supports_color():
-    """Detect if the terminal supports ANSI colors."""
-    if os.getenv("NO_COLOR"):
-        return False
-    if os.getenv("FORCE_COLOR"):
-        return True
+    if os.getenv("NO_COLOR"): return False
+    if os.getenv("FORCE_COLOR"): return True
     if sys.platform == "win32":
         try:
             import ctypes
@@ -36,7 +51,6 @@ def _supports_color():
     return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
 
 def _supports_unicode():
-    """Check if stdout can handle unicode."""
     try:
         enc = getattr(sys.stdout, "encoding", "") or ""
         return enc.lower().replace("-", "") in ("utf8", "utf16", "utf32", "utf_8")
@@ -46,152 +60,219 @@ def _supports_unicode():
 USE_COLOR = _supports_color()
 USE_UNICODE = _supports_unicode()
 
-# ─── Symbols ──────────────────────────────────────────────────────────
-
 class S:
-    """Symbols with ASCII fallbacks."""
     if USE_UNICODE:
-        CHECK    = "✓"
-        CROSS    = "✗"
-        WARN     = "!"
-        ARROW    = ">"
-        INFO     = "i"
-        BULLET   = "*"
-        SKIP     = "o"
-        BLOCK    = "#"
-        LIGHT    = "."
-        STAR     = "*"
+        CHECK = "✓"; CROSS = "✗"; WARN = "!"; ARROW = ">"; INFO = "i"; BULLET = "*"; SKIP = "o"; BLOCK = "#"; LIGHT = "."
     else:
-        CHECK    = "+"
-        CROSS    = "x"
-        WARN     = "!"
-        ARROW    = ">"
-        INFO     = "i"
-        BULLET   = "*"
-        SKIP     = "o"
-        BLOCK    = "#"
-        LIGHT    = "."
-        STAR     = "*"
+        CHECK = "+"; CROSS = "x"; WARN = "!"; ARROW = ">"; INFO = "i"; BULLET = "*"; SKIP = "o"; BLOCK = "#"; LIGHT = "."
 
-# ─── Color Codes ──────────────────────────────────────────────────────
-
-class C:
-    """ANSI color codes, empty strings if unsupported."""
+class _C:
     if USE_COLOR:
-        RESET   = "\033[0m"
-        BOLD    = "\033[1m"
-        DIM     = "\033[2m"
-        RED     = "\033[91m"
-        GREEN   = "\033[92m"
-        YELLOW  = "\033[93m"
-        BLUE    = "\033[94m"
-        MAGENTA = "\033[95m"
-        CYAN    = "\033[96m"
-        WHITE   = "\033[97m"
-        GRAY    = "\033[90m"
+        RESET = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"; RED = "\033[91m"; GREEN = "\033[92m"; YELLOW = "\033[93m"
+        BLUE = "\033[94m"; MAGENTA = "\033[95m"; CYAN = "\033[96m"; WHITE = "\033[97m"; GRAY = "\033[90m"
     else:
-        RESET = BOLD = DIM = RED = GREEN = YELLOW = ""
-        BLUE = MAGENTA = CYAN = WHITE = GRAY = ""
-
-# ─── Safe Print ───────────────────────────────────────────────────────
+        RESET = BOLD = DIM = RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = GRAY = ""
 
 def _print(text, **kwargs):
-    """Print with encoding error handling."""
     try:
         print(text, **kwargs)
     except UnicodeEncodeError:
-        # Fallback: strip non-ASCII
         safe = text.encode("ascii", errors="replace").decode("ascii")
         print(safe, **kwargs)
 
-# ─── Output Functions ─────────────────────────────────────────────────
+# ─── Public API ───────────────────────────────────────────────────────
 
 def banner():
-    """Print the startup banner."""
-    _print(f"""
-{C.CYAN}{C.BOLD}+======================================================+
-|              MPV Auto-Deploy System v1.0             |
-+======================================================+{C.RESET}
-""")
+    if _RICH_AVAILABLE:
+        art = "[cyan][bold]+======================================================+\n|              MPV Auto-Deploy System v1.0             |\n+======================================================+[/bold][/cyan]"
+        _console.print(art)
+    else:
+        _print(f"\n{_C.CYAN}{_C.BOLD}+======================================================+\n|              MPV Auto-Deploy System v1.0             |\n+======================================================+{_C.RESET}\n")
 
 def header(text):
-    """Print a section header."""
-    _print(f"\n{C.BOLD}{C.BLUE}{'=' * 56}")
-    _print(f"  {text}")
-    _print(f"{'=' * 56}{C.RESET}\n")
+    if _RICH_AVAILABLE:
+        _console.print()
+        _console.print(Rule(f"[bold blue]{text}[/bold blue]", style="blue"))
+        _console.print()
+    else:
+        _print(f"\n{_C.BOLD}{_C.BLUE}{'=' * 56}")
+        _print(f"  {text}")
+        _print(f"{'=' * 56}{_C.RESET}\n")
 
 def step(text):
-    """Print a step indicator."""
-    _print(f"  {C.CYAN}{S.ARROW}{C.RESET} {text}")
+    if _RICH_AVAILABLE:
+        _console.print(f"[cyan]>[/cyan] {text}")
+    else:
+        _print(f"  {_C.CYAN}{S.ARROW}{_C.RESET} {text}")
 
 def success(text):
-    """Print a success message."""
-    _print(f"  {C.GREEN}{S.CHECK}{C.RESET} {text}")
+    if _RICH_AVAILABLE:
+        _console.print(f"[green]✓[/green] {text}")
+    else:
+        _print(f"  {_C.GREEN}{S.CHECK}{_C.RESET} {text}")
 
 def warn(text):
-    """Print a warning message."""
-    _print(f"  {C.YELLOW}{S.WARN}{C.RESET} {text}")
+    if _RICH_AVAILABLE:
+        _console.print(f"[yellow]![/yellow] {text}")
+    else:
+        _print(f"  {_C.YELLOW}{S.WARN}{_C.RESET} {text}")
 
 def error(text):
-    """Print an error message."""
-    _print(f"  {C.RED}{S.CROSS}{C.RESET} {text}")
+    if _RICH_AVAILABLE:
+        _console.print(Panel(text, title="Error", border_style="red"))
+    else:
+        _print(f"  {_C.RED}{S.CROSS}{_C.RESET} {text}")
 
 def info(text):
-    """Print an info message."""
-    _print(f"  {C.DIM}{S.INFO}{C.RESET} {text}")
+    if _RICH_AVAILABLE:
+        _console.print(f"[dim]ℹ[/dim] {text}")
+    else:
+        _print(f"  {_C.DIM}{S.INFO}{_C.RESET} {text}")
 
 def item(name, detail=""):
-    """Print a list item."""
-    if detail:
-        _print(f"    {C.WHITE}{S.BULLET}{C.RESET} {name} {C.DIM}({detail}){C.RESET}")
+    if _RICH_AVAILABLE:
+        if detail:
+            _console.print(f"  [white]*[/white] {name} [dim]({detail})[/dim]")
+        else:
+            _console.print(f"  [white]*[/white] {name}")
     else:
-        _print(f"    {C.WHITE}{S.BULLET}{C.RESET} {name}")
+        if detail:
+            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name} {_C.DIM}({detail}){_C.RESET}")
+        else:
+            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name}")
 
 def progress(current, total, name):
-    """Print a progress indicator."""
-    pct = int((current / total) * 100) if total > 0 else 0
-    bar_len = 20
-    filled = int(bar_len * current / total) if total > 0 else 0
-    bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
-    try:
-        print(f"\r  {C.CYAN}{bar}{C.RESET} {pct:3d}% {C.DIM}({current}/{total}){C.RESET} {name}    ", end="", flush=True)
-    except UnicodeEncodeError:
-        print(f"\r  {bar} {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
-    if current == total:
-        print()
+    if _RICH_AVAILABLE:
+        # Simple inline progress for backwards compatibility with single calls
+        pct = int((current / total) * 100) if total > 0 else 0
+        bar_len = 20
+        filled = int(bar_len * current / total) if total > 0 else 0
+        bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
+        print(f"\r  \033[96m{bar}\033[0m {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
+        if current == total:
+            print()
+    else:
+        pct = int((current / total) * 100) if total > 0 else 0
+        bar_len = 20
+        filled = int(bar_len * current / total) if total > 0 else 0
+        bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
+        try:
+            print(f"\r  {_C.CYAN}{bar}{_C.RESET} {pct:3d}% {_C.DIM}({current}/{total}){_C.RESET} {name}    ", end="", flush=True)
+        except UnicodeEncodeError:
+            print(f"\r  {bar} {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
+        if current == total:
+            print()
 
 def summary(results):
-    """Print a final summary table of results."""
-    _print(f"\n{C.BOLD}{'=' * 56}")
-    _print(f"  Summary")
-    _print(f"{'=' * 56}{C.RESET}")
+    if _RICH_AVAILABLE:
+        table = Table(title="Summary", box=None)
+        table.add_column("Status", justify="center")
+        table.add_column("Name")
+        table.add_column("Detail", style="dim")
+        
+        ok_count = skip_count = fail_count = 0
+        
+        for r in results:
+            if r["status"] == "ok":
+                icon = "[green]✓[/green]"
+                ok_count += 1
+            elif r["status"] == "skipped":
+                icon = "[yellow]o[/yellow]"
+                skip_count += 1
+            else:
+                icon = "[red]✗[/red]"
+                fail_count += 1
+            table.add_row(icon, r["name"], r.get("detail", ""))
+            
+        _console.print(table)
+        
+        msg = f"[green]{ok_count} succeeded[/green]"
+        if skip_count:
+            msg += f"  [yellow]{skip_count} skipped[/yellow]"
+        if fail_count:
+            msg += f"  [red]{fail_count} failed[/red]"
+        _console.print(msg)
+    else:
+        _print(f"\n{_C.BOLD}{'=' * 56}")
+        _print(f"  Summary")
+        _print(f"{'=' * 56}{_C.RESET}")
 
-    ok_count = sum(1 for r in results if r["status"] == "ok")
-    skip_count = sum(1 for r in results if r["status"] == "skipped")
-    fail_count = sum(1 for r in results if r["status"] == "failed")
+        ok_count = sum(1 for r in results if r["status"] == "ok")
+        skip_count = sum(1 for r in results if r["status"] == "skipped")
+        fail_count = sum(1 for r in results if r["status"] == "failed")
 
-    for r in results:
-        if r["status"] == "ok":
-            icon = f"{C.GREEN}{S.CHECK}{C.RESET}"
-        elif r["status"] == "skipped":
-            icon = f"{C.YELLOW}{S.SKIP}{C.RESET}"
-        else:
-            icon = f"{C.RED}{S.CROSS}{C.RESET}"
-        detail = f" {C.DIM}-- {r.get('detail', '')}{C.RESET}" if r.get("detail") else ""
-        _print(f"  {icon} {r['name']}{detail}")
+        for r in results:
+            if r["status"] == "ok":
+                icon = f"{_C.GREEN}{S.CHECK}{_C.RESET}"
+            elif r["status"] == "skipped":
+                icon = f"{_C.YELLOW}{S.SKIP}{_C.RESET}"
+            else:
+                icon = f"{_C.RED}{S.CROSS}{_C.RESET}"
+            detail = f" {_C.DIM}-- {r.get('detail', '')}{_C.RESET}" if r.get("detail") else ""
+            _print(f"  {icon} {r['name']}{detail}")
 
-    _print(f"\n  {C.GREEN}{ok_count} succeeded{C.RESET}", end="")
-    if skip_count:
-        _print(f"  {C.YELLOW}{skip_count} skipped{C.RESET}", end="")
-    if fail_count:
-        _print(f"  {C.RED}{fail_count} failed{C.RESET}", end="")
-    _print(f"\n{'=' * 56}\n")
+        _print(f"\n  {_C.GREEN}{ok_count} succeeded{_C.RESET}", end="")
+        if skip_count:
+            _print(f"  {_C.YELLOW}{skip_count} skipped{_C.RESET}", end="")
+        if fail_count:
+            _print(f"  {_C.RED}{fail_count} failed{_C.RESET}", end="")
+        _print(f"\n{'=' * 56}\n")
 
 def confirm(text):
-    """Ask for user confirmation. Returns True/False."""
-    try:
-        reply = input(f"  {C.YELLOW}?{C.RESET} {text} [Y/n] ").strip().lower()
-        return reply in ("", "y", "yes")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
+    if _RICH_AVAILABLE:
+        return Confirm.ask(f"[yellow]?[/yellow] {text}")
+    else:
+        try:
+            reply = input(f"  {_C.YELLOW}?{_C.RESET} {text} [Y/n] ").strip().lower()
+            return reply in ("", "y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+
+@contextmanager
+def spinner(text):
+    """Show a spinner during an operation."""
+    if _RICH_AVAILABLE:
+        with _console.status(text) as status:
+            yield status
+    else:
+        _print(f"  {_C.CYAN}{S.ARROW}{_C.RESET} {text} ...")
+        yield None
+
+def table(title, columns, rows):
+    """Render a table."""
+    if _RICH_AVAILABLE:
+        t = Table(title=title)
+        for col in columns:
+            t.add_column(col)
+        for row in rows:
+            t.add_row(*[str(x) for x in row])
+        _console.print(t)
+    else:
+        _print(f"\n{_C.BOLD}--- {title} ---{_C.RESET}")
+        header_str = " | ".join(columns)
+        _print(f"  {header_str}")
+        _print(f"  {'-' * len(header_str)}")
+        for row in rows:
+            _print("  " + " | ".join(str(x) for x in row))
+        _print()
+
+def panel(text, title=None, style=None):
+    """Render a panel."""
+    if _RICH_AVAILABLE:
+        _console.print(Panel(text, title=title, border_style=style))
+    else:
+        _print(f"\n{_C.BOLD}--- {title or 'Info'} ---{_C.RESET}")
+        _print(f"  {text}")
+        _print(f"{_C.BOLD}{'-' * (len(title or 'Info') + 8)}{_C.RESET}\n")
+
+def get_progress():
+    """Return a rich Progress object if available."""
+    if _RICH_AVAILABLE:
+        return Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=_console
+        )
+    return None

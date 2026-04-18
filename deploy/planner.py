@@ -255,13 +255,13 @@ _CATEGORY_LABELS: Dict[str, str] = {
 
 # (ANSI color, icon char, fixed-width label)
 _ACTION_STYLE: Dict[str, Tuple[str, str, str]] = {
-    "install": (ui.C.YELLOW, "+", "INSTALL"),
-    "remove":  (ui.C.RED,    "-", "REMOVE "),
-    "fetch":   (ui.C.CYAN,   "↓", "FETCH  "),
-    "deploy":  (ui.C.GREEN,  "→", "DEPLOY "),
-    "backup":  (ui.C.BLUE,   "⊙", "BACKUP "),
-    "create":  (ui.C.GREEN,  "+", "CREATE "),
-    "skip":    (ui.C.DIM,    "=", "SKIP   "),
+    "install": (ui._C.YELLOW, "+", "INSTALL"),
+    "remove":  (ui._C.RED,    "-", "REMOVE "),
+    "fetch":   (ui._C.CYAN,   "↓", "FETCH  "),
+    "deploy":  (ui._C.GREEN,  "→", "DEPLOY "),
+    "backup":  (ui._C.BLUE,   "⊙", "BACKUP "),
+    "create":  (ui._C.GREEN,  "+", "CREATE "),
+    "skip":    (ui._C.DIM,    "=", "SKIP   "),
 }
 
 
@@ -279,7 +279,7 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     Nothing is executed — this is purely informational output.
     """
     ui.header(title)
-    print(f"  {ui.C.DIM}The following actions will be performed:{ui.C.RESET}\n")
+    print(f"  {ui._C.DIM}The following actions will be performed:{ui._C.RESET}\n")
 
     # Collect categories in the order they first appear
     seen_cats: List[str] = []
@@ -297,20 +297,20 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     for cat in ordered:
         entries = categories[cat]
         label = _CATEGORY_LABELS.get(cat, cat.title())
-        print(f"  {ui.C.BOLD}{label}:{ui.C.RESET}")
+        print(f"  {ui._C.BOLD}{label}:{ui._C.RESET}")
         for entry in entries:
             color, icon, action_label = _ACTION_STYLE.get(
                 entry.action,
-                (ui.C.WHITE, "?", entry.action.upper()[:7].ljust(7)),
+                (ui._C.WHITE, "?", entry.action.upper()[:7].ljust(7)),
             )
             target = _short_path(entry.target)
             detail_str = (
-                f"  {ui.C.DIM}# {entry.detail}{ui.C.RESET}"
+                f"  {ui._C.DIM}# {entry.detail}{ui._C.RESET}"
                 if entry.detail else ""
             )
             print(
-                f"    {color}[{icon}]{ui.C.RESET} "
-                f"{ui.C.DIM}{action_label}{ui.C.RESET} "
+                f"    {color}[{icon}]{ui._C.RESET} "
+                f"{ui._C.DIM}{action_label}{ui._C.RESET} "
                 f"{target}{detail_str}"
             )
         print()
@@ -327,17 +327,17 @@ def confirm_plan(plan: List[PlanEntry], operation: str = "install") -> bool:
     skipped = len(plan) - len(active)
 
     print(
-        f"  {ui.C.BOLD}Summary:{ui.C.RESET} "
-        f"{ui.C.GREEN}{len(active)}{ui.C.RESET} action(s) pending"
-        + (f", {ui.C.DIM}{skipped} skipped{ui.C.RESET}" if skipped else "")
+        f"  {ui._C.BOLD}Summary:{ui._C.RESET} "
+        f"{ui._C.GREEN}{len(active)}{ui._C.RESET} action(s) pending"
+        + (f", {ui._C.DIM}{skipped} skipped{ui._C.RESET}" if skipped else "")
         + ".\n"
     )
 
     try:
         reply = input(
-            f"  {ui.C.YELLOW}?{ui.C.RESET}  "
+            f"  {ui._C.YELLOW}?{ui._C.RESET}  "
             f"Proceed with {operation}? "
-            f"{ui.C.BOLD}[Y/n]{ui.C.RESET} "
+            f"{ui._C.BOLD}[Y/n]{ui._C.RESET} "
         ).strip().lower()
         return reply in ("", "y", "yes")
     except (EOFError, KeyboardInterrupt):

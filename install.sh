@@ -113,6 +113,9 @@ fi
 echo "  → Ensuring compatible pip/setuptools..."
 $PYTHON -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel 2>/dev/null || true
 
+echo "  → Installing CLI UI dependencies (rich)..."
+$PYTHON -m pip install --quiet "rich>=13.0.0" 2>/dev/null || true
+
 # ─── Step 4: Run the deployer ─────────────────────────────────────
 echo ""
 echo "[4/4] Running MPV Auto-Deploy..."
