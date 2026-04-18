@@ -74,6 +74,8 @@ def _apply_zip_permissions(zip_info, dest_path):
     """Restore Unix permission bits from zip metadata when available."""
     if os.name == "nt":
         return
+    if zip_info.create_system != 3:  # 3 == Unix
+        return
     # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
     mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
     if mode:

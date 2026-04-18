@@ -39,7 +39,7 @@ LINUX_VISUAL_TUNING_BLOCK = (
     "sub-border-color=\"#000000\"\n"
     "sub-border-size=2\n"
     "sub-shadow-offset=1\n"
-    "sub-margin-y=36"
+    "sub-margin-y=36\n"
 )
 
 
