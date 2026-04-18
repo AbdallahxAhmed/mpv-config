@@ -255,7 +255,8 @@ def _patch_mpv_conf(
         else:
             gpu_context = ""
 
-    # Keep legacy vendor-specific Linux hwdec optimization in native mode only.
+    # Keep legacy vendor-specific Linux hwdec optimization in native mode.
+    # Also avoid copy-path overhead on Linux/NVIDIA in default profile.
     if selected_profile == "native":
         if env.gpu_vendor == "nvidia" and env.os == "linux":
             hwdec = "nvdec"
@@ -263,6 +264,9 @@ def _patch_mpv_conf(
             hwdec = "vaapi"
         elif env.gpu_vendor == "intel" and env.os == "linux":
             hwdec = "vaapi"
+    elif selected_profile == "windows-like":
+        if env.gpu_vendor == "nvidia" and env.os == "linux" and base_hwdec in {"auto", "auto-copy", "auto-safe"}:
+            hwdec = "nvdec"
 
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context
