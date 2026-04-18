@@ -24,6 +24,24 @@ from deploy.registry import (
     PLATFORM_REQUIRED_DEFAULTS,
 )
 
+LINUX_VISUAL_TUNING_BLOCK = (
+    "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
+    "osd-font=\"Tahoma\"\n"
+    "osd-font-size=50\n"
+    "osd-scale-by-window=yes\n"
+    "\n"
+    "# 2. إعدادات الترجمة (SRT) الديناميكية (مريحة للعين)\n"
+    "sub-font-provider=fontconfig\n"
+    "sub-font=\"Tahoma\"\n"
+    "sub-font-size=36\n"
+    "sub-scale-by-window=yes\n"
+    "sub-color=\"#FFFFFF\"\n"
+    "sub-border-color=\"#000000\"\n"
+    "sub-border-size=2\n"
+    "sub-shadow-offset=1\n"
+    "sub-margin-y=36\n"
+)
+
 
 # ─── Backup ────────────────────────────────────────────────────────────
 
@@ -206,6 +224,8 @@ def _patch_mpv_conf(
     resolved_defaults,
 ):
     """Patch mpv.conf.template with profile-aware + platform-required values."""
+    linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
+
     defaults = resolved_defaults
     required = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
 
@@ -219,6 +239,7 @@ def _patch_mpv_conf(
         "{{HWDEC}}": defaults.get("hwdec", "auto"),
         "{{VO}}": defaults.get("vo", "gpu-next"),
         "{{SHADER_SEP}}": shader_sep,
+        "{{LINUX_VISUAL_TUNING}}": linux_visual_tuning,
     }
 
     # GPU context: detect wayland vs x11 when profile requests automatic context.
@@ -234,7 +255,8 @@ def _patch_mpv_conf(
         else:
             gpu_context = ""
 
-    # Keep legacy vendor-specific Linux hwdec optimization in native mode only.
+    # Keep legacy vendor-specific Linux hwdec optimization in native mode.
+    # Also avoid copy-path overhead on Linux/NVIDIA in default profile.
     if selected_profile == "native":
         if env.gpu_vendor == "nvidia" and env.os == "linux":
             hwdec = "nvdec"
@@ -242,6 +264,9 @@ def _patch_mpv_conf(
             hwdec = "vaapi"
         elif env.gpu_vendor == "intel" and env.os == "linux":
             hwdec = "vaapi"
+    elif selected_profile == "windows-like":
+        if env.gpu_vendor == "nvidia" and env.os == "linux" and base_hwdec in {"auto", "auto-copy", "auto-safe"}:
+            hwdec = "nvdec"
 
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context

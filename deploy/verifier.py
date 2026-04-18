@@ -90,6 +90,14 @@ def verify(config_dir, env):
 
     ui.step("Checking scripts...")
     check_dir("uosc", "scripts/uosc", min_files=1)
+    # env.os is normalized by detector.py to "windows" | "linux" | "macos".
+    ziggy_by_os = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}
+    ziggy_name = ziggy_by_os.get(env.os)
+    if ziggy_name:
+        rel = f"scripts/uosc/bin/{ziggy_name}"
+        ziggy = os.path.join(config_dir, rel)
+        check(f"uosc {ziggy_name}", os.path.isfile(ziggy), rel)
+        check(f"uosc {ziggy_name} executable", os.access(ziggy, os.X_OK), "must be executable")
     check_file("thumbfast", "scripts/thumbfast.lua")
     check_file("SmartSkip", "scripts/SmartSkip.lua")
     check_file("sponsorblock", "scripts/sponsorblock.lua")

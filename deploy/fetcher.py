@@ -29,6 +29,8 @@ GITHUB_API = "https://api.github.com/repos/{repo}/releases"
 USER_AGENT = "mpv-auto-deploy/1.0"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
+ZIP_UNIX_MODE_SHIFT = 16
+ZIP_UNIX_MODE_MASK = 0o7777
 
 
 # ─── HTTP Helpers ──────────────────────────────────────────────────────
@@ -66,6 +68,21 @@ def _request(url, binary=False):
 def _ensure_dir(path):
     """Create directory and all parents if they don't exist."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
+
+
+def _apply_zip_permissions(zip_info, dest_path):
+    """Restore Unix permission bits from zip metadata when available."""
+    if os.name == "nt":
+        return
+    if zip_info.create_system != 3:  # 3 == Unix
+        return
+    # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
+    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
+    if mode:
+        try:
+            os.chmod(dest_path, mode)
+        except OSError as e:
+            ui.warn(f"Could not restore permissions on {dest_path}: {e}")
 
 
 # ─── Fetch: Raw Files ─────────────────────────────────────────────────
@@ -181,6 +198,7 @@ def fetch_release(entry, staging_dir, is_shader=False):
                     dest_path = os.path.join(dest_dir, basename)
                     with zf.open(zi) as src, open(dest_path, "wb") as dst:
                         dst.write(src.read())
+                    _apply_zip_permissions(zi, dest_path)
                     extracted_count += 1
         else:
             # Script mode: use install.map to route files
@@ -212,6 +230,7 @@ def fetch_release(entry, staging_dir, is_shader=False):
                             _ensure_dir(dest_path)
                             with zf.open(zi) as src, open(dest_path, "wb") as dst:
                                 dst.write(src.read())
+                            _apply_zip_permissions(zi, dest_path)
                             extracted_count += 1
                             break
                     else:
