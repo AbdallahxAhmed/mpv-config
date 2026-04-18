@@ -68,6 +68,18 @@ def _ensure_dir(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
 
+def _apply_zip_permissions(zip_info, dest_path):
+    """Restore Unix permission bits from zip metadata when available."""
+    if os.name == "nt":
+        return
+    mode = (zip_info.external_attr >> 16) & 0o777
+    if mode:
+        try:
+            os.chmod(dest_path, mode)
+        except OSError:
+            pass
+
+
 # ─── Fetch: Raw Files ─────────────────────────────────────────────────
 
 def fetch_raw(script_entry, staging_dir):
@@ -181,6 +193,7 @@ def fetch_release(entry, staging_dir, is_shader=False):
                     dest_path = os.path.join(dest_dir, basename)
                     with zf.open(zi) as src, open(dest_path, "wb") as dst:
                         dst.write(src.read())
+                    _apply_zip_permissions(zi, dest_path)
                     extracted_count += 1
         else:
             # Script mode: use install.map to route files
@@ -212,6 +225,7 @@ def fetch_release(entry, staging_dir, is_shader=False):
                             _ensure_dir(dest_path)
                             with zf.open(zi) as src, open(dest_path, "wb") as dst:
                                 dst.write(src.read())
+                            _apply_zip_permissions(zi, dest_path)
                             extracted_count += 1
                             break
                     else:
