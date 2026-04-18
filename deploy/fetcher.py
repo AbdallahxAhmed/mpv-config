@@ -29,6 +29,7 @@ GITHUB_API = "https://api.github.com/repos/{repo}/releases"
 USER_AGENT = "mpv-auto-deploy/1.0"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
+ZIP_UNIX_MODE_SHIFT = 16
 
 
 # ─── HTTP Helpers ──────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ def _apply_zip_permissions(zip_info, dest_path):
     if os.name == "nt":
         return
     # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
-    mode = (zip_info.external_attr >> 16) & 0o777
+    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & 0o777
     if mode:
         try:
             os.chmod(dest_path, mode)

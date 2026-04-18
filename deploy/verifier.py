@@ -90,6 +90,7 @@ def verify(config_dir, env):
 
     ui.step("Checking scripts...")
     check_dir("uosc", "scripts/uosc", min_files=1)
+    # env.os is normalized by detector.py to "windows" | "linux" | "macos".
     ziggy_by_os = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}
     ziggy_name = ziggy_by_os.get(env.os)
     if ziggy_name:
