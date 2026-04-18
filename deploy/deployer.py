@@ -24,6 +24,24 @@ from deploy.registry import (
     PLATFORM_REQUIRED_DEFAULTS,
 )
 
+LINUX_VISUAL_TUNING_BLOCK = (
+    "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
+    "osd-font=\"Tahoma\"\n"
+    "osd-font-size=50\n"
+    "osd-scale-by-window=yes\n"
+    "\n"
+    "# 2. إعدادات الترجمة (SRT) الديناميكية (مريحة للعين)\n"
+    "sub-font-provider=fontconfig\n"
+    "sub-font=\"Tahoma\"\n"
+    "sub-font-size=36\n"
+    "sub-scale-by-window=yes\n"
+    "sub-color=\"#FFFFFF\"\n"
+    "sub-border-color=\"#000000\"\n"
+    "sub-border-size=2\n"
+    "sub-shadow-offset=1\n"
+    "sub-margin-y=36"
+)
+
 
 # ─── Backup ────────────────────────────────────────────────────────────
 
@@ -206,25 +224,7 @@ def _patch_mpv_conf(
     resolved_defaults,
 ):
     """Patch mpv.conf.template with profile-aware + platform-required values."""
-    linux_visual_tuning = ""
-    if env.os == "linux":
-        linux_visual_tuning = (
-            "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
-            "osd-font=\"Tahoma\"\n"
-            "osd-font-size=50\n"
-            "osd-scale-by-window=yes\n"
-            "\n"
-            "# 2. إعدادات الترجمة (SRT) الديناميكية (مريحة للعين)\n"
-            "sub-font-provider=fontconfig\n"
-            "sub-font=\"Tahoma\"\n"
-            "sub-font-size=36\n"
-            "sub-scale-by-window=yes\n"
-            "sub-color=\"#FFFFFF\"\n"
-            "sub-border-color=\"#000000\"\n"
-            "sub-border-size=2\n"
-            "sub-shadow-offset=1\n"
-            "sub-margin-y=36"
-        )
+    linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
 
     defaults = resolved_defaults
     required = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})

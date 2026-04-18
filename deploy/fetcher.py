@@ -30,6 +30,7 @@ USER_AGENT = "mpv-auto-deploy/1.0"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
 ZIP_UNIX_MODE_SHIFT = 16
+ZIP_UNIX_MODE_MASK = 0o7777
 
 
 # ─── HTTP Helpers ──────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ def _apply_zip_permissions(zip_info, dest_path):
     if os.name == "nt":
         return
     # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
-    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & 0o7777
+    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
     if mode:
         try:
             os.chmod(dest_path, mode)
