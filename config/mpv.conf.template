@@ -43,6 +43,13 @@ ytdl-format = "bestvideo[height<=?1080]+bestaudio/best"
 gpu-shader-cache=yes
 gpu-shader-cache-dir="~~/shader_cache"
 
+# ─── Screenshot Settings ─────────────────────────────────────────
+screenshot-format=png
+screenshot-png-compression=0
+screenshot-high-bit-depth=yes
+screenshot-directory=~/Pictures/mpv-screenshots
+screenshot-template="%F_%P"
+
 # ==========================================
 # إعدادات واجهة البرنامج (OSD) والترجمة (SRT)
 # ==========================================
@@ -112,6 +119,30 @@ profile-restore=copy
 # --- الوضع الافتراضي للملفات التي لا ينطبق عليها الشرط ---
 [default]
 profile=live-action
+
+# ─── YouTube / Streaming Optimization ────────────────────────────
+[protocol.https]
+profile-desc="Optimized cache and format for YouTube/streaming"
+
+# Format: 1080p max, highest video bitrate, best audio (opus > aac)
+ytdl-format=bestvideo[height<=?1080][vcodec!~='vp0?9']+bestaudio[acodec=opus]/bestvideo[height<=?1080]+bestaudio/best
+
+# Aggressive read-ahead cache for fast seeking
+cache=yes
+demuxer-max-bytes=800M
+demuxer-max-back-bytes=200M
+demuxer-readahead-secs=300
+
+# Precise seeking for instant response
+hr-seek=yes
+hr-seek-framedrop=no
+
+# Disable interpolation for streaming (reduces decode overhead)
+interpolation=no
+video-sync=audio
+
+[protocol.http]
+profile=protocol.https
 
 #######################################################################################
 #                                   نهاية الإعدادات                                   #

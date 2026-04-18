@@ -19,9 +19,9 @@
 
 **Independent Test**: Press `h` → memo history opens. Press `B` → SponsorBlock upvote fires. Press `n` → autosubsync menu opens. No key fires two scripts.
 
-- [ ] T001 [P] [US1] Add conflict-free script keybinding section to `config/input.conf.template` — add `h script-binding memo-history`, `B script-binding sponsorblock_upvote`, `Shift+B script-binding sponsorblock_downvote`, `n script-binding autosubsync-menu`
-- [ ] T002 [P] [US1] Fix SmartSkip `n` conflict in `config/script-opts/SmartSkip.conf` — change `cancel_autoskip_countdown_keybind=["esc", "n"]` to `cancel_autoskip_countdown_keybind=["esc"]`
-- [ ] T003 [US1] Add keybinding quick-reference comment block at the top of `config/input.conf.template` — document all assigned keys grouped by category (Anime4K, Screenshots, Scripts, SmartSkip, SponsorBlock)
+- [x] T001 [P] [US1] Add conflict-free script keybinding section to `config/input.conf.template` — add `h script-binding memo-history`, `B script-binding sponsorblock_upvote`, `Shift+B script-binding sponsorblock_downvote`, `n script-binding autosubsync-menu`
+- [x] T002 [P] [US1] Fix SmartSkip `n` conflict in `config/script-opts/SmartSkip.conf` — change `cancel_autoskip_countdown_keybind=["esc", "n"]` to `cancel_autoskip_countdown_keybind=["esc"]`
+- [x] T003 [US1] Add keybinding quick-reference comment block at the top of `config/input.conf.template` — document all assigned keys grouped by category (Anime4K, Screenshots, Scripts, SmartSkip, SponsorBlock)
 
 **Checkpoint**: Deploy and press each key during playback — every key fires exactly one action, zero conflicts
 
@@ -33,7 +33,7 @@
 
 **Independent Test**: Press `F1` during playback → check `~/Pictures/mpv-screenshots/` for a PNG file named `VideoName_HH-MM-SS.mmm.png`
 
-- [ ] T004 [US2] Add screenshot settings block to `config/mpv.conf.template` — add `screenshot-format=png`, `screenshot-png-compression=0`, `screenshot-high-bit-depth=yes`, `screenshot-directory=~/Pictures/mpv-screenshots`, `screenshot-template="%F_%P"` after the shader cache section
+- [x] T004 [US2] Add screenshot settings block to `config/mpv.conf.template` — add `screenshot-format=png`, `screenshot-png-compression=0`, `screenshot-high-bit-depth=yes`, `screenshot-directory=~/Pictures/mpv-screenshots`, `screenshot-template="%F_%P"` after the shader cache section
 
 **Checkpoint**: Take a screenshot, verify it's lossless PNG in the correct directory with the correct filename format
 
@@ -45,8 +45,8 @@
 
 **Independent Test**: Open a YouTube URL, seek forward 30s → resumes within 2s. Seek backward → instant. Local files unaffected.
 
-- [ ] T005 [US3] Add `[protocol.https]` auto-profile to `config/mpv.conf.template` — add `ytdl-format`, `cache=yes`, `demuxer-max-bytes=800M`, `demuxer-max-back-bytes=200M`, `demuxer-readahead-secs=300`, `hr-seek=yes`, `hr-seek-framedrop=no`, `interpolation=no`, `video-sync=audio`
-- [ ] T006 [US3] Add `[protocol.http]` alias profile to `config/mpv.conf.template` — add `profile=protocol.https` so HTTP URLs also use the streaming profile
+- [x] T005 [US3] Add `[protocol.https]` auto-profile to `config/mpv.conf.template` — add `ytdl-format`, `cache=yes`, `demuxer-max-bytes=800M`, `demuxer-max-back-bytes=200M`, `demuxer-readahead-secs=300`, `hr-seek=yes`, `hr-seek-framedrop=no`, `interpolation=no`, `video-sync=audio`
+- [x] T006 [US3] Add `[protocol.http]` alias profile to `config/mpv.conf.template` — add `profile=protocol.https` so HTTP URLs also use the streaming profile
 
 **Checkpoint**: Play YouTube URL, verify fast seeking. Play local file, verify default cache settings apply (500M not 800M)
 
@@ -56,9 +56,9 @@
 
 **Purpose**: Final validation and commit
 
-- [ ] T007 Verify no regressions — run `python3 setup.py --verify` from project root to confirm all existing checks still pass
-- [ ] T008 Manual keybinding test — play a local video and press `h`, `B`, `Shift+B`, `n`, `g`, `G`, `>`, `<`, `F1`, `F2` to confirm each fires the correct action
-- [ ] T009 Commit all changes — `git add -A && git commit -m "feat: resolve keybinding conflicts, add lossless screenshots, optimize YouTube seeking (002-mpv-playback-keys)"`
+- [x] T007 Verify no regressions — run `python3 setup.py --verify` from project root to confirm all existing checks still pass
+- [x] T008 Manual keybinding test — play a local video and press `h`, `B`, `Shift+B`, `n`, `g`, `G`, `>`, `<`, `F1`, `F2` to confirm each fires the correct action
+- [x] T009 Commit all changes — `git add -A && git commit -m "feat: resolve keybinding conflicts, add lossless screenshots, optimize YouTube seeking (002-mpv-playback-keys)"`
 
 ---
 

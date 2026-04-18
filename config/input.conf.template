@@ -5,6 +5,52 @@
 #                                                                                     #
 #######################################################################################
 
+# ┌─────────────────────────────────────────────────────────────────┐
+# │                    MPV Keybinding Quick Reference                │
+# ├─────────────┬───────────────────────────────────────────────────┤
+# │             │  🎨 Anime4K Shaders (CTRL + number)              │
+# │ CTRL+1      │  Mode A (Sharp)                                  │
+# │ CTRL+2      │  Mode B (Soft)                                   │
+# │ CTRL+3      │  Mode C (Denoise)                                │
+# │ CTRL+4      │  Mode A+A (Ultra Sharp)                          │
+# │ CTRL+5      │  Mode B+B (Ultra Soft)                           │
+# │ CTRL+6      │  Mode C+A (Denoise + Sharp)                      │
+# │ CTRL+0      │  Clear all shaders                               │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  📸 Screenshots & Display (F-keys)               │
+# │ F1          │  Screenshot (video only, no subs)                │
+# │ F2          │  Screenshot (with subtitles)                     │
+# │ F3          │  Toggle deband filter                            │
+# │ F4          │  Toggle interpolation (motion smoothing)         │
+# │ F5          │  Cycle audio track                               │
+# │ F6          │  Cycle subtitle track                            │
+# │ F7          │  Show/hide subtitles                             │
+# │ F8          │  Night mode (normalize loud audio)               │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  📜 Scripts — Everyday (single letter)           │
+# │ h           │  History — open watch history (memo)             │
+# │ n           │  Subtitle syNc menu (autosubsync)                │
+# │ RIGHT       │  Fast-forward (evafast)                          │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  ⏭️  SmartSkip (>, <, ?, Ctrl/Shift/Alt+N)       │
+# │ >           │  Smart next (skip intro/outro/silence)           │
+# │ <           │  Smart previous                                  │
+# │ ?           │  Trigger silence skip                            │
+# │ Ctrl+.      │  Toggle autoskip on/off                          │
+# │ Alt+.       │  Toggle category autoskip                        │
+# │ Ctrl+RIGHT  │  Next chapter                                    │
+# │ Ctrl+LEFT   │  Previous chapter                                │
+# │ Shift+n     │  Add chapter at current position                 │
+# │ Alt+n       │  Remove current chapter                          │
+# │ Ctrl+n      │  Save chapters to file                           │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  🚫 SponsorBlock (B = Block)                     │
+# │ g           │  Mark segment start/end                          │
+# │ G           │  Submit segment to SponsorBlock API              │
+# │ B           │  Upvote segment (👍 = B for Block)               │
+# │ Shift+B     │  Downvote segment (👎)                           │
+# └─────────────┴───────────────────────────────────────────────────┘
+
 # **----- اختصارات تبديل مؤثرات Anime4K -----**
 
 # الوضع A
@@ -61,4 +107,14 @@ F8 cycle-values af "lavfi=[dynaudnorm=f=250:g=31:p=0.5]" ""
 #                                   نهاية الإعدادات                                   #
 #######################################################################################
 
-n script_binding autosubsync-menu
+# ─── Script Keybindings (conflict-free) ──────────────────────────
+
+# History (memo) — h = History
+h    script-binding memo-history
+
+# SponsorBlock voting — B = Block (moved from h/H to avoid memo conflict)  
+B    script-binding sponsorblock_upvote
+Shift+B  script-binding sponsorblock_downvote
+
+# Subtitle sync (autosubsync) — n = syNc
+n    script-binding autosubsync-menu
