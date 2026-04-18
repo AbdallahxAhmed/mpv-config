@@ -74,12 +74,12 @@ def _apply_zip_permissions(zip_info, dest_path):
     if os.name == "nt":
         return
     # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
-    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & 0o777
+    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & 0o7777
     if mode:
         try:
             os.chmod(dest_path, mode)
-        except OSError:
-            pass
+        except OSError as e:
+            ui.warn(f"Could not restore permissions on {dest_path}: {e}")
 
 
 # ─── Fetch: Raw Files ─────────────────────────────────────────────────
