@@ -154,17 +154,20 @@ SHADERS = {
 }
 
 SYSTEM_DEPS = {
+    # ── Category A — CLI executables ── NEVER pip ──────────────
     "mpv": {
         "windows": {"method": "winget", "id": "mpv-player.mpv"},
         "arch":    {"method": "pacman", "pkg": "mpv"},
         "ubuntu":  {"method": "apt",    "pkg": "mpv"},
+        "fedora":  {"method": "dnf",    "pkg": "mpv"},
         "macos":   {"method": "brew",   "pkg": "mpv"},
         "verify":  ["mpv", "--version"],
     },
     "yt-dlp": {
         "windows": {"method": "winget", "id": "yt-dlp.yt-dlp"},
         "arch":    {"method": "pacman", "pkg": "yt-dlp"},
-        "ubuntu":  {"method": "pip",    "pkg": "yt-dlp"},
+        "ubuntu":  {"method": "apt",    "pkg": "yt-dlp"},        # was pip
+        "fedora":  {"method": "dnf",    "pkg": "yt-dlp"},
         "macos":   {"method": "brew",   "pkg": "yt-dlp"},
         "verify":  ["yt-dlp", "--version"],
     },
@@ -172,6 +175,7 @@ SYSTEM_DEPS = {
         "windows": {"method": "winget", "id": "Gyan.FFmpeg"},
         "arch":    {"method": "pacman", "pkg": "ffmpeg"},
         "ubuntu":  {"method": "apt",    "pkg": "ffmpeg"},
+        "fedora":  {"method": "dnf",    "pkg": "ffmpeg"},
         "macos":   {"method": "brew",   "pkg": "ffmpeg"},
         "verify":  ["ffmpeg", "-version"],
     },
@@ -179,14 +183,18 @@ SYSTEM_DEPS = {
         "windows": {"method": "winget",  "id": "Python.Python.3.11"},
         "arch":    {"method": "pacman",  "pkg": "python"},
         "ubuntu":  {"method": "apt",     "pkg": "python3"},
+        "fedora":  {"method": "dnf",     "pkg": "python3"},
         "macos":   {"method": "brew",    "pkg": "python@3"},
         "verify":  ["python", "--version"],
         "verify_alt": ["python3", "--version"],
     },
     "ffsubsync": {
-        "all":    {"method": "pip", "pkg": "ffsubsync"},
-        "arch":   {"method": "pip", "pkg": "ffsubsync", "flags": ["--user", "--break-system-packages"]},
-        "verify": ["ffsubsync", "--version"],
+        "arch":    {"method": "aur", "pkg": "ffsubsync"},         # was pip+break-system-packages
+        "ubuntu":  {"method": "pipx", "pkg": "ffsubsync"},        # pipx used as fallback — no native package available
+        "fedora":  {"method": "pipx", "pkg": "ffsubsync"},
+        "macos":   {"method": "pipx", "pkg": "ffsubsync"},
+        "windows": {"method": "pipx", "pkg": "ffsubsync"},
+        "verify":  ["ffsubsync", "--version"],
     },
     "alass": {
         "arch":    {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},

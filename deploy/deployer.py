@@ -40,6 +40,11 @@ LINUX_VISUAL_TUNING_BLOCK = (
     "sub-border-size=2\n"
     "sub-shadow-offset=1\n"
     "sub-margin-y=36\n"
+    "\n"
+    "# 3. Window Sizing Helpers (Convenience)\n"
+    "geometry=50%x50%\n"
+    "autofit-larger=90%x90%\n"
+    "autofit-smaller=30%x30%\n"
 )
 
 

@@ -12,7 +12,12 @@
 # --- التوافق مع uosc (مهم جداً لمنع تداخل الواجهات) ---
 osc                 = no
 osd-bar             = no
-border              = no
+border              = yes
+
+# ── KDE Plasma fullscreen synchronization ────────────────────────
+# Prevents WM-level fullscreen (like dragging to top edge or KDE's fullscreen button)
+# from desyncing mpv's internal fs state and uosc's fullscreen icon.
+native-fs           = no
 
 # --- إعدادات التشغيل الأساسية ---
 fs                  = yes

@@ -193,9 +193,23 @@ elif command -v brew &>/dev/null; then
     xcode-select --install 2>/dev/null || true
 fi
 
-_gum_spin "Installing pip requirements..." $PYTHON -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel >/tmp/mpv-deploy-pip.log 2>&1 < /dev/null || true
-_gum_spin "Installing rich..." $PYTHON -m pip install --quiet "rich>=13.0.0" >>/tmp/mpv-deploy-pip.log 2>&1 < /dev/null || true
-_styled_echo "green" "  ✓ Python dependencies installed"
+# ── Step 3b: Install rich (Category B) ─────────────────────────
+# Try system package first, venv fallback handled by setup.py bootstrap
+if command -v pacman &>/dev/null; then
+    _gum_spin "Installing python-rich via pacman..." \
+        sudo pacman -S --noconfirm --needed python-rich 2>/dev/null || true
+elif command -v apt &>/dev/null; then
+    _gum_spin "Installing python3-rich via apt..." \
+        sudo apt install -y -qq python3-rich 2>/dev/null || true
+elif command -v brew &>/dev/null; then
+    _gum_spin "Installing rich via brew..." \
+        brew install python-rich 2>/dev/null || true
+fi
+
+# If the above failed, setup.py's bootstrap guard will handle venv fallback
+if ! $PYTHON -c "import rich" 2>/dev/null; then
+    _styled_echo "dim" "  → rich not available as system package; setup.py will bootstrap via venv"
+fi
 
 # ─── Step 4: Run the deployer ─────────────────────────────────────
 _styled_echo "white" ""

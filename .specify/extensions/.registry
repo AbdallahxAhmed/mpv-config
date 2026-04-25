@@ -14,10 +14,17 @@
           "speckit.git.remote",
           "speckit.git.initialize",
           "speckit.git.commit"
+        ],
+        "codex": [
+          "speckit.git.feature",
+          "speckit.git.validate",
+          "speckit.git.remote",
+          "speckit.git.initialize",
+          "speckit.git.commit"
         ]
       },
       "registered_skills": [],
-      "installed_at": "2026-04-18T07:37:56.807530+00:00"
+      "installed_at": "2026-04-25T06:30:22.704496+00:00"
     }
   }
 }

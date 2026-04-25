@@ -73,7 +73,7 @@ class _C:
     else:
         RESET = BOLD = DIM = RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = GRAY = ""
 
-def _print(text, **kwargs):
+def _print(text="", **kwargs):
     try:
         print(text, **kwargs)
     except UnicodeEncodeError:
@@ -99,69 +99,62 @@ def header(text):
         _print(f"  {text}")
         _print(f"{'=' * 56}{_C.RESET}\n")
 
-def step(text):
+def step(text, **kwargs):
     if _RICH_AVAILABLE:
-        _console.print(f"[cyan]>[/cyan] {text}")
+        _console.print(f"[cyan]>[/cyan] {text}", **kwargs)
     else:
-        _print(f"  {_C.CYAN}{S.ARROW}{_C.RESET} {text}")
+        _print(f"  {_C.CYAN}{S.ARROW}{_C.RESET} {text}", **kwargs)
 
-def success(text):
+def success(text, **kwargs):
     if _RICH_AVAILABLE:
-        _console.print(f"[green]✓[/green] {text}")
+        _console.print(f"[green]✓[/green] {text}", **kwargs)
     else:
-        _print(f"  {_C.GREEN}{S.CHECK}{_C.RESET} {text}")
+        _print(f"  {_C.GREEN}{S.CHECK}{_C.RESET} {text}", **kwargs)
 
-def warn(text):
+def warn(text, **kwargs):
     if _RICH_AVAILABLE:
-        _console.print(f"[yellow]![/yellow] {text}")
+        _console.print(f"[yellow]![/yellow] {text}", **kwargs)
     else:
-        _print(f"  {_C.YELLOW}{S.WARN}{_C.RESET} {text}")
+        _print(f"  {_C.YELLOW}{S.WARN}{_C.RESET} {text}", **kwargs)
 
-def error(text):
+def error(text, **kwargs):
     if _RICH_AVAILABLE:
-        _console.print(Panel(text, title="Error", border_style="red"))
+        _console.print(Panel(text, title="Error", border_style="red"), **kwargs)
     else:
-        _print(f"  {_C.RED}{S.CROSS}{_C.RESET} {text}")
+        _print(f"  {_C.RED}{S.CROSS}{_C.RESET} {text}", **kwargs)
 
-def info(text):
+def info(text, **kwargs):
     if _RICH_AVAILABLE:
-        _console.print(f"[dim]ℹ[/dim] {text}")
+        _console.print(f"[dim]ℹ[/dim] {text}", **kwargs)
     else:
-        _print(f"  {_C.DIM}{S.INFO}{_C.RESET} {text}")
+        _print(f"  {_C.DIM}{S.INFO}{_C.RESET} {text}", **kwargs)
 
-def item(name, detail=""):
+def item(name, detail="", **kwargs):
     if _RICH_AVAILABLE:
         if detail:
-            _console.print(f"  [white]*[/white] {name} [dim]({detail})[/dim]")
+            _console.print(f"  [white]*[/white] {name} [dim]({detail})[/dim]", **kwargs)
         else:
-            _console.print(f"  [white]*[/white] {name}")
+            _console.print(f"  [white]*[/white] {name}", **kwargs)
     else:
         if detail:
-            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name} {_C.DIM}({detail}){_C.RESET}")
+            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name} {_C.DIM}({detail}){_C.RESET}", **kwargs)
         else:
-            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name}")
+            _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name}", **kwargs)
 
 def progress(current, total, name):
+    pct = int((current / total) * 100) if total > 0 else 0
+    bar_len = 20
+    filled = int(bar_len * current / total) if total > 0 else 0
+    bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
+
     if _RICH_AVAILABLE:
         # Simple inline progress for backwards compatibility with single calls
-        pct = int((current / total) * 100) if total > 0 else 0
-        bar_len = 20
-        filled = int(bar_len * current / total) if total > 0 else 0
-        bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
-        print(f"\r  \033[96m{bar}\033[0m {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
-        if current == total:
-            print()
+        _print(f"\r  \033[96m{bar}\033[0m {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
     else:
-        pct = int((current / total) * 100) if total > 0 else 0
-        bar_len = 20
-        filled = int(bar_len * current / total) if total > 0 else 0
-        bar = f"{S.BLOCK * filled}{S.LIGHT * (bar_len - filled)}"
-        try:
-            print(f"\r  {_C.CYAN}{bar}{_C.RESET} {pct:3d}% {_C.DIM}({current}/{total}){_C.RESET} {name}    ", end="", flush=True)
-        except UnicodeEncodeError:
-            print(f"\r  {bar} {pct:3d}% ({current}/{total}) {name}    ", end="", flush=True)
-        if current == total:
-            print()
+        _print(f"\r  {_C.CYAN}{bar}{_C.RESET} {pct:3d}% {_C.DIM}({current}/{total}){_C.RESET} {name}    ", end="", flush=True)
+
+    if current == total:
+        _print()
 
 def summary(results):
     if _RICH_AVAILABLE:

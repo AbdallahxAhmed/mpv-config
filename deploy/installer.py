@@ -12,7 +12,6 @@ import sys
 from deploy import ui
 from deploy.registry import SYSTEM_DEPS
 
-FFSUBSYNC_SETUPTOOLS_PIN = "setuptools<74.0"
 
 
 def _run(cmd, check=True):
@@ -33,65 +32,22 @@ def _run(cmd, check=True):
         return False
 
 
-def _get_pip_args(env):
-    """
-    Return a list of command tokens for a working pip invocation.
+def _ensure_pipx(env):
+    """Ensure pipx is available, installing via OS package manager if missing."""
+    if shutil.which("pipx"):
+        return True
 
-    Resolution order:
-    1. env.pip_cmd (may already be "python3 -m pip" from detector fallback)
-    2. pip3 / pip standalone binaries
-    3. <python_cmd> -m pip
-    4. Install python-pip (Arch) / python3-pip (Ubuntu/Debian) and retry
-    Returns a list suitable for use as the start of a subprocess command,
-    e.g. ["pip3"] or ["python3", "-m", "pip"].
-    Returns None if pip cannot be made available.
-    """
-    # env.pip_cmd may already encode "python3 -m pip" from detector
-    if " " in env.pip_cmd:
-        # It was stored as a space-joined string – split it back
-        import shlex
-        parts = shlex.split(env.pip_cmd)
-        if shutil.which(parts[0]):
-            return parts
-    elif shutil.which(env.pip_cmd):
-        return [env.pip_cmd]
-
-    # Try common standalone commands
-    for cmd in ["pip3", "pip"]:
-        if shutil.which(cmd):
-            return [cmd]
-
-    # Try python -m pip
-    for py in [env.python_cmd, "python3", "python"]:
-        if shutil.which(py):
-            try:
-                r = subprocess.run(
-                    [py, "-m", "pip", "--version"],
-                    capture_output=True, timeout=10,
-                )
-                if r.returncode == 0:
-                    return [py, "-m", "pip"]
-            except Exception:
-                pass
-
-    # Last resort: install pip via the distro package manager
+    ui.step("pipx not found — attempting to install via OS package manager...")
     if env.os == "linux":
-        if env.distro == "arch":
-            ui.step("pip not found — installing python-pip via pacman...")
-            if _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-pip"], check=False):
-                for cmd in ["pip3", "pip"]:
-                    if shutil.which(cmd):
-                        return [cmd]
-                return [env.python_cmd, "-m", "pip"]
-        elif env.distro in ("ubuntu", "debian"):
-            ui.step("pip not found — installing python3-pip via apt...")
-            if _run(["sudo", "apt", "install", "-y", "python3-pip"], check=False):
-                for cmd in ["pip3", "pip"]:
-                    if shutil.which(cmd):
-                        return [cmd]
-                return [env.python_cmd, "-m", "pip"]
+        if env.distro in ("ubuntu", "debian", "mint", "pop"):
+            return _run(["sudo", "apt", "install", "-y", "pipx"])
+        elif env.distro == "fedora":
+            return _run(["sudo", "dnf", "install", "-y", "pipx"])
+    elif env.os == "macos":
+        return _run(["brew", "install", "pipx"])
 
-    return None
+    ui.warn("Could not automatically install pipx. Please install it manually.")
+    return False
 
 
 def _install_one(name, dep_info, env):
@@ -112,30 +68,19 @@ def _install_one(name, dep_info, env):
     elif method == "apt":
         return _run(["sudo", "apt", "install", "-y", info["pkg"]])
 
+    elif method == "dnf":
+        return _run(["sudo", "dnf", "install", "-y", info["pkg"]])
+
     elif method == "brew":
         return _run(["brew", "install", info["pkg"]])
 
     elif method == "winget":
         return _run(["winget", "install", "--id", info["id"], "-e", "--accept-package-agreements", "--accept-source-agreements"])
 
-    elif method == "pip":
-        # Special handling for ffsubsync: pin setuptools first
-        if name == "ffsubsync":
-            _prepare_ffsubsync_build(env)
-        pip_args = _get_pip_args(env)
-        if pip_args is None:
-            ui.error(f"pip is not available and could not be installed automatically.")
+    elif method == "pipx":
+        if not _ensure_pipx(env):
             return False
-        cmd = pip_args + ["install"]
-        if name == "ffsubsync":
-            # Keep ffsubsync and its runtime environment healthy (pkg_resources lives
-            # in setuptools and is still imported by webrtcvad in some setups).
-            cmd += ["--upgrade", info["pkg"], FFSUBSYNC_SETUPTOOLS_PIN]
-        else:
-            cmd += [info["pkg"]]
-        flags = info.get("flags", [])
-        cmd.extend(flags)
-        return _run(cmd)
+        return _run(["pipx", "install", info["pkg"]])
 
     elif method == "aur":
         if env.aur_helper:
@@ -160,48 +105,6 @@ def _install_one(name, dep_info, env):
         return False
 
 
-def _prepare_ffsubsync_build(env):
-    """
-    Prepare the build environment for ffsubsync.
-    ffsubsync depends on webrtcvad which needs C compilation.
-    Also, setuptools >= 74 breaks build — must pin to < 74.
-    """
-    ui.info("Preparing build environment for ffsubsync...")
-
-    # 1. Ensure pip is available
-    pip_args = _get_pip_args(env)
-    if pip_args is None:
-        ui.warn("pip is not available; skipping setuptools pin for ffsubsync")
-    else:
-        # Pin setuptools to a compatible version
-        ui.step("Pinning setuptools<74 (ffsubsync compatibility)...")
-        _run(pip_args + ["install", "--quiet", "pip>=23.0", FFSUBSYNC_SETUPTOOLS_PIN, "wheel"], check=False)
-
-    # 2. Install build dependencies on Linux
-    if env.os == "linux":
-        if env.distro in ("arch",):
-            ui.step("Installing build deps: base-devel python...")
-            _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", "base-devel", "python"], check=False)
-        elif env.distro in ("ubuntu", "debian"):
-            ui.step("Installing build deps: build-essential python3-dev...")
-            _run(["sudo", "apt", "install", "-y", "-qq", "build-essential", "python3-dev"], check=False)
-    elif env.os == "windows":
-        # Check for Visual C++ Build Tools
-        try:
-            import subprocess as sp
-            vswhere = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
-            r = sp.run([vswhere, "-latest", "-products", "*",
-                       "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                       "-property", "installationPath"],
-                      capture_output=True, text=True, timeout=10)
-            if r.returncode != 0 or not r.stdout.strip():
-                ui.warn("Visual C++ Build Tools not detected!")
-                ui.warn("ffsubsync may fail. Get them from:")
-                ui.warn("  https://visualstudio.microsoft.com/visual-cpp-build-tools/")
-        except Exception:
-            ui.warn("Could not check for Visual C++ Build Tools")
-
-
 def _uninstall_one(name, dep_info, env):
     """Uninstall a single dependency using the appropriate method."""
     platform = env.platform_key
@@ -220,12 +123,10 @@ def _uninstall_one(name, dep_info, env):
         return _run(["brew", "uninstall", info["pkg"]], check=False)
     elif method == "winget":
         return _run(["winget", "uninstall", "--id", info["id"], "-e"], check=False)
-    elif method == "pip":
-        pip_args = _get_pip_args(env)
-        if pip_args is None:
-            ui.error("pip is not available and could not be detected automatically.")
-            return False
-        return _run(pip_args + ["uninstall", "-y", info["pkg"]], check=False)
+    elif method == "dnf":
+        return _run(["sudo", "dnf", "remove", "-y", info["pkg"]], check=False)
+    elif method == "pipx":
+        return _run(["pipx", "uninstall", info["pkg"]], check=False)
     elif method == "aur":
         if env.aur_helper:
             return _run([env.aur_helper, "-Rns", "--noconfirm", info["pkg"]], check=False)

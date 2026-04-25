@@ -30,6 +30,95 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
+# ── Rich bootstrap guard ───────────────────────────────────────
+# Rich is needed by deploy.ui. If it is missing we must install it
+# BEFORE importing anything from deploy/.
+def _bootstrap_rich():
+    """Install rich via system package manager or isolated venv, then re-exec."""
+    import subprocess
+    import platform
+
+    # ── Try system package manager first ────────────────────────
+    if sys.platform != "win32":
+        try:
+            with open("/etc/os-release") as f:
+                os_release = f.read().lower()
+        except FileNotFoundError:
+            os_release = ""
+
+        if "arch" in os_release or "cachyos" in os_release or "endeavour" in os_release:
+            print("[bootstrap] Trying: sudo pacman -S --noconfirm python-rich")
+            rc = subprocess.call(
+                ["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-rich"]
+            )
+            if rc == 0:
+                # Verify import works after system install
+                try:
+                    import rich as _test  # noqa: F811
+                    return  # success — continue in this process
+                except ImportError:
+                    pass
+
+        elif any(d in os_release for d in ("ubuntu", "debian", "mint", "pop")):
+            print("[bootstrap] Trying: sudo apt install -y python3-rich")
+            rc = subprocess.call(["sudo", "apt", "install", "-y", "python3-rich"])
+            if rc == 0:
+                try:
+                    import rich as _test  # noqa: F811
+                    return
+                except ImportError:
+                    pass
+
+    # ── Venv fallback ───────────────────────────────────────────
+    venv_dir = os.path.expanduser("~/.local/share/mpv-config/venv")
+    venv_python = (
+        os.path.join(venv_dir, "Scripts", "python.exe")
+        if sys.platform == "win32"
+        else os.path.join(venv_dir, "bin", "python")
+    )
+    venv_pip = (
+        os.path.join(venv_dir, "Scripts", "pip.exe")
+        if sys.platform == "win32"
+        else os.path.join(venv_dir, "bin", "pip")
+    )
+
+    # Create or recreate venv if stale
+    needs_create = True
+    if os.path.isdir(venv_dir) and os.path.isfile(venv_python):
+        # Check if rich is already importable inside existing venv
+        r = subprocess.run(
+            [venv_python, "-c", "import rich"],
+            capture_output=True,
+        )
+        if r.returncode == 0:
+            # Rich available in venv — re-exec into it
+            print("[bootstrap] Rich found in existing venv. Re-executing...")
+            os.execv(venv_python, [venv_python] + sys.argv)
+        else:
+            # Venv exists but rich broken — recreate
+            import shutil
+            shutil.rmtree(venv_dir, ignore_errors=True)
+
+    if needs_create:
+        print(f"[bootstrap] Creating venv at {venv_dir} ...")
+        import venv as _venv_mod
+        _venv_mod.create(venv_dir, with_pip=True)
+
+    # pip install inside venv (ONLY place pip runs outside a venv is never)
+    print("[bootstrap] Installing rich inside venv ...")
+    subprocess.check_call([venv_pip, "install", "--quiet", "rich>=13.0.0"])
+
+    # Re-exec setup.py under the venv python
+    print("[bootstrap] Re-executing under venv python ...")
+    os.execv(venv_python, [venv_python] + sys.argv)
+
+
+try:
+    import rich  # noqa: F401
+except ImportError:
+    _bootstrap_rich()
+
+# ── Now safe to import deploy modules ───────────────────────────
 from deploy import ui
 from deploy.registry import SCRIPTS, SHADERS, MPV_EXPERIENCE_PROFILES, MPV_PROFILE_DEFAULT
 from deploy.detector import detect
