@@ -281,6 +281,11 @@ def _patch_mpv_conf(
     """Patch mpv.conf.template with profile-aware + platform-required values."""
     linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
 
+    # Platform-conditional: border=no on Windows (clean borderless), yes on Linux (KDE needs it)
+    border_value = "no" if env.os == "windows" else "yes"
+    # native-fs=no only on Linux (prevents KDE compositor desync); omitted on Windows
+    native_fs_value = "no" if env.os == "linux" else ""
+
     defaults = resolved_defaults
     required = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
 
@@ -295,6 +300,8 @@ def _patch_mpv_conf(
         "{{VO}}": defaults.get("vo", "gpu-next"),
         "{{SHADER_SEP}}": shader_sep,
         "{{LINUX_VISUAL_TUNING}}": linux_visual_tuning,
+        "{{BORDER}}": border_value,
+        "{{NATIVE_FS}}": native_fs_value,
     }
 
     # GPU context: detect wayland vs x11 when profile requests automatic context.
@@ -329,15 +336,17 @@ def _patch_mpv_conf(
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
 
-    # Handle conditional blocks: {{#if GPU_CONTEXT}}...{{/if}}
-    if not gpu_context:
-        content = re.sub(
-            r'\{\{#if GPU_CONTEXT\}\}.*?\{\{/if\}\}\n?',
-            '', content, flags=re.DOTALL
-        )
-    else:
-        content = content.replace("{{#if GPU_CONTEXT}}", "")
-        content = content.replace("{{/if}}", "")
+    # Handle conditional blocks: {{#if BLOCK}}...{{/if}}
+    for block_name, block_value in [("GPU_CONTEXT", gpu_context), ("NATIVE_FS", native_fs_value)]:
+        if not block_value:
+            content = re.sub(
+                r'\{\{#if ' + block_name + r'\}\}.*?\{\{/if\}\}\n?',
+                '', content, flags=re.DOTALL
+            )
+        else:
+            content = content.replace("{{#if " + block_name + "}}", "")
+            # Only remove the {{/if}} that follows this block
+            content = content.replace("{{/if}}", "", 1)
 
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(content)
