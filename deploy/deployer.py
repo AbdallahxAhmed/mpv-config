@@ -164,7 +164,19 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
         if os.path.isdir(config_dir):
             safety_backup = f"{config_dir}.pre-rollback.{timestamp}"
             ui.step(f"Saving current config → {safety_backup}")
-            shutil.move(config_dir, safety_backup)
+            shutil.copytree(config_dir, safety_backup, ignore=shutil.ignore_patterns(".git"))
+            # Remove old config with retry for Windows file locks
+            import time
+            for attempt in range(3):
+                try:
+                    shutil.rmtree(config_dir)
+                    break
+                except PermissionError:
+                    if attempt < 2:
+                        ui.warn(f"Files locked, retrying in 2s... (attempt {attempt + 1}/3)")
+                        time.sleep(2)
+                    else:
+                        raise
 
         shutil.move(temp_restore, config_dir)
         
