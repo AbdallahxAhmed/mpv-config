@@ -70,7 +70,7 @@ def backup_existing(config_dir, audit_log=None):
 
     ui.step(f"Backing up existing config → {backup_dir}")
     try:
-        shutil.copytree(config_dir, backup_dir, symlinks=False)
+        shutil.copytree(config_dir, backup_dir, symlinks=False, ignore=shutil.ignore_patterns(".git"))
         ui.success(f"Backup created: {backup_dir}")
         if audit_log:
             audit_log.record_backup(backup_dir)
@@ -159,7 +159,7 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
 
     try:
         ui.step(f"Preparing rollback from: {backup_source}")
-        shutil.copytree(backup_source, temp_restore)
+        shutil.copytree(backup_source, temp_restore, ignore=shutil.ignore_patterns(".git"))
 
         if os.path.isdir(config_dir):
             safety_backup = f"{config_dir}.pre-rollback.{timestamp}"

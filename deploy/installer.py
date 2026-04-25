@@ -1,13 +1,18 @@
 """
 installer.py — Install system dependencies.
 
-Handles package installation via winget, pacman, apt, brew, and pip
-based on the detected environment.
+Handles package installation via winget, pacman, apt, brew, dnf, pipx,
+and github_asset (direct GitHub release downloads) based on the
+detected environment.
 """
 
+import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 
 from deploy import ui
 from deploy.registry import SYSTEM_DEPS
@@ -50,6 +55,143 @@ def _ensure_pipx(env):
     return False
 
 
+def _ensure_7zip():
+    """Ensure 7-Zip is available, installing via winget if missing."""
+    if shutil.which("7z"):
+        return True
+    # Check common install paths
+    for path in [
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ]:
+        if os.path.isfile(path):
+            return True
+
+    ui.step("7-Zip not found — installing via winget...")
+    return _run([
+        "winget", "install", "--id", "7zip.7zip",
+        "-e", "--accept-package-agreements", "--accept-source-agreements",
+    ])
+
+
+def _find_7z():
+    """Return the path to 7z.exe."""
+    path = shutil.which("7z")
+    if path:
+        return path
+    for candidate in [
+        r"C:\Program Files\7-Zip\7z.exe",
+        r"C:\Program Files (x86)\7-Zip\7z.exe",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def _add_to_path(directory):
+    """Add a directory to the user's PATH on Windows (persistent)."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             f"$p = [Environment]::GetEnvironmentVariable('PATH','User');"
+             f"if ($p -notlike '*{directory}*') {{"
+             f"  [Environment]::SetEnvironmentVariable('PATH', $p + ';{directory}', 'User');"
+             f"  Write-Output 'added'"
+             f"}} else {{ Write-Output 'exists' }}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if "added" in result.stdout:
+            ui.success(f"Added {directory} to user PATH")
+            # Also update current process PATH so mpv is findable immediately
+            os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + directory
+        else:
+            ui.info(f"{directory} already in PATH")
+        return True
+    except Exception as e:
+        ui.warn(f"Could not update PATH: {e}")
+        return False
+
+
+def _install_github_asset(name, info, env):
+    """Download a GitHub release asset (.7z), extract, and add to PATH."""
+    repo = info["repo"]
+    install_dir = info.get("install_dir", r"C:\Program Files\mpv")
+    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+
+    # 1. Fetch latest release metadata
+    ui.step(f"Fetching latest release from {repo}...")
+    try:
+        req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            release = json.loads(resp.read())
+    except Exception as e:
+        ui.error(f"Failed to fetch release info: {e}")
+        return False
+
+    # 2. Select asset based on AVX2 support
+    if env.has_avx2:
+        pattern = re.compile(r"^mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z$")
+        label = "v3 (AVX2)"
+    else:
+        pattern = re.compile(r"^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$")
+        label = "x86_64"
+
+    asset = None
+    for a in release.get("assets", []):
+        if pattern.match(a["name"]):
+            asset = a
+            break
+
+    if not asset:
+        ui.error(f"No matching {label} asset found in {repo} release")
+        return False
+
+    download_url = asset["browser_download_url"]
+    asset_name = asset["name"]
+    asset_size_mb = asset.get("size", 0) / (1024 * 1024)
+
+    # 3. Ensure 7-Zip is available for extraction
+    if not _ensure_7zip():
+        ui.error("Cannot extract .7z archive without 7-Zip.")
+        return False
+
+    sevenz = _find_7z()
+    if not sevenz:
+        ui.error("7z.exe not found even after installation.")
+        return False
+
+    # 4. Download asset
+    os.makedirs(install_dir, exist_ok=True)
+    archive_path = os.path.join(install_dir, asset_name)
+
+    ui.step(f"Downloading {asset_name} ({label}, {asset_size_mb:.1f} MB)...")
+    try:
+        urllib.request.urlretrieve(download_url, archive_path)
+    except Exception as e:
+        ui.error(f"Download failed: {e}")
+        return False
+
+    # 5. Extract
+    ui.step(f"Extracting to {install_dir}...")
+    ok = _run([sevenz, "x", "-y", f"-o{install_dir}", archive_path])
+    if not ok:
+        ui.error("Extraction failed.")
+        return False
+
+    # Clean up archive
+    try:
+        os.remove(archive_path)
+    except OSError:
+        pass
+
+    # 6. Add to PATH
+    _add_to_path(install_dir)
+
+    ui.success(f"mpv {label} installed to {install_dir}")
+    return True
+
+
+
 def _install_one(name, dep_info, env):
     """Install a single dependency using the appropriate method."""
     platform = env.platform_key
@@ -76,6 +218,9 @@ def _install_one(name, dep_info, env):
 
     elif method == "winget":
         return _run(["winget", "install", "--id", info["id"], "-e", "--accept-package-agreements", "--accept-source-agreements"])
+
+    elif method == "github_asset":
+        return _install_github_asset(name, info, env)
 
     elif method == "pipx":
         if not _ensure_pipx(env):

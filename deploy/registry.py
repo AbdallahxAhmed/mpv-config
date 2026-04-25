@@ -156,7 +156,12 @@ SHADERS = {
 SYSTEM_DEPS = {
     # ── Category A — CLI executables ── NEVER pip ──────────────
     "mpv": {
-        "windows": {"method": "winget", "id": "mpv-player.mpv"},
+        "windows": {
+            "method": "github_asset",
+            "repo": "zhongfly/mpv-winbuild",
+            # Asset selection: v3 (AVX2) vs regular decided at install time
+            "install_dir": "C:\\Program Files\\mpv",
+        },
         "arch":    {"method": "pacman", "pkg": "mpv"},
         "ubuntu":  {"method": "apt",    "pkg": "mpv"},
         "fedora":  {"method": "dnf",    "pkg": "mpv"},

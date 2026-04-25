@@ -38,6 +38,7 @@ class Environment:
     python_cmd: str = "python"     # "python" | "python3"
     pip_cmd: str = "pip"           # "pip" | "pip3"
     has_git: bool = False
+    has_avx2: bool = False          # CPU supports AVX2 (x86_64-v3)
     installed: Dict[str, bool] = field(default_factory=dict)
 
 
@@ -136,6 +137,22 @@ def _detect_gpu():
             elif "intel" in out_lower:
                 return "intel"
     return ""
+
+
+def _detect_avx2():
+    """Detect AVX2 CPU support (enables x86_64-v3 optimized builds)."""
+    if sys.platform == "win32":
+        ok, out = _run_silent([
+            "powershell", "-NoProfile", "-Command",
+            "[System.Runtime.Intrinsics.X86.Avx2]::IsSupported"
+        ])
+        return ok and out.strip().lower() == "true"
+    else:
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                return "avx2" in f.read().lower()
+        except FileNotFoundError:
+            return False
 
 
 def _detect_pkg_manager(os_name, distro):
@@ -372,6 +389,11 @@ def detect():
         else:
             ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")
             env.gpu_vendor = ""
+
+        # AVX2
+        env.has_avx2 = _detect_avx2()
+        if env.has_avx2:
+            rows.append(["AVX2", "supported"])
 
         # Package manager
         env.pkg_manager = _detect_pkg_manager(env.os, env.distro)
