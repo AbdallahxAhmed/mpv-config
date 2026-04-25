@@ -165,11 +165,30 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
             safety_backup = f"{config_dir}.pre-rollback.{timestamp}"
             ui.step(f"Saving current config → {safety_backup}")
             shutil.copytree(config_dir, safety_backup, ignore=shutil.ignore_patterns(".git"))
-            # Remove old config with retry for Windows file locks
+            # Remove old config — skip .git, force-clear attributes on Windows
+            import stat
             import time
+
+            def _on_rm_error(func, path, exc_info):
+                """Clear read-only/hidden/system flags and retry."""
+                os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                func(path)
+
             for attempt in range(3):
                 try:
-                    shutil.rmtree(config_dir)
+                    # Remove everything except .git
+                    for item in os.listdir(config_dir):
+                        if item == ".git":
+                            continue
+                        item_path = os.path.join(config_dir, item)
+                        if os.path.isdir(item_path) and not os.path.islink(item_path):
+                            shutil.rmtree(item_path, onerror=_on_rm_error)
+                        else:
+                            try:
+                                os.remove(item_path)
+                            except PermissionError:
+                                os.chmod(item_path, stat.S_IWRITE)
+                                os.remove(item_path)
                     break
                 except PermissionError:
                     if attempt < 2:
@@ -178,7 +197,14 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                     else:
                         raise
 
-        shutil.move(temp_restore, config_dir)
+        # Move restored files into config_dir (which still exists with .git)
+        for item in os.listdir(temp_restore):
+            src = os.path.join(temp_restore, item)
+            dst = os.path.join(config_dir, item)
+            if os.path.exists(dst):
+                _remove_path(dst)
+            shutil.move(src, dst)
+        _remove_path(temp_restore)
         
         # Clean up any leftover symlinks pointing to 'deployed'
         try:
