@@ -110,8 +110,14 @@ def _detect_display():
 def _detect_gpu():
     """Detect the GPU vendor."""
     if sys.platform == "win32":
+        # Try wmic first (Windows 10), fallback to PowerShell (Windows 11)
         ok, out = _run_silent(["wmic", "path", "win32_VideoController", "get", "name"])
-        if ok:
+        if not ok or not out.strip():
+            ok, out = _run_silent([
+                "powershell", "-NoProfile", "-Command",
+                "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name"
+            ])
+        if ok and out:
             out_lower = out.lower()
             if "nvidia" in out_lower:
                 return "nvidia"
