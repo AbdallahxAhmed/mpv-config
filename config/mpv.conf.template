@@ -20,6 +20,9 @@ native-fs           = {{NATIVE_FS}}
 {{/if}}
 
 # --- إعدادات التشغيل الأساسية ---
+# Force correct display refresh rate — Windows measurement is unreliable.
+# deployer.py detects and injects the actual Hz value at install time.
+display-fps-override={{DISPLAY_FPS}}
 fs                  = yes
 keep-open           = yes
 force-window        = immediate
@@ -161,9 +164,11 @@ profile=protocol.https
 # KDE Plasma Wayland provides unstable presentation feedback,
 # causing mpv's estimated refresh rate to wander.
 [wayland-144hz-fix]
+# KDE Plasma Wayland provides unstable presentation feedback.
+# NOTE: Update 143.981 below to match your monitor's exact refresh rate.
 profile-desc="Fix unstable display-resample on KDE Wayland"
 profile-cond=os.getenv("WAYLAND_DISPLAY") ~= nil
-override-display-fps=143.981
+display-fps-override=143.981
 profile-restore=copy
 
 #######################################################################################

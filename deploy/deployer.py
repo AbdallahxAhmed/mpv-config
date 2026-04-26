@@ -264,6 +264,48 @@ def _resolve_mpv_profile(env, mpv_profile):
     return selected_profile, defaults
 
 
+def _detect_display_fps(env):
+    """Detect the actual display refresh rate to avoid hardcoded fallbacks."""
+    import subprocess
+    import re
+    try:
+        if env.os == "windows":
+            cmd = ["powershell", "-NoProfile", "-Command", "(Get-CimInstance -ClassName Win32_VideoController).CurrentRefreshRate"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+            if res.returncode == 0 and res.stdout.strip():
+                fps = int(res.stdout.strip())
+                if fps > 0:
+                    return str(fps)
+        elif env.os == "linux":
+            # Try xrandr first (works for X11 and XWayland wrappers)
+            try:
+                res = subprocess.run(["xrandr", "--current"], capture_output=True, text=True, timeout=2)
+                if res.returncode == 0:
+                    # Look for the current mode marked with '*' (e.g. "  1920x1080 (0x46) 144.000Hz *+")
+                    # Sometimes it's just "   60.00*+" or similar.
+                    # We'll just look for a number before an asterisk
+                    match = re.search(r'\b(\d+(?:\.\d+)?)(?:\s*\*|\*)', res.stdout)
+                    if match:
+                        return match.group(1)
+            except Exception:
+                pass
+            
+            # Fallback to kscreen-doctor for KDE Wayland natively
+            try:
+                res = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=2)
+                if res.returncode == 0:
+                    # Looks for something like "1920x1080@143" or "2560x1440@60"
+                    match = re.search(r'@(\d+(?:\.\d+)?)', res.stdout)
+                    if match:
+                        return match.group(1)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    
+    return None
+
+
 def _patch_mpv_conf(
     template_path,
     dest_path,
@@ -325,6 +367,15 @@ def _patch_mpv_conf(
 
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context
+
+    display_fps = _detect_display_fps(env)
+    if display_fps:
+        replacements["{{DISPLAY_FPS}}"] = display_fps
+    else:
+        import re
+        # If detection failed, remove the exact config line so it doesn't break mpv
+        content = re.sub(r'^.*display-fps-override=\{\{DISPLAY_FPS\}\}.*\n?', '', content, flags=re.MULTILINE)
+        replacements["{{DISPLAY_FPS}}"] = ""
 
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
