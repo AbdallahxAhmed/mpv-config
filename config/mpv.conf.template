@@ -76,12 +76,19 @@ dscale-antiring=0.6
 #######################################################################################
 
 # --- ملف تعريف للمحتوى الحقيقي (بدون مؤثرات Anime4K) ---
+# ── IMPORTANT: Adaptive Sync / VRR / G-Sync ──────────────────
+# If your display uses Variable Refresh Rate (FreeSync/G-Sync),
+# display-resample may CONFLICT with VRR. Consider using:
+#   video-sync=audio
+#   interpolation=no
+# The [protocol.https] streaming profile already uses this mode.
 [live-action]
 profile-desc="ملف تعريف للفيديو الحقيقي (بدون Anime4K)"
 deband=yes
 video-sync=display-resample
 interpolation=yes
-tscale=oversample
+tscale=linear
+video-timing-offset=0.01
 dither-depth=auto
 temporal-dither=yes
 dither=fruit
@@ -103,7 +110,8 @@ cscale=spline36
 deband=yes
 video-sync=display-resample
 interpolation=yes
-tscale=oversample
+tscale=linear
+video-timing-offset=0.01
 dither-depth=auto
 temporal-dither=yes
 dither=fruit
@@ -148,6 +156,15 @@ video-sync=audio
 
 [protocol.http]
 profile=protocol.https
+
+# ── Wayland Refresh Rate Stabilization ────────────────────────
+# KDE Plasma Wayland provides unstable presentation feedback,
+# causing mpv's estimated refresh rate to wander.
+[wayland-144hz-fix]
+profile-desc="Fix unstable display-resample on KDE Wayland"
+profile-cond=os.getenv("WAYLAND_DISPLAY") ~= nil
+override-display-fps=143.981
+profile-restore=copy
 
 #######################################################################################
 #                                   نهاية الإعدادات                                   #
