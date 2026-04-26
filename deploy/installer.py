@@ -22,10 +22,12 @@ from deploy.registry import SYSTEM_DEPS
 def _run(cmd, check=True):
     """Run a command, showing output. Returns success bool."""
     try:
-        subprocess.run(
+        result = subprocess.run(
             cmd, check=check, timeout=300,
             # Don't capture — let user see install progress
         )
+        if not check and result.returncode != 0:
+            return False
         return True
     except subprocess.CalledProcessError:
         return False
