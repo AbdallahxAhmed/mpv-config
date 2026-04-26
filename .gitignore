@@ -28,3 +28,4 @@ dist/
 # === IDEs ===
 .vscode/
 .idea/
+.agent/skills/brainstorming/scripts/node_modules/

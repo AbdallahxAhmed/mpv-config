@@ -214,7 +214,7 @@ MPV_EXPERIENCE_PROFILES = {
     # Cross-platform baseline intended to make behavior as consistent as possible.
     # Per-OS technical compatibility fallbacks are applied in deployer.py.
     "windows-like": {
-        "gpu_api": "d3d11",
+        "gpu_api": "vulkan",
         "hwdec": "auto-safe",
         # Empty means no explicit override; let mpv pick a suitable context.
         "gpu_context": "",
@@ -226,7 +226,7 @@ MPV_EXPERIENCE_PROFILES = {
 
 PLATFORM_NATIVE_MPV_DEFAULTS = {
     "windows": {
-        "gpu_api": "d3d11",
+        "gpu_api": "vulkan",
         "hwdec": "auto-safe",
         "gpu_context": "",
         "vo": "gpu-next",

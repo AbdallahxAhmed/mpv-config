@@ -261,13 +261,6 @@ def _resolve_mpv_profile(env, mpv_profile):
     else:
         defaults = dict(MPV_EXPERIENCE_PROFILES.get(selected_profile, fallback_profile))
 
-    # Technical compatibility fallbacks for unsupported values.
-    if defaults.get("gpu_api") == "d3d11":
-        if env.os == "linux":
-            defaults["gpu_api"] = "vulkan"
-        elif env.os == "macos":
-            defaults["gpu_api"] = "auto"
-
     return selected_profile, defaults
 
 
