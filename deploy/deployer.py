@@ -270,12 +270,23 @@ def _detect_display_fps(env):
     import re
     try:
         if env.os == "windows":
-            cmd = ["powershell", "-NoProfile", "-Command", "(Get-CimInstance -ClassName Win32_VideoController).CurrentRefreshRate"]
+            cmd = ["powershell", "-NoProfile", "-Command", "(Get-CimInstance -ClassName Win32_VideoController).CurrentRefreshRate / 1.0"]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
             if res.returncode == 0 and res.stdout.strip():
-                fps = int(res.stdout.strip())
-                if fps > 0:
-                    return str(fps)
+                try:
+                    fps_val = float(res.stdout.strip())
+                    if fps_val > 0:
+                        fps_int = int(round(fps_val))
+                        exact_map = {
+                            144: "143.981",
+                            120: "119.880",
+                            60:  "59.940",
+                            165: "164.999",
+                            240: "239.760"
+                        }
+                        return exact_map.get(fps_int, f"{fps_val:.3f}")
+                except ValueError:
+                    pass
         elif env.os == "linux":
             # Try xrandr first (works for X11 and XWayland wrappers)
             try:
