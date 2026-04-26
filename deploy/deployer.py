@@ -383,7 +383,6 @@ def _patch_mpv_conf(
     if display_fps:
         replacements["{{DISPLAY_FPS}}"] = display_fps
     else:
-        import re
         # If detection failed, remove the exact config line so it doesn't break mpv
         content = re.sub(r'^.*display-fps-override=\{\{DISPLAY_FPS\}\}.*\n?', '', content, flags=re.MULTILINE)
         replacements["{{DISPLAY_FPS}}"] = ""
