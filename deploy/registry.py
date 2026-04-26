@@ -194,7 +194,7 @@ SYSTEM_DEPS = {
         "verify_alt": ["python3", "--version"],
     },
     "ffsubsync": {
-        "arch":    {"method": "aur", "pkg": "ffsubsync"},         # was pip+break-system-packages
+        "arch":    {"method": "aur", "pkg": "python-ffsubsync", "fallback_pkg": "ffsubsync"},
         "ubuntu":  {"method": "pipx", "pkg": "ffsubsync"},        # pipx used as fallback — no native package available
         "fedora":  {"method": "pipx", "pkg": "ffsubsync"},
         "macos":   {"method": "pipx", "pkg": "ffsubsync"},
