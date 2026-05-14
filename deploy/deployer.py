@@ -22,6 +22,7 @@ from deploy.registry import (
     MPV_PROFILE_DEFAULT,
     PLATFORM_NATIVE_MPV_DEFAULTS,
     PLATFORM_REQUIRED_DEFAULTS,
+    SYSTEM_DEPS,
 )
 
 LINUX_VISUAL_TUNING_BLOCK = (
@@ -413,10 +414,51 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
     with open(template_path, "r", encoding="utf-8") as f:
         content = f.read()
 
+    def _pick_first_existing(candidates):
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        return None
+
     # For 'auto' values on Windows, try to find actual paths
     ffmpeg_path = defaults.get("ffmpeg_path", "ffmpeg")
     ffsubsync_path = defaults.get("ffsubsync_path", "ffsubsync")
     alass_path = defaults.get("alass_path", "alass")
+
+    if env.os == "windows":
+        ffmpeg_root = SYSTEM_DEPS.get("ffmpeg", {}).get("windows", {}).get("install_dir")
+        ffmpeg_bin_subdir = SYSTEM_DEPS.get("ffmpeg", {}).get("windows", {}).get("bin_subdir")
+        ffsubsync_bin_dir = SYSTEM_DEPS.get("ffsubsync", {}).get("windows", {}).get("bin_dir")
+        alass_dir = SYSTEM_DEPS.get("alass", {}).get("windows", {}).get("install_dir")
+
+        ffmpeg_candidates = []
+        if ffmpeg_root:
+            if ffmpeg_bin_subdir:
+                ffmpeg_candidates.append(os.path.join(ffmpeg_root, ffmpeg_bin_subdir, "ffmpeg.exe"))
+            ffmpeg_candidates.append(os.path.join(ffmpeg_root, "ffmpeg.exe"))
+            ffmpeg_candidates.append(os.path.join(ffmpeg_root, "bin", "ffmpeg.exe"))
+
+        ffsubsync_candidates = []
+        if ffsubsync_bin_dir:
+            ffsubsync_candidates.extend([
+                os.path.join(ffsubsync_bin_dir, "ffsubsync.exe"),
+                os.path.join(ffsubsync_bin_dir, "ffsubsync.cmd"),
+                os.path.join(ffsubsync_bin_dir, "ffsubsync"),
+            ])
+
+        alass_candidates = []
+        if alass_dir:
+            alass_candidates.extend([
+                os.path.join(alass_dir, "alass.exe"),
+                os.path.join(alass_dir, "alass-cli.exe"),
+            ])
+
+        if ffmpeg_path == "auto":
+            ffmpeg_path = _pick_first_existing(ffmpeg_candidates) or ffmpeg_path
+        if ffsubsync_path in ("auto", "ffsubsync"):
+            ffsubsync_path = _pick_first_existing(ffsubsync_candidates) or ffsubsync_path
+        if alass_path in ("auto", "alass", "alass-cli"):
+            alass_path = _pick_first_existing(alass_candidates) or alass_path
 
     if ffmpeg_path == "auto":
         ffmpeg_path = _find_binary("ffmpeg", env) or "ffmpeg"
@@ -427,6 +469,11 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
             alass_path = _find_binary("alass-cli", env) or _find_binary("alass", env) or "alass-cli"
         else:
             alass_path = _find_binary("alass", env) or _find_binary("alass-cli", env) or "alass"
+
+    if env.os == "windows":
+        ffmpeg_path = ffmpeg_path.replace("\\", "/")
+        ffsubsync_path = ffsubsync_path.replace("\\", "/")
+        alass_path = alass_path.replace("\\", "/")
 
     content = content.replace("{{FFMPEG_PATH}}", ffmpeg_path)
     content = content.replace("{{FFSUBSYNC_PATH}}", ffsubsync_path)

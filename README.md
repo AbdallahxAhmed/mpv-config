@@ -18,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/inst
 ## What It Does
 
 1. **Detects** your OS, GPU vendor, display server, and installed tools
-2. **Installs** missing dependencies (mpv, yt-dlp, ffmpeg, ffsubsync)
+2. **Installs** missing dependencies (mpv, yt-dlp, ffmpeg, python, uv, ffsubsync, alass)
 3. **Fetches** latest scripts & shaders directly from their GitHub repos
 4. **Patches** configs for your platform (GPU API, shader separators, paths)
 5. **Deploys** everything to your mpv config directory
@@ -126,8 +126,19 @@ Platform-required values are still kept per OS:
 
 - **Python 3.8+**
 - **Rich** (`pip install rich`) — installed automatically by bootstrap scripts
+- **uv** (Python tool manager) — installed automatically by setup.py/bootstraps
 - **Gum** (optional, installed automatically by `install.sh` for beautiful shell UI)
 - **Internet connection** (to fetch scripts from GitHub)
+
+Python tools such as **ffsubsync** are installed via `uv tool install` for consistent packaging.
+
+## Windows Dependency Layout
+
+On Windows, all managed binaries are installed under **`C:\Program Files\mpv`**:
+
+- **mpv**: v3 (AVX2) build when supported
+- **ffmpeg**: BtbN full win64 GPL build (includes `ffprobe` and `ffplay`)
+- **yt-dlp**, **uv**, **ffsubsync**, **alass**: installed into subfolders under the same mpv directory
 
 ## License
 

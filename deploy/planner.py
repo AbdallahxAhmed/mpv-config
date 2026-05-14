@@ -47,7 +47,7 @@ def build_install_plan(env: "Environment") -> List[PlanEntry]:
     plan: List[PlanEntry] = []
 
     # ── System packages ──────────────────────────────────────────────
-    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python"]
+    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python", "uv"]
     optional_deps = ["ffsubsync", "alass"]
 
     for name in core_deps + optional_deps:
@@ -222,7 +222,7 @@ def build_uninstall_plan(
 
     # ── System packages ──────────────────────────────────────────────
     if remove_deps:
-        managed_pkgs = ["mpv", "yt-dlp", "ffmpeg", "ffsubsync", "alass"]
+        managed_pkgs = ["mpv", "yt-dlp", "ffmpeg", "ffsubsync", "alass", "uv"]
         if remove_python:
             managed_pkgs.append("python")
 

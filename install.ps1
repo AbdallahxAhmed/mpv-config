@@ -85,6 +85,13 @@ if ($useGit) {
 Write-Host ""
 Write-Host "[3/4] Ensuring build dependencies..." -ForegroundColor White
 
+# Ensure uv (Python tool manager)
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    Write-Host "  + uv found" -ForegroundColor Green
+} else {
+    Write-Host "  i uv not found; setup.py will install it into the mpv folder." -ForegroundColor Yellow
+}
+
 Write-Host "  > Upgrading pip and pinning setuptools..." -ForegroundColor Gray
 & $python -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel 2>$null
 

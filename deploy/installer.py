@@ -12,7 +12,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
+import zipfile
 
 from deploy import ui
 from deploy.registry import SYSTEM_DEPS
@@ -87,6 +89,60 @@ def _find_7z():
     ]:
         if os.path.isfile(candidate):
             return candidate
+    return None
+
+
+def _fetch_latest_release(repo):
+    """Fetch GitHub latest release metadata."""
+    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def _select_release_asset(release, patterns):
+    """Select an asset matching the first regex pattern."""
+    assets = release.get("assets", [])
+    for pattern in patterns:
+        regex = re.compile(pattern, re.IGNORECASE)
+        for asset in assets:
+            name = asset.get("name", "")
+            if regex.match(name) or regex.search(name):
+                return asset
+    return None
+
+
+def _download_asset(url, dest_path):
+    """Download an asset to dest_path."""
+    urllib.request.urlretrieve(url, dest_path)
+
+
+def _extract_zip(archive_path, dest_dir):
+    """Extract a zip archive to dest_dir."""
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        zf.extractall(dest_dir)
+
+
+def _flatten_single_dir(dest_dir):
+    """Flatten single top-level directory if present."""
+    entries = [e for e in os.listdir(dest_dir)]
+    if len(entries) != 1:
+        return False
+    inner = os.path.join(dest_dir, entries[0])
+    if not os.path.isdir(inner):
+        return False
+    for item in os.listdir(inner):
+        shutil.move(os.path.join(inner, item), os.path.join(dest_dir, item))
+    shutil.rmtree(inner, ignore_errors=True)
+    return True
+
+
+def _find_bin_dir(root, expected_bins):
+    """Find the directory containing any of the expected binaries."""
+    for dirpath, _, filenames in os.walk(root):
+        for name in expected_bins:
+            if name in filenames:
+                return dirpath
     return None
 
 
@@ -186,6 +242,8 @@ def _install_github_asset(name, info, env):
     except OSError:
         pass
 
+    _flatten_single_dir(install_dir)
+
     # 6. Add to PATH
     _add_to_path(install_dir)
 
@@ -193,6 +251,260 @@ def _install_github_asset(name, info, env):
     return True
 
 
+def _install_github_release_zip(name, info, env):
+    """Download a GitHub release zip asset and extract to install_dir."""
+    repo = info.get("repo")
+    install_dir = info.get("install_dir")
+    patterns = info.get("asset_patterns") or []
+    if not repo or not install_dir or not patterns:
+        ui.error(f"{name}: missing repo/install_dir/asset_patterns for github_release_zip")
+        return False
+
+    ui.step(f"Fetching latest release from {repo}...")
+    try:
+        release = _fetch_latest_release(repo)
+    except Exception as e:
+        ui.error(f"Failed to fetch release info: {e}")
+        return False
+
+    asset = _select_release_asset(release, patterns)
+    if not asset:
+        ui.error(f"No matching asset found for {name} in {repo} release")
+        return False
+
+    download_url = asset["browser_download_url"]
+    asset_name = asset["name"]
+    asset_size_mb = asset.get("size", 0) / (1024 * 1024)
+
+    ui.step(f"Downloading {asset_name} ({asset_size_mb:.1f} MB)...")
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_path = os.path.join(tmpdir, asset_name)
+            _download_asset(download_url, archive_path)
+            if os.path.isdir(install_dir):
+                shutil.rmtree(install_dir)
+            os.makedirs(install_dir, exist_ok=True)
+            _extract_zip(archive_path, install_dir)
+    except Exception as e:
+        ui.error(f"Download or extraction failed: {e}")
+        return False
+
+    _flatten_single_dir(install_dir)
+
+    bin_dir = None
+    bin_subdir = info.get("bin_subdir")
+    if bin_subdir:
+        candidate = os.path.join(install_dir, bin_subdir)
+        if os.path.isdir(candidate):
+            bin_dir = candidate
+
+    expected_bins = info.get("expected_bins") or []
+    if not bin_dir and expected_bins:
+        bin_dir = _find_bin_dir(install_dir, expected_bins)
+
+    if env.os == "windows":
+        _add_to_path(bin_dir or install_dir)
+
+    ui.success(f"{name}: installed to {install_dir}")
+    return True
+
+
+def _install_github_release_file(name, info, env):
+    """Download a GitHub release asset file to install_dir."""
+    repo = info.get("repo")
+    install_dir = info.get("install_dir")
+    patterns = info.get("asset_patterns") or []
+    if not repo or not install_dir or not patterns:
+        ui.error(f"{name}: missing repo/install_dir/asset_patterns for github_release_file")
+        return False
+
+    ui.step(f"Fetching latest release from {repo}...")
+    try:
+        release = _fetch_latest_release(repo)
+    except Exception as e:
+        ui.error(f"Failed to fetch release info: {e}")
+        return False
+
+    asset = _select_release_asset(release, patterns)
+    if not asset:
+        ui.error(f"No matching asset found for {name} in {repo} release")
+        return False
+
+    dest_name = info.get("dest_name") or asset["name"]
+    os.makedirs(install_dir, exist_ok=True)
+    dest_path = os.path.join(install_dir, dest_name)
+
+    ui.step(f"Downloading {asset['name']}...")
+    try:
+        _download_asset(asset["browser_download_url"], dest_path)
+    except Exception as e:
+        ui.error(f"Download failed: {e}")
+        return False
+
+    if env.os != "windows":
+        os.chmod(dest_path, 0o755)
+    else:
+        _add_to_path(install_dir)
+
+    ui.success(f"{name}: installed to {dest_path}")
+    return True
+
+
+def _install_direct_url(name, info, env):
+    """Download a direct URL asset to install_dir."""
+    url = info.get("url")
+    install_dir = info.get("install_dir")
+    if not url or not install_dir:
+        ui.error(f"{name}: missing url/install_dir for direct_url")
+        return False
+
+    dest_name = info.get("dest_name") or os.path.basename(url)
+    os.makedirs(install_dir, exist_ok=True)
+    dest_path = os.path.join(install_dir, dest_name)
+
+    ui.step(f"Downloading {dest_name}...")
+    try:
+        _download_asset(url, dest_path)
+    except Exception as e:
+        ui.error(f"Download failed: {e}")
+        return False
+
+    if env.os != "windows":
+        os.chmod(dest_path, 0o755)
+    else:
+        _add_to_path(install_dir)
+
+    ui.success(f"{name}: installed to {dest_path}")
+    return True
+
+
+def _install_uv(name, info, env):
+    """Install uv with OS-specific fallbacks."""
+    if shutil.which("uv"):
+        return True
+
+    if env.os == "macos":
+        if shutil.which("brew") and _run(["brew", "install", "uv"]):
+            return True
+    elif env.os == "linux":
+        if env.distro == "arch":
+            if _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", "uv"]):
+                return True
+        elif env.distro in ("ubuntu", "debian", "mint", "pop"):
+            if _run(["sudo", "apt", "install", "-y", "uv"]):
+                return True
+        elif env.distro == "fedora":
+            if _run(["sudo", "dnf", "install", "-y", "uv"]):
+                return True
+
+    ui.step("Installing uv via official installer script...")
+    if env.os == "windows":
+        return _run(["powershell", "-NoProfile", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"])
+    ok = _run(["/bin/sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"])
+    if ok:
+        local_bin = os.path.expanduser("~/.local/bin")
+        if local_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = local_bin + os.pathsep + os.environ.get("PATH", "")
+    return ok
+
+
+def _uninstall_uv(info, env):
+    """Uninstall uv with OS-specific fallbacks."""
+    if env.os == "macos" and shutil.which("brew"):
+        return _run(["brew", "uninstall", "uv"], check=False)
+    if env.os == "linux":
+        if env.distro == "arch":
+            return _run(["sudo", "pacman", "-Rns", "--noconfirm", "uv"], check=False)
+        if env.distro in ("ubuntu", "debian", "mint", "pop"):
+            return _run(["sudo", "apt", "remove", "-y", "uv"], check=False)
+        if env.distro == "fedora":
+            return _run(["sudo", "dnf", "remove", "-y", "uv"], check=False)
+
+    if shutil.which("uv"):
+        return _run(["uv", "self", "uninstall"], check=False)
+
+    uv_bin = os.path.expanduser("~/.local/bin/uv")
+    if os.path.isfile(uv_bin):
+        try:
+            os.remove(uv_bin)
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def _install_uv_tool(info, env):
+    """Install a Python tool via uv tool install."""
+    pkg = info.get("pkg")
+    if not pkg:
+        ui.error("uv_tool missing pkg")
+        return False
+
+    if not shutil.which("uv"):
+        uv_info = SYSTEM_DEPS.get("uv", {}).get(env.platform_key, {})
+        uv_method = uv_info.get("method")
+        if uv_method == "github_release_zip":
+            ok = _install_github_release_zip("uv", uv_info, env)
+        elif uv_method == "github_release_file":
+            ok = _install_github_release_file("uv", uv_info, env)
+        elif uv_method == "direct_url":
+            ok = _install_direct_url("uv", uv_info, env)
+        else:
+            ok = _install_uv("uv", uv_info, env)
+        if not ok:
+            ui.warn("uv not available; falling back to pipx if possible")
+            if not _ensure_pipx(env):
+                return False
+            return _run(["pipx", "install", pkg])
+
+    bin_dir = info.get("bin_dir")
+    if not bin_dir and env.os != "windows":
+        bin_dir = os.path.expanduser("~/.local/bin")
+    if bin_dir:
+        os.makedirs(bin_dir, exist_ok=True)
+
+    cmd = ["uv", "tool", "install", pkg]
+    if bin_dir:
+        cmd += ["--bin-dir", bin_dir]
+    ok = _run(cmd)
+    if not ok:
+        ui.warn("uv tool install failed; trying pipx fallback")
+        if not _ensure_pipx(env):
+            return False
+        ok = _run(["pipx", "install", pkg])
+
+    if ok and bin_dir:
+        if env.os == "windows":
+            _add_to_path(bin_dir)
+        else:
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+    return ok
+
+
+def _uninstall_uv_tool(info, env):
+    """Uninstall a Python tool installed via uv tool."""
+    pkg = info.get("pkg")
+    if not pkg:
+        return False
+
+    ok = False
+    if shutil.which("uv"):
+        ok = _run(["uv", "tool", "uninstall", pkg], check=False)
+    if not ok and shutil.which("pipx"):
+        ok = _run(["pipx", "uninstall", pkg], check=False)
+
+    bin_dir = info.get("bin_dir")
+    bin_names = info.get("bin_names") or []
+    if bin_dir and bin_names:
+        for name in bin_names:
+            path = os.path.join(bin_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    return ok
 
 def _install_one(name, dep_info, env):
     """Install a single dependency using the appropriate method."""
@@ -224,10 +536,25 @@ def _install_one(name, dep_info, env):
     elif method == "github_asset":
         return _install_github_asset(name, info, env)
 
+    elif method == "github_release_zip":
+        return _install_github_release_zip(name, info, env)
+
+    elif method == "github_release_file":
+        return _install_github_release_file(name, info, env)
+
+    elif method == "direct_url":
+        return _install_direct_url(name, info, env)
+
     elif method == "pipx":
         if not _ensure_pipx(env):
             return False
         return _run(["pipx", "install", info["pkg"]])
+
+    elif method == "uv":
+        return _install_uv(name, info, env)
+
+    elif method == "uv_tool":
+        return _install_uv_tool(info, env)
 
     elif method == "aur":
         if env.aur_helper:
@@ -274,10 +601,38 @@ def _uninstall_one(name, dep_info, env):
         return _run(["sudo", "dnf", "remove", "-y", info["pkg"]], check=False)
     elif method == "pipx":
         return _run(["pipx", "uninstall", info["pkg"]], check=False)
+    elif method == "uv":
+        return _uninstall_uv(info, env)
+    elif method == "uv_tool":
+        return _uninstall_uv_tool(info, env)
     elif method == "aur":
         if env.aur_helper:
             return _run([env.aur_helper, "-Rns", "--noconfirm", info["pkg"]], check=False)
         ui.warn(f"{name} was installed from AUR; no AUR helper found for auto-uninstall.")
+        return False
+    elif method == "github_release_zip":
+        install_dir = info.get("install_dir")
+        if install_dir and os.path.isdir(install_dir):
+            shutil.rmtree(install_dir, ignore_errors=True)
+            return True
+        return False
+    elif method == "github_release_file":
+        install_dir = info.get("install_dir")
+        dest_name = info.get("dest_name")
+        if install_dir and dest_name:
+            path = os.path.join(install_dir, dest_name)
+            if os.path.isfile(path):
+                os.remove(path)
+                return True
+        return False
+    elif method == "direct_url":
+        install_dir = info.get("install_dir")
+        dest_name = info.get("dest_name") or os.path.basename(info.get("url", ""))
+        if install_dir and dest_name:
+            path = os.path.join(install_dir, dest_name)
+            if os.path.isfile(path):
+                os.remove(path)
+                return True
         return False
     elif method == "manual":
         url = info.get("url", "")
@@ -315,7 +670,7 @@ def uninstall_deps(env, remove_python=False, dry_run=False, pre_existing_pkgs=No
         ui.warn("Only packages installed by this tool can be auto-removed.")
         pre_existing_pkgs = {}
 
-    managed = ["mpv", "yt-dlp", "ffmpeg", "ffsubsync", "alass"]
+    managed = ["mpv", "yt-dlp", "ffmpeg", "ffsubsync", "alass", "uv"]
     if remove_python:
         managed.append("python")
 
@@ -378,7 +733,7 @@ def install_deps(env, dry_run=False, audit_log=None):
 
     # Determine what's needed
     # Core deps always, optional deps we just warn about
-    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python"]
+    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python", "uv"]
     optional_deps = ["ffsubsync", "alass"]
 
     to_install = []

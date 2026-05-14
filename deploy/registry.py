@@ -5,6 +5,14 @@ Maps every third-party script/shader to its upstream GitHub source,
 fetch strategy, file layout, and dependency chain.
 """
 
+WINDOWS_MPV_DIR = r"C:\Program Files\mpv"
+WINDOWS_FFMPEG_DIR = r"C:\Program Files\mpv\ffmpeg"
+WINDOWS_YTDLP_DIR = r"C:\Program Files\mpv\yt-dlp"
+WINDOWS_UV_DIR = r"C:\Program Files\mpv\uv"
+WINDOWS_FFSUBSYNC_DIR = r"C:\Program Files\mpv\ffsubsync"
+WINDOWS_ALASS_DIR = r"C:\Program Files\mpv\alass"
+WINDOWS_FFMPEG_BIN_DIR = WINDOWS_FFMPEG_DIR + r"\bin"
+
 SCRIPTS = [
     {
         "name": "uosc",
@@ -160,7 +168,9 @@ SYSTEM_DEPS = {
             "method": "github_asset",
             "repo": "zhongfly/mpv-winbuild",
             # Asset selection: v3 (AVX2) vs regular decided at install time
-            "install_dir": "C:\\Program Files\\mpv",
+            "install_dir": WINDOWS_MPV_DIR,
+            "ensure_in_dir": WINDOWS_MPV_DIR,
+            "bin_names": ["mpv.exe"],
         },
         "arch":    {"method": "pacman", "pkg": "mpv"},
         "ubuntu":  {"method": "apt",    "pkg": "mpv"},
@@ -169,7 +179,14 @@ SYSTEM_DEPS = {
         "verify":  ["mpv", "--version"],
     },
     "yt-dlp": {
-        "windows": {"method": "winget", "id": "yt-dlp.yt-dlp"},
+        "windows": {
+            "method": "direct_url",
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
+            "install_dir": WINDOWS_YTDLP_DIR,
+            "dest_name": "yt-dlp.exe",
+            "ensure_in_dir": WINDOWS_YTDLP_DIR,
+            "bin_names": ["yt-dlp.exe"],
+        },
         "arch":    {"method": "pacman", "pkg": "yt-dlp"},
         "ubuntu":  {"method": "apt",    "pkg": "yt-dlp"},        # was pip
         "fedora":  {"method": "dnf",    "pkg": "yt-dlp"},
@@ -177,7 +194,21 @@ SYSTEM_DEPS = {
         "verify":  ["yt-dlp", "--version"],
     },
     "ffmpeg": {
-        "windows": {"method": "winget", "id": "Gyan.FFmpeg"},
+        "windows": {
+            "method": "github_release_zip",
+            "repo": "BtbN/FFmpeg-Builds",
+            "asset_patterns": [
+                r"^ffmpeg-master-latest-win64-gpl\.zip$",
+                r"^ffmpeg-master-latest-win64-gpl-shared\.zip$",
+                r"^ffmpeg-.*-win64-gpl\.zip$",
+                r"^ffmpeg-.*-win64-gpl-shared\.zip$",
+            ],
+            "install_dir": WINDOWS_FFMPEG_DIR,
+            "bin_subdir": "bin",
+            "expected_bins": ["ffmpeg.exe", "ffprobe.exe", "ffplay.exe"],
+            "ensure_in_dir": WINDOWS_FFMPEG_BIN_DIR,
+            "bin_names": ["ffmpeg.exe"],
+        },
         "arch":    {"method": "pacman", "pkg": "ffmpeg"},
         "ubuntu":  {"method": "apt",    "pkg": "ffmpeg"},
         "fedora":  {"method": "dnf",    "pkg": "ffmpeg"},
@@ -195,16 +226,53 @@ SYSTEM_DEPS = {
     },
     "ffsubsync": {
         "arch":    {"method": "aur", "pkg": "python-ffsubsync", "fallback_pkg": "ffsubsync"},
-        "ubuntu":  {"method": "pipx", "pkg": "ffsubsync"},        # pipx used as fallback — no native package available
-        "fedora":  {"method": "pipx", "pkg": "ffsubsync"},
-        "macos":   {"method": "pipx", "pkg": "ffsubsync"},
-        "windows": {"method": "pipx", "pkg": "ffsubsync"},
+        "ubuntu":  {"method": "uv_tool", "pkg": "ffsubsync"},
+        "fedora":  {"method": "uv_tool", "pkg": "ffsubsync"},
+        "macos":   {"method": "uv_tool", "pkg": "ffsubsync"},
+        "windows": {
+            "method": "uv_tool",
+            "pkg": "ffsubsync",
+            "bin_dir": WINDOWS_FFSUBSYNC_DIR,
+            "ensure_in_dir": WINDOWS_FFSUBSYNC_DIR,
+            "bin_names": ["ffsubsync.exe", "ffsubsync", "ffsubsync.cmd"],
+        },
         "verify":  ["ffsubsync", "--version"],
     },
     "alass": {
         "arch":    {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},
-        "windows": {"method": "manual", "url": "https://github.com/kaegi/alass/releases"},
+        "windows": {
+            "method": "github_release_zip",
+            "repo": "kaegi/alass",
+            "asset_patterns": [
+                r"^alass-.*windows.*x64.*\.zip$",
+                r"^alass-.*win64.*\.zip$",
+                r"^alass-.*win.*\.zip$",
+            ],
+            "install_dir": WINDOWS_ALASS_DIR,
+            "expected_bins": ["alass.exe", "alass-cli.exe"],
+            "ensure_in_dir": WINDOWS_ALASS_DIR,
+            "bin_names": ["alass.exe", "alass-cli.exe"],
+        },
         "verify":  ["alass", "--version"],
+    },
+    "uv": {
+        "windows": {
+            "method": "github_release_zip",
+            "repo": "astral-sh/uv",
+            "asset_patterns": [
+                r"^uv-x86_64-pc-windows-msvc\.zip$",
+                r"^uv-.*windows.*x86_64.*\.zip$",
+            ],
+            "install_dir": WINDOWS_UV_DIR,
+            "expected_bins": ["uv.exe"],
+            "ensure_in_dir": WINDOWS_UV_DIR,
+            "bin_names": ["uv.exe"],
+        },
+        "arch":    {"method": "uv"},
+        "ubuntu":  {"method": "uv"},
+        "fedora":  {"method": "uv"},
+        "macos":   {"method": "uv"},
+        "verify":  ["uv", "--version"],
     },
 }
 
