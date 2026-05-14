@@ -238,8 +238,12 @@ def _check_installed(dep_name, dep_info):
             # ffsubsync needs both path validation and runtime health checks,
             # since its launcher can exist even when Python deps are broken.
             if dep_name == "ffsubsync":
-                return _check_windows_bin_locations(bin_names, ensure_dir) and _check_ffsubsync_installed()
-            return _check_windows_bin_locations(bin_names, ensure_dir)
+                launcher = _find_windows_bin_in_dir(bin_names, ensure_dir)
+                if launcher:
+                    return _check_ffsubsync_installed(launcher)
+            else:
+                if _check_windows_bin_locations(bin_names, ensure_dir):
+                    return True
 
     if dep_name == "ffsubsync":
         return _check_ffsubsync_installed()
@@ -271,7 +275,21 @@ def _check_windows_bin_locations(bin_names, ensure_dir):
     return False
 
 
-def _check_ffsubsync_installed():
+def _find_windows_bin_in_dir(bin_names, ensure_dir):
+    """Return the bin path inside ensure_dir, if present (including PATH entries)."""
+    ensure_dir = os.path.normcase(os.path.abspath(ensure_dir))
+    for name in bin_names:
+        candidate = os.path.join(ensure_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
+    for name in bin_names:
+        found = shutil.which(name)
+        if found and os.path.normcase(found).startswith(ensure_dir):
+            return found
+    return None
+
+
+def _check_ffsubsync_installed(launcher=None):
     """
     Check ffsubsync availability and basic runtime health.
 
@@ -279,12 +297,13 @@ def _check_ffsubsync_installed():
     imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
     in the same interpreter environment as the ffsubsync launcher).
     """
-    ok, _ = _run_silent(["ffsubsync", "--version"])
+    cmd = launcher or "ffsubsync"
+    ok, _ = _run_silent([cmd, "--version"])
     if not ok:
         return False
 
-    launcher = shutil.which("ffsubsync")
-    if not launcher:
+    launcher_path = launcher or shutil.which("ffsubsync")
+    if not launcher_path:
         return False
 
     # On Windows, ffsubsync is typically an .exe shim; we keep version check only.
@@ -292,7 +311,7 @@ def _check_ffsubsync_installed():
         return True
 
     try:
-        with open(launcher, "r", encoding="utf-8", errors="replace") as f:
+        with open(launcher_path, "r", encoding="utf-8", errors="replace") as f:
             first_line = f.readline().strip()
     except OSError:
         return True
