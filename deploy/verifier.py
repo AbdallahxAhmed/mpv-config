@@ -76,10 +76,14 @@ def verify(config_dir, env):
     ui.step("Checking binaries...")
     check_binary("mpv", ["mpv", "--version"])
     check_binary("ffmpeg", ["ffmpeg", "-version"])
+    if env.os == "windows":
+        check_binary("ffprobe", ["ffprobe", "-version"])
+        check_binary("ffplay", ["ffplay", "-version"])
     check_binary("yt-dlp", ["yt-dlp", "--version"])
 
     python_cmd = env.python_cmd
     check_binary("python", [python_cmd, "--version"])
+    check_binary("uv", ["uv", "--version"])
 
     # Optional
     if _run_check(["ffsubsync", "--version"]):
@@ -87,6 +91,12 @@ def verify(config_dir, env):
     else:
         ui.warn("ffsubsync: not found (optional)")
         results.append({"name": "ffsubsync binary", "status": "skipped", "detail": "optional"})
+
+    if _run_check(["alass", "--version"]) or _run_check(["alass-cli", "--version"]):
+        check("alass binary", True)
+    else:
+        ui.warn("alass: not found (optional)")
+        results.append({"name": "alass binary", "status": "skipped", "detail": "optional"})
 
     # ─── Config files ────────────────────────────────────────────────
 

@@ -230,6 +230,17 @@ def _resolve_config_dir(os_name):
 
 def _check_installed(dep_name, dep_info):
     """Check if a system dependency is already installed."""
+    if sys.platform == "win32":
+        win_info = dep_info.get("windows", {})
+        ensure_dir = win_info.get("ensure_in_dir")
+        bin_names = win_info.get("bin_names") or []
+        if ensure_dir and bin_names:
+            # ffsubsync needs both path validation and runtime health checks,
+            # since its launcher can exist even when Python deps are broken.
+            if dep_name == "ffsubsync":
+                return _check_windows_bin_locations(bin_names, ensure_dir) and _check_ffsubsync_installed()
+            return _check_windows_bin_locations(bin_names, ensure_dir)
+
     if dep_name == "ffsubsync":
         return _check_ffsubsync_installed()
 
@@ -242,6 +253,20 @@ def _check_installed(dep_name, dep_info):
     if verify_alt:
         ok, _ = _run_silent(verify_alt)
         if ok:
+            return True
+    return False
+
+
+def _check_windows_bin_locations(bin_names, ensure_dir):
+    """Return True if any bin exists in ensure_dir (or on PATH within it)."""
+    ensure_dir = os.path.normcase(os.path.abspath(ensure_dir))
+    for name in bin_names:
+        candidate = os.path.join(ensure_dir, name)
+        if os.path.isfile(candidate):
+            return True
+    for name in bin_names:
+        found = shutil.which(name)
+        if found and os.path.normcase(found).startswith(ensure_dir):
             return True
     return False
 

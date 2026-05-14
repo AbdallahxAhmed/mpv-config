@@ -193,6 +193,16 @@ elif command -v brew &>/dev/null; then
     xcode-select --install 2>/dev/null || true
 fi
 
+# ── Step 3a: Ensure uv (Python tool manager) ──────────────────
+if ! command -v uv &>/dev/null; then
+    _styled_echo "dim" "  → Installing uv (Python tool manager)..."
+    if _gum_spin "Installing uv..." /bin/sh -c "curl -LsSf https://astral.sh/uv/install.sh | sh" >/tmp/mpv-uv-install.log 2>&1; then
+        export PATH="$HOME/.local/bin:$PATH"
+    else
+        _styled_echo "yellow" "  ! uv install failed; setup.py will try to install it later."
+    fi
+fi
+
 # ── Step 3b: Install rich (Category B) ─────────────────────────
 # Try system package first, venv fallback handled by setup.py bootstrap
 if command -v pacman &>/dev/null; then
