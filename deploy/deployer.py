@@ -407,6 +407,10 @@ def _patch_mpv_conf(
         f.write(content)
 
 
+def _normalize_windows_path(path):
+    return os.path.normpath(path).replace("\\", "/")
+
+
 def _patch_autosubsync_conf(template_path, dest_path, env):
     """Patch autosubsync.conf.template with platform-specific paths."""
     defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
@@ -471,9 +475,6 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
             alass_path = _find_binary("alass", env) or _find_binary("alass-cli", env) or "alass"
 
     if env.os == "windows":
-        def _normalize_windows_path(path):
-            return os.path.normpath(path).replace("\\", "/")
-
         ffmpeg_path = _normalize_windows_path(ffmpeg_path)
         ffsubsync_path = _normalize_windows_path(ffsubsync_path)
         alass_path = _normalize_windows_path(alass_path)

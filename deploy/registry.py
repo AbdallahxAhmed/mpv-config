@@ -7,7 +7,7 @@ fetch strategy, file layout, and dependency chain.
 
 import os
 
-WINDOWS_PROGRAM_FILES = os.environ.get("ProgramFiles", r"C:\Program Files")
+WINDOWS_PROGRAM_FILES = os.environ.get("ProgramFiles", "C:\\Program Files")
 WINDOWS_MPV_DIR = os.path.join(WINDOWS_PROGRAM_FILES, "mpv")
 WINDOWS_FFMPEG_DIR = os.path.join(WINDOWS_MPV_DIR, "ffmpeg")
 WINDOWS_YTDLP_DIR = os.path.join(WINDOWS_MPV_DIR, "yt-dlp")

@@ -110,7 +110,7 @@ def _select_release_asset(release, patterns):
         regex = re.compile(pattern, re.IGNORECASE)
         for asset in assets:
             name = asset.get("name", "")
-            if regex.match(name) or regex.search(name):
+            if regex.search(name):
                 return asset
     return None
 
