@@ -131,6 +131,8 @@ Platform-required values are still kept per OS:
 - **Internet connection** (to fetch scripts from GitHub)
 
 Python tools such as **ffsubsync** are installed via `uv tool install` for consistent packaging.
+ffsubsync is pinned to **Python 3.11** to prefer prebuilt wheels and avoid build tools.
+Set `MPV_FFSUBSYNC_BUILD=1` if you want to allow source builds instead.
 
 ## Windows Dependency Layout
 
