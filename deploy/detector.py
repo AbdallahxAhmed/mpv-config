@@ -241,7 +241,7 @@ def _check_installed(dep_name, dep_info):
                     return _check_ffsubsync_installed(launcher)
         return _check_ffsubsync_installed()
 
-    if sys.platform == "win32":
+    if sys.platform == "win32" and dep_name != "ffsubsync":
         win_info = dep_info.get("windows", {})
         ensure_dir = win_info.get("ensure_in_dir")
         bin_names = win_info.get("bin_names") or []
@@ -268,18 +268,7 @@ def _normalize_windows_dir(path):
 
 def _check_windows_bin_locations(bin_names, ensure_dir):
     """Return True if any bin exists in ensure_dir (or on PATH within it)."""
-    ensure_dir = _normalize_windows_dir(ensure_dir)
-    for name in bin_names:
-        candidate = os.path.join(ensure_dir, name)
-        if os.path.isfile(candidate):
-            return True
-    for name in bin_names:
-        found = shutil.which(name)
-        if not found:
-            continue
-        if os.path.normcase(found).startswith(ensure_dir):
-            return True
-    return False
+    return _find_windows_bin_in_dir(bin_names, ensure_dir) is not None
 
 
 def _find_windows_bin_in_dir(bin_names, ensure_dir):
