@@ -443,6 +443,8 @@ def _uninstall_uv(info, env):
 def _install_uv_tool(info, env):
     """Install a Python tool via uv tool install."""
     pkg = info.get("pkg")
+    uv_python = info.get("uv_python")
+    uv_no_fallback = info.get("uv_no_fallback", False)
     if not pkg:
         ui.error("uv_tool missing pkg")
         return False
@@ -459,6 +461,9 @@ def _install_uv_tool(info, env):
         else:
             ok = _install_uv("uv", uv_info, env)
         if not ok:
+            if uv_no_fallback:
+                ui.warn("uv not available; skipping pipx fallback to avoid source builds.")
+                return False
             ui.warn("uv not available; falling back to pipx if possible")
             if not _ensure_pipx(env):
                 return False
@@ -471,10 +476,16 @@ def _install_uv_tool(info, env):
         os.makedirs(bin_dir, exist_ok=True)
 
     cmd = ["uv", "tool", "install", pkg]
+    if uv_python:
+        ui.info(f"{pkg}: using uv with Python {uv_python} to prefer prebuilt wheels")
+        cmd += ["--python", uv_python]
     if bin_dir:
         cmd += ["--bin-dir", bin_dir]
     ok = _run(cmd)
     if not ok:
+        if uv_no_fallback:
+            ui.warn("uv tool install failed; build fallbacks disabled for this tool.")
+            return False
         ui.warn("uv tool install failed; trying pipx fallback")
         if not _ensure_pipx(env):
             return False

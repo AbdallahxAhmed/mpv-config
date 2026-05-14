@@ -181,16 +181,21 @@ fi
 _styled_echo "white" ""
 _styled_echo "white" "[3/4] Ensuring build dependencies..."
 
-if command -v pacman &>/dev/null; then
-    _styled_echo "dim" "  → Arch detected: ensuring base-devel + python headers..."
-    sudo pacman -S --noconfirm --needed base-devel python 2>/dev/null || true
-elif command -v apt &>/dev/null; then
-    _styled_echo "dim" "  → Debian/Ubuntu detected: ensuring build-essential + python3-dev..."
-    sudo apt update -qq 2>/dev/null
-    sudo apt install -y -qq build-essential python3-dev python3-venv 2>/dev/null || true
-elif command -v brew &>/dev/null; then
-    _styled_echo "dim" "  → macOS detected: checking Xcode CLI tools..."
-    xcode-select --install 2>/dev/null || true
+if [ "${MPV_FFSUBSYNC_BUILD:-0}" = "1" ]; then
+    if command -v pacman &>/dev/null; then
+        _styled_echo "dim" "  → Arch detected: ensuring base-devel + python headers..."
+        sudo pacman -S --noconfirm --needed base-devel python 2>/dev/null || true
+    elif command -v apt &>/dev/null; then
+        _styled_echo "dim" "  → Debian/Ubuntu detected: ensuring build-essential + python3-dev..."
+        sudo apt update -qq 2>/dev/null
+        sudo apt install -y -qq build-essential python3-dev python3-venv 2>/dev/null || true
+    elif command -v brew &>/dev/null; then
+        _styled_echo "dim" "  → macOS detected: checking Xcode CLI tools..."
+        xcode-select --install 2>/dev/null || true
+    fi
+else
+    _styled_echo "dim" "  → Skipping build tools (ffsubsync uses uv + Python 3.11 wheels)"
+    _styled_echo "dim" "    Set MPV_FFSUBSYNC_BUILD=1 to allow source builds if needed."
 fi
 
 # ── Step 3a: Ensure uv (Python tool manager) ──────────────────

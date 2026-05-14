@@ -98,20 +98,27 @@ Write-Host "  > Upgrading pip and pinning setuptools..." -ForegroundColor Gray
 Write-Host "  > Installing CLI UI dependencies (rich)..." -ForegroundColor Gray
 & $python -m pip install --quiet "rich>=13.0.0" 2>$null
 
-# Check for Visual C++ Build Tools (needed for webrtcvad in ffsubsync)
-$hasVCTools = $false
-$vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (Test-Path $vsWhere) {
-    $result = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-    if ($result) { $hasVCTools = $true }
-}
+# ffsubsync prefers prebuilt wheels via uv (Python 3.11). Allow opt-in builds if needed.
+$forceBuild = $env:MPV_FFSUBSYNC_BUILD -eq "1"
+if ($forceBuild) {
+    # Check for Visual C++ Build Tools (needed for webrtcvad in ffsubsync)
+    $hasVCTools = $false
+    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vsWhere) {
+        $result = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($result) { $hasVCTools = $true }
+    }
 
-if ($hasVCTools) {
-    Write-Host "  + Visual C++ Build Tools found" -ForegroundColor Green
+    if ($hasVCTools) {
+        Write-Host "  + Visual C++ Build Tools found" -ForegroundColor Green
+    } else {
+        Write-Host "  ! Visual C++ Build Tools not detected" -ForegroundColor Yellow
+        Write-Host "    ffsubsync may fail to install without them." -ForegroundColor Yellow
+        Write-Host "    Get them from: https://visualstudio.microsoft.com/visual-cpp-build-tools/" -ForegroundColor Yellow
+    }
 } else {
-    Write-Host "  ! Visual C++ Build Tools not detected" -ForegroundColor Yellow
-    Write-Host "    ffsubsync may fail to install without them." -ForegroundColor Yellow
-    Write-Host "    Get them from: https://visualstudio.microsoft.com/visual-cpp-build-tools/" -ForegroundColor Yellow
+    Write-Host "  + ffsubsync will use uv with Python 3.11 (prebuilt wheels; no build tools needed)" -ForegroundColor Green
+    Write-Host "    Set MPV_FFSUBSYNC_BUILD=1 to allow source builds if needed." -ForegroundColor Gray
 }
 
 # ─── Step 4: Run the deployer ─────────────────────────────────────
