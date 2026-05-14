@@ -270,7 +270,9 @@ def _check_windows_bin_locations(bin_names, ensure_dir):
             return True
     for name in bin_names:
         found = shutil.which(name)
-        if found and os.path.normcase(found).startswith(ensure_dir):
+        if not found:
+            continue
+        if os.path.normcase(found).startswith(ensure_dir):
             return True
     return False
 
@@ -284,7 +286,9 @@ def _find_windows_bin_in_dir(bin_names, ensure_dir):
             return candidate
     for name in bin_names:
         found = shutil.which(name)
-        if found and os.path.normcase(found).startswith(ensure_dir):
+        if not found:
+            continue
+        if os.path.normcase(found).startswith(ensure_dir):
             return found
     return None
 
@@ -297,8 +301,8 @@ def _check_ffsubsync_installed(launcher=None):
     imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
     in the same interpreter environment as the ffsubsync launcher).
     """
-    version_cmd = launcher or "ffsubsync"
-    ok, _ = _run_silent([version_cmd, "--version"])
+    launcher_cmd = launcher or "ffsubsync"
+    ok, _ = _run_silent([launcher_cmd, "--version"])
     if not ok:
         return False
 
