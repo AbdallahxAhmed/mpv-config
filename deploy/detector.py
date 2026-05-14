@@ -234,16 +234,16 @@ def _check_installed(dep_name, dep_info):
         win_info = dep_info.get("windows", {})
         ensure_dir = win_info.get("ensure_in_dir")
         bin_names = win_info.get("bin_names") or []
-        if ensure_dir and bin_names:
+        if dep_name == "ffsubsync" and ensure_dir and bin_names:
             # ffsubsync needs both path validation and runtime health checks,
             # since its launcher can exist even when Python deps are broken.
-            if dep_name == "ffsubsync":
-                launcher = _find_windows_bin_in_dir(bin_names, ensure_dir)
-                if launcher:
-                    return _check_ffsubsync_installed(launcher)
-            else:
-                if _check_windows_bin_locations(bin_names, ensure_dir):
-                    return True
+            launcher = _find_windows_bin_in_dir(bin_names, ensure_dir)
+            if launcher:
+                return _check_ffsubsync_installed(launcher)
+            return _check_ffsubsync_installed()
+        if ensure_dir and bin_names:
+            if _check_windows_bin_locations(bin_names, ensure_dir):
+                return True
 
     if dep_name == "ffsubsync":
         return _check_ffsubsync_installed()
@@ -297,8 +297,8 @@ def _check_ffsubsync_installed(launcher=None):
     imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
     in the same interpreter environment as the ffsubsync launcher).
     """
-    cmd = launcher or "ffsubsync"
-    ok, _ = _run_silent([cmd, "--version"])
+    version_cmd = launcher or "ffsubsync"
+    ok, _ = _run_silent([version_cmd, "--version"])
     if not ok:
         return False
 
