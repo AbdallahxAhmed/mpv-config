@@ -230,19 +230,24 @@ def _resolve_config_dir(os_name):
 
 def _check_installed(dep_name, dep_info):
     """Check if a system dependency is already installed."""
-    if sys.platform == "win32":
+    if dep_name == "ffsubsync":
+        if sys.platform == "win32":
+            win_info = dep_info.get("windows", {})
+            ensure_dir = win_info.get("ensure_in_dir")
+            bin_names = win_info.get("bin_names") or []
+            if ensure_dir and bin_names:
+                launcher = _find_windows_bin_in_dir(bin_names, ensure_dir)
+                if launcher:
+                    return _check_ffsubsync_installed(launcher)
+        return _check_ffsubsync_installed()
+
+    if sys.platform == "win32" and dep_name != "ffsubsync":
         win_info = dep_info.get("windows", {})
         ensure_dir = win_info.get("ensure_in_dir")
         bin_names = win_info.get("bin_names") or []
         if ensure_dir and bin_names:
-            # ffsubsync needs both path validation and runtime health checks,
-            # since its launcher can exist even when Python deps are broken.
-            if dep_name == "ffsubsync":
-                return _check_windows_bin_locations(bin_names, ensure_dir) and _check_ffsubsync_installed()
-            return _check_windows_bin_locations(bin_names, ensure_dir)
-
-    if dep_name == "ffsubsync":
-        return _check_ffsubsync_installed()
+            if _check_windows_bin_locations(bin_names, ensure_dir):
+                return True
 
     verify = dep_info.get("verify", [])
     if verify:
@@ -257,21 +262,32 @@ def _check_installed(dep_name, dep_info):
     return False
 
 
+def _normalize_windows_dir(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _check_windows_bin_locations(bin_names, ensure_dir):
     """Return True if any bin exists in ensure_dir (or on PATH within it)."""
-    ensure_dir = os.path.normcase(os.path.abspath(ensure_dir))
+    return _find_windows_bin_in_dir(bin_names, ensure_dir) is not None
+
+
+def _find_windows_bin_in_dir(bin_names, ensure_dir):
+    """Return the bin path inside ensure_dir, if present (including PATH entries)."""
+    ensure_dir = _normalize_windows_dir(ensure_dir)
     for name in bin_names:
         candidate = os.path.join(ensure_dir, name)
         if os.path.isfile(candidate):
-            return True
+            return candidate
     for name in bin_names:
         found = shutil.which(name)
-        if found and os.path.normcase(found).startswith(ensure_dir):
-            return True
-    return False
+        if not found:
+            continue
+        if os.path.normcase(found).startswith(ensure_dir):
+            return found
+    return None
 
 
-def _check_ffsubsync_installed():
+def _check_ffsubsync_installed(launcher=None):
     """
     Check ffsubsync availability and basic runtime health.
 
@@ -279,12 +295,13 @@ def _check_ffsubsync_installed():
     imports fail later (e.g., missing setuptools/pkg_resources or webrtcvad
     in the same interpreter environment as the ffsubsync launcher).
     """
-    ok, _ = _run_silent(["ffsubsync", "--version"])
+    launcher_cmd = launcher or "ffsubsync"
+    ok, _ = _run_silent([launcher_cmd, "--version"])
     if not ok:
         return False
 
-    launcher = shutil.which("ffsubsync")
-    if not launcher:
+    launcher_path = launcher or shutil.which("ffsubsync")
+    if not launcher_path:
         return False
 
     # On Windows, ffsubsync is typically an .exe shim; we keep version check only.
@@ -292,7 +309,7 @@ def _check_ffsubsync_installed():
         return True
 
     try:
-        with open(launcher, "r", encoding="utf-8", errors="replace") as f:
+        with open(launcher_path, "r", encoding="utf-8", errors="replace") as f:
             first_line = f.readline().strip()
     except OSError:
         return True
