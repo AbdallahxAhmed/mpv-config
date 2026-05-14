@@ -5,13 +5,16 @@ Maps every third-party script/shader to its upstream GitHub source,
 fetch strategy, file layout, and dependency chain.
 """
 
-WINDOWS_MPV_DIR = r"C:\Program Files\mpv"
-WINDOWS_FFMPEG_DIR = r"C:\Program Files\mpv\ffmpeg"
-WINDOWS_YTDLP_DIR = r"C:\Program Files\mpv\yt-dlp"
-WINDOWS_UV_DIR = r"C:\Program Files\mpv\uv"
-WINDOWS_FFSUBSYNC_DIR = r"C:\Program Files\mpv\ffsubsync"
-WINDOWS_ALASS_DIR = r"C:\Program Files\mpv\alass"
-WINDOWS_FFMPEG_BIN_DIR = WINDOWS_FFMPEG_DIR + r"\bin"
+import os
+
+WINDOWS_PROGRAM_FILES = os.environ.get("ProgramFiles", r"C:\Program Files")
+WINDOWS_MPV_DIR = os.path.join(WINDOWS_PROGRAM_FILES, "mpv")
+WINDOWS_FFMPEG_DIR = os.path.join(WINDOWS_MPV_DIR, "ffmpeg")
+WINDOWS_YTDLP_DIR = os.path.join(WINDOWS_MPV_DIR, "yt-dlp")
+WINDOWS_UV_DIR = os.path.join(WINDOWS_MPV_DIR, "uv")
+WINDOWS_FFSUBSYNC_DIR = os.path.join(WINDOWS_MPV_DIR, "ffsubsync")
+WINDOWS_ALASS_DIR = os.path.join(WINDOWS_MPV_DIR, "alass")
+WINDOWS_FFMPEG_BIN_DIR = os.path.join(WINDOWS_FFMPEG_DIR, "bin")
 
 SCRIPTS = [
     {

@@ -235,6 +235,8 @@ def _check_installed(dep_name, dep_info):
         ensure_dir = win_info.get("ensure_in_dir")
         bin_names = win_info.get("bin_names") or []
         if ensure_dir and bin_names:
+            # ffsubsync needs both path validation and runtime health checks,
+            # since its launcher can exist even when Python deps are broken.
             if dep_name == "ffsubsync":
                 return _check_windows_bin_locations(bin_names, ensure_dir) and _check_ffsubsync_installed()
             return _check_windows_bin_locations(bin_names, ensure_dir)

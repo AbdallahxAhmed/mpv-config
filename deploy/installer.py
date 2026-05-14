@@ -128,7 +128,7 @@ def _extract_zip(archive_path, dest_dir):
 
 def _flatten_single_dir(dest_dir):
     """Flatten single top-level directory if present."""
-    entries = [e for e in os.listdir(dest_dir)]
+    entries = os.listdir(dest_dir)
     if len(entries) != 1:
         return False
     inner = os.path.join(dest_dir, entries[0])
@@ -286,7 +286,7 @@ def _install_github_release_zip(name, info, env):
             _download_asset(download_url, archive_path)
             if os.path.isdir(install_dir):
                 shutil.rmtree(install_dir)
-            os.makedirs(install_dir, exist_ok=True)
+            os.makedirs(install_dir)
             _extract_zip(archive_path, install_dir)
     except Exception as e:
         ui.error(f"Download or extraction failed: {e}")
@@ -400,9 +400,13 @@ def _install_uv(name, info, env):
             if _run(["sudo", "dnf", "install", "-y", "uv"]):
                 return True
 
-    ui.step("Installing uv via official installer script...")
     if env.os == "windows":
-        return _run(["powershell", "-NoProfile", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"])
+        if info.get("repo") and info.get("asset_patterns"):
+            return _install_github_release_zip(name, info, env)
+        ui.warn("uv install on Windows requires a release asset configuration.")
+        return False
+
+    ui.step("Installing uv via official installer script...")
     ok = _run(["/bin/sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"])
     if ok:
         local_bin = os.path.expanduser("~/.local/bin")
