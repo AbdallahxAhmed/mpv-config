@@ -95,7 +95,10 @@ def _find_7z():
 def _fetch_latest_release(repo):
     """Fetch GitHub latest release metadata."""
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
-    req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
+    req = urllib.request.Request(
+        api_url,
+        headers={"Accept": "application/json", "User-Agent": "mpv-config"},
+    )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.loads(resp.read())
 
