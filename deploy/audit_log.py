@@ -103,6 +103,7 @@ class AuditLog:
             "packages": {},
             "files": [],
             "backups": [],
+            "notes": [],
         }
         self._data["sessions"].append(self._current_session)
         self.save()
@@ -220,6 +221,16 @@ class AuditLog:
         self._require_session()["backups"].append(
             {"path": backup_path, "created_at": _now_iso()}
         )
+        self.save()
+
+    def record_note(self, name: str, detail: str = ""):
+        """Record a diagnostic note for the current session."""
+        entry = {
+            "name": name,
+            "detail": detail,
+            "timestamp": _now_iso(),
+        }
+        self._require_session()["notes"].append(entry)
         self.save()
 
     # ─── Query helpers ─────────────────────────────────────────────────

@@ -18,10 +18,12 @@ from datetime import datetime
 
 from deploy import ui
 from deploy.registry import (
+    ANIME4K_CHAINS,
     MPV_EXPERIENCE_PROFILES,
     MPV_PROFILE_DEFAULT,
     PLATFORM_NATIVE_MPV_DEFAULTS,
     PLATFORM_REQUIRED_DEFAULTS,
+    SCALER_TIERS,
     SYSTEM_DEPS,
 )
 
@@ -47,6 +49,69 @@ LINUX_VISUAL_TUNING_BLOCK = (
     "autofit-larger=90%x90%\n"
     "autofit-smaller=30%x30%\n"
 )
+
+
+def _process_conditionals(content, blocks):
+    """Process {{#if NAME}}...{{/if}} blocks atomically per named block."""
+    pattern = re.compile(r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n?', flags=re.DOTALL)
+    return pattern.sub(lambda m: m.group(2) if blocks.get(m.group(1)) else "", content)
+
+
+def _resolve_screenshot_dir(env):
+    if env.os == "windows":
+        userprofile = os.environ.get("USERPROFILE", "")
+        return f"{userprofile}/Pictures/mpv-screenshots".replace("\\", "/")
+    return "~/Pictures/mpv-screenshots"
+
+
+def _resolve_anime_chain(preset, shader_sep):
+    chain = ANIME4K_CHAINS.get(preset, ANIME4K_CHAINS["A"])
+    if not chain:
+        return ""
+    parts = [name.strip() for name in chain.split(";") if name.strip()]
+    return shader_sep.join(f"~~/shaders/{name}.glsl" for name in parts)
+
+
+def _resolve_scaler_tier(tier):
+    return SCALER_TIERS.get(tier, SCALER_TIERS["balanced"])
+
+
+def _resolve_display_mode(mode):
+    if mode == "vrr":
+        return {
+            "video_sync": "audio",
+            "interpolation": "no",
+            "d3d11_flip": "no",
+        }
+    return {
+        "video_sync": "display-resample",
+        "interpolation": "yes",
+        "d3d11_flip": "yes",
+    }
+
+
+def _detect_dither_depth(env):
+    import subprocess
+    if env.os != "windows":
+        return None
+    try:
+        cmd = [
+            "powershell", "-NoProfile", "-Command",
+            "(Get-CimInstance Win32_VideoController).CurrentBitsPerPixel"
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        if res.returncode == 0 and res.stdout.strip():
+            try:
+                bpp = int(float(res.stdout.strip()))
+                if bpp >= 30:
+                    return "10"
+                if bpp > 0:
+                    return "8"
+            except ValueError:
+                return None
+    except Exception:
+        return None
+    return None
 
 
 # ─── Backup ────────────────────────────────────────────────────────────
@@ -199,12 +264,19 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                         raise
 
         # Move restored files into config_dir (which still exists with .git)
+        same_drive = os.path.splitdrive(temp_restore)[0].lower() == os.path.splitdrive(config_dir)[0].lower()
         for item in os.listdir(temp_restore):
             src = os.path.join(temp_restore, item)
             dst = os.path.join(config_dir, item)
             if os.path.exists(dst):
                 _remove_path(dst)
-            shutil.move(src, dst)
+            if same_drive:
+                shutil.move(src, dst)
+            else:
+                if os.path.isdir(src):
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
         _remove_path(temp_restore)
         
         # Clean up any leftover symlinks pointing to 'deployed'
@@ -324,6 +396,11 @@ def _patch_mpv_conf(
     env,
     selected_profile,
     resolved_defaults,
+    anime_preset="A",
+    scaler_tier="balanced",
+    display_mode="fixed",
+    dither_depth="auto",
+    audit_log=None,
 ):
     """Patch mpv.conf.template with profile-aware + platform-required values."""
     linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
@@ -340,6 +417,21 @@ def _patch_mpv_conf(
         content = f.read()
 
     shader_sep = required.get("shader_sep", ";")
+    anime_chain = _resolve_anime_chain(anime_preset, shader_sep)
+    scalers = _resolve_scaler_tier(scaler_tier)
+    display_settings = _resolve_display_mode(display_mode)
+    screenshot_dir = _resolve_screenshot_dir(env)
+
+    dither_value = dither_depth
+    if dither_depth == "auto":
+        dither_value = _detect_dither_depth(env) or "auto"
+
+    display_fps = _detect_display_fps(env)
+    if audit_log:
+        detail = display_fps or "unknown"
+        audit_log.record_note("display_fps_detected", f"detected_display_fps={detail}")
+        if display_mode == "auto":
+            audit_log.record_note("display_mode", "auto → fixed (vrr requires explicit --display-mode vrr)")
 
     replacements = {
         "{{GPU_API}}": defaults.get("gpu_api", "auto"),
@@ -349,6 +441,15 @@ def _patch_mpv_conf(
         "{{LINUX_VISUAL_TUNING}}": linux_visual_tuning,
         "{{BORDER}}": border_value,
         "{{NATIVE_FS}}": native_fs_value,
+        "{{SCREENSHOT_DIR}}": screenshot_dir,
+        "{{ANIME_CHAIN}}": anime_chain,
+        "{{SCALE}}": scalers["scale"],
+        "{{CSCALE}}": scalers["cscale"],
+        "{{DSCALE}}": scalers["dscale"],
+        "{{D3D11_FLIP}}": display_settings["d3d11_flip"],
+        "{{VIDEO_SYNC}}": display_settings["video_sync"],
+        "{{INTERPOLATION}}": display_settings["interpolation"],
+        "{{DITHER_DEPTH}}": str(dither_value),
     }
 
     # GPU context: detect wayland vs x11 when profile requests automatic context.
@@ -380,28 +481,14 @@ def _patch_mpv_conf(
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context
 
-    display_fps = _detect_display_fps(env)
-    if display_fps:
-        replacements["{{DISPLAY_FPS}}"] = display_fps
-    else:
-        # If detection failed, remove the exact config line so it doesn't break mpv
-        content = re.sub(r'^.*display-fps-override=\{\{DISPLAY_FPS\}\}.*\n?', '', content, flags=re.MULTILINE)
-        replacements["{{DISPLAY_FPS}}"] = ""
-
     for placeholder, value in replacements.items():
         content = content.replace(placeholder, value)
 
     # Handle conditional blocks: {{#if BLOCK}}...{{/if}}
-    for block_name, block_value in [("GPU_CONTEXT", gpu_context), ("NATIVE_FS", native_fs_value)]:
-        if not block_value:
-            content = re.sub(
-                r'\{\{#if ' + block_name + r'\}\}.*?\{\{/if\}\}\n?',
-                '', content, flags=re.DOTALL
-            )
-        else:
-            content = content.replace("{{#if " + block_name + "}}", "")
-            # Only remove the {{/if}} that follows this block
-            content = content.replace("{{/if}}", "", 1)
+    content = _process_conditionals(content, {
+        "GPU_CONTEXT": gpu_context,
+        "NATIVE_FS": native_fs_value,
+    })
 
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -591,7 +678,18 @@ def _deploy_directory(src, dst, env, audit_log=None):
 
 # ─── Main Deploy ───────────────────────────────────────────────────────
 
-def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None, mpv_profile=MPV_PROFILE_DEFAULT):
+def deploy(
+    staging_dir,
+    env,
+    repo_dir,
+    dry_run=False,
+    audit_log=None,
+    mpv_profile=MPV_PROFILE_DEFAULT,
+    anime_preset="A",
+    scaler_tier="balanced",
+    display_mode="fixed",
+    dither_depth="auto",
+):
     """
     Deploy everything from staging_dir + repo_dir/config/ to env.config_dir.
 
@@ -672,6 +770,11 @@ def deploy(staging_dir, env, repo_dir, dry_run=False, audit_log=None, mpv_profil
                 env,
                 selected_profile=selected_profile,
                 resolved_defaults=resolved_defaults,
+                anime_preset=anime_preset,
+                scaler_tier=scaler_tier,
+                display_mode=display_mode,
+                dither_depth=dither_depth,
+                audit_log=audit_log,
             )
             sep = PLATFORM_REQUIRED_DEFAULTS[env.platform_key]["shader_sep"]
             resolved_gpu_api = resolved_defaults.get("gpu_api", "auto")

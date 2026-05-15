@@ -94,7 +94,9 @@ def fetch_raw(script_entry, staging_dir):
     """
     source = script_entry["source"]
     repo = source["repo"]
+    pin = source.get("pin")
     branch = source.get("branch", "master")
+    ref = pin or branch
     files = source["files"]
     name = script_entry["name"]
 
@@ -103,7 +105,7 @@ def fetch_raw(script_entry, staging_dir):
     fetched = []
     with ui.spinner(f"Downloading {name}..."):
         for f in files:
-            url = GITHUB_RAW.format(repo=repo, branch=branch, path=f["src"])
+            url = GITHUB_RAW.format(repo=repo, branch=ref, path=f["src"])
             dest = os.path.join(staging_dir, f["dest"])
             _ensure_dir(dest)
 
@@ -122,7 +124,7 @@ def fetch_raw(script_entry, staging_dir):
 
     return {
         "name": name,
-        "source": f"github:{repo}@{branch}",
+        "source": f"github:{repo}@{ref}",
         "files": fetched,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }

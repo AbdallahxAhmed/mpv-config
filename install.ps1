@@ -15,6 +15,16 @@ $REPO = "AbdallahxAhmed/mpv-config"
 $BRANCH = "main"
 $INSTALL_DIR = "$env:USERPROFILE\.mpv-deploy"
 
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+
+if (-not $isAdmin) {
+    Write-Host "Re-launching as Administrator..." -ForegroundColor Yellow
+    $scriptUrl = "https://raw.githubusercontent.com/$REPO/$BRANCH/install.ps1"
+    Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`""
+    exit
+}
+
 Write-Host ""
 Write-Host "+=============================================+" -ForegroundColor Cyan
 Write-Host "|       MPV Auto-Deploy - Bootstrap            |" -ForegroundColor Cyan
