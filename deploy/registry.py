@@ -186,10 +186,32 @@ SYSTEM_DEPS = {
     "mpv": {
         "windows": {
             "method": "github_asset",
+            # PRIMARY: zhongfly publishes daily builds with date+commit tags
+            # like "2026-05-15-4498c0ff81". The old pin "2025-01-15" was a
+            # plain date that has never existed as a real tag → 404.
+            # Leaving pin=None means "use latest release", which is the
+            # right default for daily-build repos. Users can override the
+            # tag with --mpv-version <tag> (existing CLI flag).
             "repo": "zhongfly/mpv-winbuild",
-            "pin": "2025-01-15",
+            "pin": None,
             "fallback_repo": "shinchiro/mpv-winbuild-cmake",
-            # Asset selection: v3 (AVX2) vs regular decided at install time
+            # WHY per-repo asset patterns:
+            # zhongfly names assets as: mpv-x86_64[-v3]-YYYYMMDD-git-HASH.7z
+            # shinchiro names assets as: mpv-x86_64[-v3]-git-HASH.7z (no date)
+            # A single regex cannot match both — the old code's `\d{8}` made
+            # the shinchiro fallback effectively dead.
+            "asset_patterns": {
+                "zhongfly/mpv-winbuild": {
+                    "avx2":  r"^mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z$",
+                    "plain": r"^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$",
+                },
+                "shinchiro/mpv-winbuild-cmake": {
+                    "avx2":  r"^mpv-x86_64-v3-git-[0-9a-f]+\.7z$",
+                    "plain": r"^mpv-x86_64-git-[0-9a-f]+\.7z$",
+                },
+            },
+            # Very loose fallback if both repos change naming in the future.
+            "asset_pattern_generic": r"^mpv-x86_64(?:-v3)?(?:-\d{8})?-git-[0-9a-f]+\.7z$",
             "install_dir": WINDOWS_MPV_DIR,
             "ensure_in_dir": WINDOWS_MPV_DIR,
             "bin_names": ["mpv.exe"],

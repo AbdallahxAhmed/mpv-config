@@ -111,13 +111,16 @@ def _detect_display():
 def _detect_gpu():
     """Detect the GPU vendor."""
     if sys.platform == "win32":
-        # Try wmic first (Windows 10), fallback to PowerShell (Windows 11)
-        ok, out = _run_silent(["wmic", "path", "win32_VideoController", "get", "name"])
+        # WHY: wmic is deprecated and removed-by-default on Windows 11 24H2+.
+        # CIM is the canonical replacement and exists on Win10 1709+. We use
+        # it as the PRIMARY method, and fall back to wmic only if CIM fails
+        # (very old systems / restricted environments).
+        ok, out = _run_silent([
+            "powershell", "-NoProfile", "-Command",
+            "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join \"`n\""
+        ])
         if not ok or not out.strip():
-            ok, out = _run_silent([
-                "powershell", "-NoProfile", "-Command",
-                "Get-WmiObject Win32_VideoController | Select-Object -ExpandProperty Name"
-            ])
+            ok, out = _run_silent(["wmic", "path", "win32_VideoController", "get", "name"])
         if ok and out:
             out_lower = out.lower()
             if "nvidia" in out_lower:
@@ -140,19 +143,69 @@ def _detect_gpu():
 
 
 def _detect_avx2():
-    """Detect AVX2 CPU support (enables x86_64-v3 optimized builds)."""
+    """
+    Detect AVX2 CPU support (enables x86_64-v3 optimized mpv builds).
+
+    Detection chain (first method that returns a definite answer wins):
+       1. ctypes -> kernel32!IsProcessorFeaturePresent(40)
+         The canonical Win32 API. Works on every Windows version regardless
+         of which PowerShell edition launched us. This is why the previous
+         PowerShell-based detection silently returned False under Windows
+         PowerShell 5.1 — System.Runtime.Intrinsics is .NET Core only.
+       2. PowerShell intrinsics (pwsh 7+) — kept as a sanity check.
+       3. CPU name heuristic via CIM — last-resort, for the rare case where
+         the Win32 API call fails (e.g. tightly locked-down kiosk images).
+
+    On Linux/macOS we parse /proc/cpuinfo or sysctl as before.
+    """
     if sys.platform == "win32":
+        # Method 1: Win32 API via ctypes — definitive, edition-independent.
+        try:
+            import ctypes
+            # PF_AVX2_INSTRUCTIONS_AVAILABLE = 40 (winnt.h)
+            PF_AVX2 = 40
+            result = ctypes.windll.kernel32.IsProcessorFeaturePresent(PF_AVX2)
+            return bool(result)
+        except (OSError, AttributeError):
+            pass
+
+        # Method 2: PowerShell 7 intrinsics. Only reliable in pwsh; under
+        # PS 5.1 the type is not loaded and the call returns no output.
         ok, out = _run_silent([
-            "powershell", "-NoProfile", "-Command",
+            "pwsh", "-NoProfile", "-Command",
             "[System.Runtime.Intrinsics.X86.Avx2]::IsSupported"
         ])
-        return ok and out.strip().lower() == "true"
+        if ok and out.strip().lower() in ("true", "false"):
+            return out.strip().lower() == "true"
+
+        # Method 3: heuristic from CPU name. Every Intel Haswell (4th gen)
+        # and later, and every AMD Ryzen / Excavator and later, has AVX2.
+        ok, out = _run_silent([
+            "powershell", "-NoProfile", "-Command",
+            "(Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name) -join \"`n\""
+        ])
+        if ok and out:
+            name = out.lower()
+            # AMD: Ryzen / EPYC / Threadripper all have AVX2.
+            if any(k in name for k in ("ryzen", "epyc", "threadripper")):
+                return True
+            # Intel: Core i?-4xxx and newer (Haswell+). The model number
+            # after the dash is a reliable family marker.
+            import re as _re
+            m = _re.search(r"core\(tm\)\s*i[3579]-(\d{3,5})", name)
+            if m:
+                gen = int(m.group(1)[:-3]) if len(m.group(1)) >= 4 else 0
+                return gen >= 4
+        return False
     else:
         try:
             with open("/proc/cpuinfo", "r") as f:
                 return "avx2" in f.read().lower()
         except FileNotFoundError:
-            return False
+            # macOS — fall back to sysctl.
+            ok, out = _run_silent(["sysctl", "-n", "machdep.cpu.features",
+                                   "machdep.cpu.leaf7_features"])
+            return ok and "avx2" in out.lower()
 
 
 def _detect_pkg_manager(os_name, distro):
@@ -464,7 +517,7 @@ def detect():
 
     # Output detection results
     ui.table("Detection Results", ["Property", "Value"], rows)
-    
+
     # Validation
     _validate_env(env)
 

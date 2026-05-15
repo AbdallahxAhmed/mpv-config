@@ -206,15 +206,112 @@ def _fetch_release(repo, pin=None):
 
 
 def _install_github_asset(name, info, env):
-    """Download a GitHub release asset (.7z), extract, and add to PATH."""
-    repo = info["repo"]
+    """
+    Download a GitHub release asset (.7z), verify SHA-256, extract, PATH.
+
+    SHA-256 verification strategy (first source that yields a hex digest wins):
+       1. asset["digest"]  — the canonical source since June 2025. GitHub
+         computes this on upload and exposes it on every asset. Both zhongfly
+         and shinchiro releases carry it. No extra HTTP round-trip.
+       2. <asset>.sha256  — companion file. Older releases / some forks use
+         this convention. We keep it for backward compatibility.
+       3. sha256.txt      — single aggregated checksum file (used by
+         zhongfly). Downloaded once and parsed for our asset name.
+       4. No SHA found    — emit a warning and continue, UNLESS the env var
+         MPV_REQUIRE_SHA256=1 is set, in which case we abort. HTTPS already
+         provides transport integrity; this matches Scoop/winget behavior.
+
+    Asset selection strategy:
+       - Read per-repo patterns from info["asset_patterns"][<repo>].
+      - Pick the AVX2 variant if env.has_avx2, else the plain variant.
+      - If AVX2 was requested but no v3 asset exists in this release, warn
+        and fall back to the plain variant (instead of failing outright).
+      - Last-resort fallback uses info["asset_pattern_generic"].
+    """
+    import hashlib
+
+    repo          = info["repo"]
     fallback_repo = info.get("fallback_repo")
-    pin = info.get("pin")
-    install_dir = info.get("install_dir", r"C:\Program Files\mpv")
+    pin           = info.get("pin")
+    install_dir   = info.get("install_dir", r"C:\Program Files\mpv")
+    patterns_map  = info.get("asset_patterns", {}) or {}
+    generic_pat   = info.get("asset_pattern_generic")
+    require_sha   = os.environ.get("MPV_REQUIRE_SHA256") == "1"
+
+    def _digest_from_asset(asset):
+        """Extract sha256 hex from GitHub's `digest` field on an asset."""
+        d = asset.get("digest")
+        if isinstance(d, str) and d.lower().startswith("sha256:"):
+            hex_part = d.split(":", 1)[1].strip()
+            if SHA256_HEX_PATTERN.fullmatch(hex_part):
+                return hex_part.lower()
+        return None
+
+    def _digest_from_companion(assets, asset_name):
+        """Look for <asset_name>.sha256 in the release assets."""
+        for a in assets:
+            if a.get("name") == f"{asset_name}.sha256":
+                try:
+                    with urllib.request.urlopen(a["browser_download_url"], timeout=15) as resp:
+                        body = resp.read().decode("utf-8", errors="replace").strip()
+                    first = body.split()[0] if body else ""
+                    if SHA256_HEX_PATTERN.fullmatch(first):
+                        return first.lower()
+                except Exception:
+                    pass
+        return None
+
+    def _digest_from_aggregate(assets, asset_name):
+        """
+        Look for an aggregate checksum file (sha256.txt / SHA256SUMS / etc.)
+        and find the line matching our asset.
+        """
+        candidates = ("sha256.txt", "SHA256SUMS", "SHA256SUMS.txt", "checksums.txt")
+        for a in assets:
+            if a.get("name") in candidates:
+                try:
+                    with urllib.request.urlopen(a["browser_download_url"], timeout=15) as resp:
+                        body = resp.read().decode("utf-8", errors="replace")
+                except Exception:
+                    continue
+                for line in body.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 2 and asset_name in parts[-1]:
+                        if SHA256_HEX_PATTERN.fullmatch(parts[0]):
+                            return parts[0].lower()
+        return None
+
+    def _select_asset(release, target_repo):
+        """Pick (asset, label) for this repo + AVX2 preference, with fallbacks."""
+        assets = release.get("assets", [])
+        repo_pats = patterns_map.get(target_repo, {})
+
+        # Build the ordered list of (label, regex) to try.
+        attempts = []
+        if env.has_avx2 and repo_pats.get("avx2"):
+            attempts.append(("v3 (AVX2)", repo_pats["avx2"]))
+            # If AVX2 build is missing, gracefully accept the plain build.
+            if repo_pats.get("plain"):
+                attempts.append(("x86_64 (AVX2 build unavailable, using plain)", repo_pats["plain"]))
+        elif repo_pats.get("plain"):
+            attempts.append(("x86_64", repo_pats["plain"]))
+            # If user truly has AVX2 but we couldn't detect it, still try v3
+            # opportunistically — costs nothing if it doesn't match.
+            if repo_pats.get("avx2"):
+                attempts.append(("v3 (AVX2, opportunistic)", repo_pats["avx2"]))
+
+        # Generic last-resort pattern.
+        if generic_pat:
+            attempts.append(("generic", generic_pat))
+
+        for label, pat in attempts:
+            regex = re.compile(pat, re.IGNORECASE)
+            for a in assets:
+                if regex.match(a.get("name", "")):
+                    return a, label
+        return None, None
 
     def _attempt_repo(target_repo):
-        """Attempt download+install from the specified repo."""
-        nonlocal pin
         ui.step(f"Fetching release from {target_repo}...")
         try:
             release = _fetch_release(target_repo, pin=pin)
@@ -222,113 +319,95 @@ def _install_github_asset(name, info, env):
             ui.error(f"Failed to fetch release info: {e}")
             return False
 
-        # 2. Select asset based on AVX2 support
-        if env.has_avx2:
-            pattern = re.compile(r"^mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z$")
-            label = "v3 (AVX2)"
-        else:
-            pattern = re.compile(r"^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$")
-            label = "x86_64"
-
-        asset = None
-        assets = release.get("assets", [])
-        for a in assets:
-            if pattern.match(a["name"]):
-                asset = a
-                break
-
+        asset, label = _select_asset(release, target_repo)
         if not asset:
-            ui.error(f"No matching {label} asset found in {target_repo} release")
+            ui.error(f"No matching mpv asset found in {target_repo} release")
             return False
 
-        download_url = asset["browser_download_url"]
-        asset_name = asset["name"]
-        asset_size_mb = asset.get("size", 0) / (1024 * 1024)
+        download_url   = asset["browser_download_url"]
+        asset_name     = asset["name"]
+        asset_size_mb  = asset.get("size", 0) / (1024 * 1024)
+        assets         = release.get("assets", [])
 
-        sha_asset = None
-        for a in assets:
-            if a.get("name") == f"{asset_name}.sha256":
-                sha_asset = a
-                break
-        if not sha_asset:
-            ui.error(f"Missing sha256 for {asset_name} in {target_repo} release")
-            return False
+        # Resolve expected SHA-256 from the most authoritative source available.
+        expected_sha = (
+            _digest_from_asset(asset)
+            or _digest_from_companion(assets, asset_name)
+            or _digest_from_aggregate(assets, asset_name)
+        )
 
-        # 3. Ensure 7-Zip is available for extraction
+        if not expected_sha:
+            if require_sha:
+                ui.error(
+                    f"No SHA-256 available for {asset_name} and "
+                    "MPV_REQUIRE_SHA256=1 is set — aborting."
+                )
+                return False
+            ui.warn(
+                f"No SHA-256 metadata found for {asset_name}. Continuing "
+                "(HTTPS still guarantees transport integrity). Set "
+                "MPV_REQUIRE_SHA256=1 to make this a hard error."
+            )
+
+        # 7-Zip is needed for .7z extraction.
         if not _ensure_7zip():
             ui.error("Cannot extract .7z archive without 7-Zip.")
             return False
-
         sevenz = _find_7z()
         if not sevenz:
             ui.error("7z.exe not found even after installation.")
             return False
 
-        # 4. Download asset + sha256
         os.makedirs(install_dir, exist_ok=True)
         archive_path = os.path.join(install_dir, asset_name)
-        sha_path = os.path.join(install_dir, f"{asset_name}.sha256")
 
         ui.step(f"Downloading {asset_name} ({label}, {asset_size_mb:.1f} MB)...")
         try:
             urllib.request.urlretrieve(download_url, archive_path)
-            urllib.request.urlretrieve(sha_asset["browser_download_url"], sha_path)
         except Exception as e:
             ui.error(f"Download failed: {e}")
             return False
 
-        try:
-            import hashlib
-            with open(sha_path, "r", encoding="utf-8") as fh:
-                sha_line = fh.read().strip().split()
-            if not sha_line or not SHA256_HEX_PATTERN.fullmatch(sha_line[0]):
-                ui.error("Invalid sha256 file format for mpv archive.")
-                try:
-                    os.remove(archive_path)
-                    os.remove(sha_path)
-                except OSError:
-                    pass
-                return False
-            expected = sha_line[0]
-            h = hashlib.sha256()
-            with open(archive_path, "rb") as fh:
-                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                    h.update(chunk)
-            actual = h.hexdigest()
-            if not expected or actual.lower() != expected.lower():
-                ui.error("SHA256 verification failed for mpv archive.")
-                try:
-                    os.remove(archive_path)
-                    os.remove(sha_path)
-                except OSError:
-                    pass
-                return False
-        except Exception as e:
-            ui.error(f"SHA256 verification failed: {e}")
+        # Verify SHA-256 if we have an expected value.
+        if expected_sha:
             try:
-                os.remove(archive_path)
-                os.remove(sha_path)
-            except OSError:
-                pass
-            return False
+                h = hashlib.sha256()
+                with open(archive_path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                        h.update(chunk)
+                actual = h.hexdigest().lower()
+                if actual != expected_sha.lower():
+                    ui.error(
+                        f"SHA-256 mismatch for {asset_name}\n"
+                        f"  expected: {expected_sha}\n"
+                        f"  actual:   {actual}"
+                    )
+                    try:
+                        os.remove(archive_path)
+                    except OSError:
+                        pass
+                    return False
+                ui.success(f"SHA-256 verified ({expected_sha[:16]}…)")
+            except Exception as e:
+                ui.error(f"SHA-256 verification error: {e}")
+                try:
+                    os.remove(archive_path)
+                except OSError:
+                    pass
+                return False
 
-        # 5. Extract
         ui.step(f"Extracting to {install_dir}...")
         ok = _run([sevenz, "x", "-y", f"-o{install_dir}", archive_path])
         if not ok:
             ui.error("Extraction failed.")
             return False
 
-        # Clean up archive + sha
         try:
             os.remove(archive_path)
-            os.remove(sha_path)
         except OSError:
             pass
 
         _flatten_single_dir(install_dir)
-
-        # 6. Add to PATH
         _add_to_path(install_dir)
 
         ui.success(f"mpv {label} installed to {install_dir}")
