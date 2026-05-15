@@ -68,8 +68,21 @@ if (Test-Path $INSTALL_DIR) {
 }
 
 if ($useGit) {
-    git clone --depth=1 "https://github.com/$REPO.git" $INSTALL_DIR 2>$null
-    Write-Host "  + Cloned successfully" -ForegroundColor Green
+    # Git writes its normal progress to stderr. With ErrorActionPreference="Stop",
+    # PowerShell would treat that as a fatal NativeCommandError even on success.
+    # We temporarily relax the preference around just this call and check $LASTEXITCODE
+    # ourselves — this is the minimal, surgical fix.
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        git clone --depth=1 "https://github.com/$REPO.git" $INSTALL_DIR 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "git clone failed with exit code $LASTEXITCODE"
+        }
+        Write-Host "  + Cloned successfully" -ForegroundColor Green
+    } finally {
+        $ErrorActionPreference = $prevPref
+    }
 } else {
     $zipUrl = "https://github.com/$REPO/archive/refs/heads/$BRANCH.zip"
     $zipPath = "$env:TEMP\mpv-config.zip"
