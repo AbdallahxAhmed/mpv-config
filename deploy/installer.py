@@ -908,7 +908,7 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
         try:
             with ui.spinner(f"Installing {name}..."):
                 dep_info = SYSTEM_DEPS.get(name, {})
-        ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
+                ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})

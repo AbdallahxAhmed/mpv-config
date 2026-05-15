@@ -19,10 +19,12 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 
 if (-not $isAdmin) {
-    Write-Host "Re-launching as Administrator..." -ForegroundColor Yellow
-    $scriptUrl = "https://raw.githubusercontent.com/$REPO/$BRANCH/install.ps1"
-    Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"irm $scriptUrl | iex`""
-    exit
+    Write-Host ""
+    Write-Host "  [!] This script requires Administrator privileges." -ForegroundColor Red
+    Write-Host "  Run PowerShell as Administrator, then re-run:" -ForegroundColor Yellow
+    Write-Host "  irm https://raw.githubusercontent.com/$REPO/$BRANCH/install.ps1 | iex" -ForegroundColor Cyan
+    Write-Host ""
+    exit 1
 }
 
 Write-Host ""
