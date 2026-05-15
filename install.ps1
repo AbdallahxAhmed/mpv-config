@@ -4,9 +4,13 @@
 #  Usage:
 #    irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 #
+#  To use Windows Terminal instead of ConHost:
+#    $env:MPV_USE_WT=1; irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
+#
 #  Environment variables (optional):
 #    MPV_NO_PAUSE=1            — skip the "Press Enter to close" prompt
 #    MPV_FFSUBSYNC_BUILD=1     — allow ffsubsync source builds
+#    MPV_USE_WT=1              — use Windows Terminal for elevation (if available)
 #    MPV_BOOTSTRAPPED=1        — internal flag, set by self-elevation
 # ───────────────────────────────────────────────────────────────────
 
@@ -95,27 +99,42 @@ if (-not $isAdmin) {
         exit 1
     }
 
+    # Decide whether to use Windows Terminal or direct shell launch.
+    # WHY: wt.exe can cause "3 windows" issues with nested quotes, but some
+    # users prefer it for the UI. We make it opt-in via MPV_USE_WT=1.
+    $useWT = ($env:MPV_USE_WT -eq "1") -and (Get-Command wt.exe -ErrorAction SilentlyContinue)
+
     try {
-        Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", $tempScript
-        ) -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
-    } catch {
-        # PS 5.1's Start-Process doesn't support -Environment. Fall back without it;
-        # the child re-downloads on its own and the lack of the guard flag is fine
-        # because the elevated process WILL be admin.
-        try {
-            Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
+        if ($useWT) {
+            # Windows Terminal path: pass the script file path directly.
+            # We use --title to set a clear window title.
+            Start-Process wt.exe -Verb RunAs -ArgumentList @(
+                "--title", "MPV Auto-Deploy (Administrator)",
+                $hostExe, "-NoProfile", "-ExecutionPolicy", "Bypass",
                 "-File", $tempScript
             ) -ErrorAction Stop
-        } catch {
-            Write-Host "ERROR: UAC was cancelled or elevation failed." -ForegroundColor Red
-            Remove-Item -Force $tempScript -ErrorAction SilentlyContinue
-            exit 1
+        } else {
+            # Direct shell launch (default): most reliable, no middleman.
+            # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
+            try {
+                Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", $tempScript
+                ) -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
+            } catch {
+                # PS 5.1's Start-Process doesn't support -Environment.
+                Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
+                    "-NoProfile",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", $tempScript
+                ) -ErrorAction Stop
+            }
         }
+    } catch {
+        Write-Host "ERROR: UAC was cancelled or elevation failed." -ForegroundColor Red
+        Remove-Item -Force $tempScript -ErrorAction SilentlyContinue
+        exit 1
     }
 
     # Close the original (non-admin) window. The elevated child is independent.
@@ -134,8 +153,8 @@ Write-Host "+=============================================+" -ForegroundColor Cy
 Write-Host ""
 
 # Show which PowerShell edition we're on — useful for debugging AVX2 issues.
-$psEdition = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { "Desktop" }
-Write-Host "  PowerShell: $($PSVersionTable.PSVersion) ($psEdition)" -ForegroundColor DarkGray
+$psEditionInfo = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { "Desktop" }
+Write-Host "  PowerShell: $($PSVersionTable.PSVersion) ($psEditionInfo)" -ForegroundColor DarkGray
 Write-Host ""
 
 # ─── Step 1: Check prerequisites ─────────────────────────────────────
