@@ -1,16 +1,18 @@
 # ───────────────────────────────────────────────────────────────────
 #  MPV Auto-Deploy — Windows One-Liner Installer (PowerShell)
 #
-#  Usage:
-#    irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
+#  Usage (Recommended):
+#    1. Open Windows Terminal as Administrator (Right-click → Run as Administrator)
+#    2. Run: irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 #
-#  To use ConHost instead of Windows Terminal:
-#    $env:MPV_NO_WT=1; irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
+#  Alternative (Auto-elevation):
+#    Run from a non-admin shell and it will request elevation automatically:
+#    irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
+#    (Note: Opens in ConHost, not Windows Terminal, due to elevation limitations)
 #
 #  Environment variables (optional):
 #    MPV_NO_PAUSE=1            — skip the "Press Enter to close" prompt
 #    MPV_FFSUBSYNC_BUILD=1     — allow ffsubsync source builds
-#    MPV_NO_WT=1               — disable Windows Terminal, use ConHost instead
 #    MPV_BOOTSTRAPPED=1        — internal flag, set by self-elevation
 # ───────────────────────────────────────────────────────────────────
 
@@ -64,6 +66,21 @@ if (-not $isAdmin) {
         exit 1
     }
 
+    Write-Host ""
+    Write-Host "╔════════════════════════════════════════════════════════════════╗" -ForegroundColor Yellow
+    Write-Host "║  Administrator privileges required                             ║" -ForegroundColor Yellow
+    Write-Host "╠════════════════════════════════════════════════════════════════╣" -ForegroundColor Yellow
+    Write-Host "║  Recommended: Open Windows Terminal as Admin and run again     ║" -ForegroundColor Cyan
+    Write-Host "║  Alternative: Continue with auto-elevation (opens ConHost)     ║" -ForegroundColor Gray
+    Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
+    Write-Host ""
+
+    $choice = Read-Host "Continue with auto-elevation? (Y/n)"
+    if ($choice -eq "n" -or $choice -eq "N") {
+        Write-Host "Cancelled. Please run from an elevated Windows Terminal." -ForegroundColor Yellow
+        exit 0
+    }
+
     # Discover the exact shell executable the user is running. This is what
     # makes pwsh stay pwsh and powershell stay powershell — without hardcoding.
     $hostExe = $null
@@ -99,42 +116,28 @@ if (-not $isAdmin) {
         exit 1
     }
 
-    # Decide whether to use Windows Terminal or direct shell launch.
-    # WHY: Windows Terminal provides better UI, but can be disabled via MPV_NO_WT=1
-    # if users prefer ConHost or encounter compatibility issues.
-    $useWT = ($env:MPV_NO_WT -ne "1") -and (Get-Command wt.exe -ErrorAction SilentlyContinue)
-
+    # Launch elevated shell directly (most reliable method).
+    # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
+    # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
     try {
-        if ($useWT) {
-            # Windows Terminal path: pass the script file path directly.
-            # We use --title to set a clear window title.
-            Start-Process wt.exe -Verb RunAs -ArgumentList @(
-                "--title", "MPV Auto-Deploy (Administrator)",
-                $hostExe, "-NoProfile", "-ExecutionPolicy", "Bypass",
+        Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", $tempScript
+        ) -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
+    } catch {
+        # PS 5.1's Start-Process doesn't support -Environment.
+        try {
+            Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
                 "-File", $tempScript
             ) -ErrorAction Stop
-        } else {
-            # Direct shell launch (default): most reliable, no middleman.
-            # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
-            try {
-                Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-                    "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", $tempScript
-                ) -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
-            } catch {
-                # PS 5.1's Start-Process doesn't support -Environment.
-                Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-                    "-NoProfile",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", $tempScript
-                ) -ErrorAction Stop
-            }
+        } catch {
+            Write-Host "ERROR: UAC was cancelled or elevation failed." -ForegroundColor Red
+            Remove-Item -Force $tempScript -ErrorAction SilentlyContinue
+            exit 1
         }
-    } catch {
-        Write-Host "ERROR: UAC was cancelled or elevation failed." -ForegroundColor Red
-        Remove-Item -Force $tempScript -ErrorAction SilentlyContinue
-        exit 1
     }
 
     # Close the original (non-admin) window. The elevated child is independent.
