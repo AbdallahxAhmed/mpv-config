@@ -53,7 +53,7 @@ LINUX_VISUAL_TUNING_BLOCK = (
 
 def _process_conditionals(content, blocks):
     """Process {{#if NAME}}...{{/if}} blocks atomically per named block."""
-    pattern = re.compile(r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n?', flags=re.DOTALL)
+    pattern = re.compile(r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n*', flags=re.DOTALL)
     return pattern.sub(lambda m: m.group(2) if blocks.get(m.group(1)) else "", content)
 
 
@@ -271,7 +271,9 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
         try:
             same_drive = os.stat(temp_restore).st_dev == os.stat(config_dir).st_dev
         except OSError:
-            same_drive = os.path.splitdrive(temp_restore)[0].lower() == os.path.splitdrive(config_dir)[0].lower()
+            drive_temp = os.path.splitdrive(temp_restore)[0]
+            drive_config = os.path.splitdrive(config_dir)[0]
+            same_drive = bool(drive_temp) and drive_temp.lower() == drive_config.lower()
         for item in os.listdir(temp_restore):
             src = os.path.join(temp_restore, item)
             dst = os.path.join(config_dir, item)

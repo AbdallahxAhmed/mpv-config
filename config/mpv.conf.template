@@ -99,7 +99,7 @@ scale-antiring            = 0.7
 cscale-antiring           = 0.5
 
 # ─── Dither — 10-bit panel (confirmed via OSD: Format rgb10a2) ───────
-# dither-depth=auto on gpu-next defaults to 8-bit (mpv bug #11862).
+# dither-depth=auto on gpu-next defaults to 8-bit (mpv issue #11862: https://github.com/mpv-player/mpv/issues/11862).
 # Explicit =10 restores the full 10-bit pipeline.
 dither-depth              = {{DITHER_DEPTH}}
 temporal-dither           = yes

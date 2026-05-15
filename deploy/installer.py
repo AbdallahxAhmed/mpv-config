@@ -177,7 +177,9 @@ def _add_to_path(directory):
                 "$result = [uintptr]::Zero; "
                 "[Win32.NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [uintptr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null"
             ]
-            subprocess.run(broadcast_cmd, capture_output=True, timeout=10)
+            broadcast_result = subprocess.run(broadcast_cmd, capture_output=True, text=True, timeout=10)
+            if broadcast_result.returncode != 0:
+                ui.warn("Failed to broadcast PATH change to other processes.")
         else:
             ui.info(f"{directory} already in PATH")
         return True
@@ -276,7 +278,15 @@ def _install_github_asset(name, info, env):
             import hashlib
             with open(sha_path, "r", encoding="utf-8") as fh:
                 sha_line = fh.read().strip().split()
-            expected = sha_line[0] if sha_line else ""
+            if not sha_line or not re.fullmatch(r"[0-9a-fA-F]{64}", sha_line[0]):
+                ui.error("Invalid sha256 file format for mpv archive.")
+                try:
+                    os.remove(archive_path)
+                    os.remove(sha_path)
+                except OSError:
+                    pass
+                return False
+            expected = sha_line[0]
             h = hashlib.sha256()
             with open(archive_path, "rb") as fh:
                 for chunk in iter(lambda: fh.read(1024 * 1024), b""):

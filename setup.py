@@ -198,10 +198,12 @@ def _extract_overrides(content, defaults):
         default_value = defaults.get(current_section, {}).get(key)
         if default_value is None:
             keep = True
-        elif placeholder_pattern.search(default_value):
-            keep = False
         else:
-            keep = value != default_value.strip()
+            default_value = default_value.strip()
+            if placeholder_pattern.search(default_value):
+                keep = False
+            else:
+                keep = value != default_value
         if keep:
             _ensure_section(current_section)
             overrides[current_section].append((key, value))
@@ -850,7 +852,7 @@ def main():
         "--display-mode",
         choices=["auto", "fixed", "vrr"],
         default="fixed",
-        help="Display sync mode: fixed (default), vrr, or auto (requires explicit vrr opt-in)",
+        help="Display sync mode: fixed (default), vrr, or auto (currently behaves like fixed unless vrr is chosen)",
     )
     parser.add_argument(
         "--dither-depth",
