@@ -4,13 +4,13 @@
 #  Usage:
 #    irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 #
-#  To use Windows Terminal instead of ConHost:
-#    $env:MPV_USE_WT=1; irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
+#  To use ConHost instead of Windows Terminal:
+#    $env:MPV_NO_WT=1; irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 #
 #  Environment variables (optional):
 #    MPV_NO_PAUSE=1            — skip the "Press Enter to close" prompt
 #    MPV_FFSUBSYNC_BUILD=1     — allow ffsubsync source builds
-#    MPV_USE_WT=1              — use Windows Terminal for elevation (if available)
+#    MPV_NO_WT=1               — disable Windows Terminal, use ConHost instead
 #    MPV_BOOTSTRAPPED=1        — internal flag, set by self-elevation
 # ───────────────────────────────────────────────────────────────────
 
@@ -100,9 +100,9 @@ if (-not $isAdmin) {
     }
 
     # Decide whether to use Windows Terminal or direct shell launch.
-    # WHY: wt.exe can cause "3 windows" issues with nested quotes, but some
-    # users prefer it for the UI. We make it opt-in via MPV_USE_WT=1.
-    $useWT = ($env:MPV_USE_WT -eq "1") -and (Get-Command wt.exe -ErrorAction SilentlyContinue)
+    # WHY: Windows Terminal provides better UI, but can be disabled via MPV_NO_WT=1
+    # if users prefer ConHost or encounter compatibility issues.
+    $useWT = ($env:MPV_NO_WT -ne "1") -and (Get-Command wt.exe -ErrorAction SilentlyContinue)
 
     try {
         if ($useWT) {
