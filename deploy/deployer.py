@@ -51,10 +51,12 @@ LINUX_VISUAL_TUNING_BLOCK = (
 )
 
 
+CONDITIONAL_BLOCK_PATTERN = re.compile(r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n*', flags=re.DOTALL)
+
+
 def _process_conditionals(content, blocks):
     """Process {{#if NAME}}...{{/if}} blocks atomically per named block."""
-    pattern = re.compile(r'\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n*', flags=re.DOTALL)
-    return pattern.sub(lambda m: m.group(2) if blocks.get(m.group(1)) else "", content)
+    return CONDITIONAL_BLOCK_PATTERN.sub(lambda m: m.group(2) if blocks.get(m.group(1)) else "", content)
 
 
 def _resolve_screenshot_dir(env):

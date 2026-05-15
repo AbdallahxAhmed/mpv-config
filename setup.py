@@ -852,7 +852,7 @@ def main():
         "--display-mode",
         choices=["auto", "fixed", "vrr"],
         default="fixed",
-        help="Display sync mode: fixed (default), vrr, or auto (currently behaves like fixed unless vrr is chosen)",
+        help="Display sync mode: fixed (default), vrr, or auto (alias of fixed; vrr requires explicit opt-in)",
     )
     parser.add_argument(
         "--dither-depth",

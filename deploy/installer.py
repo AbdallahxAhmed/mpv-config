@@ -92,6 +92,9 @@ def _find_7z():
     return None
 
 
+SHA256_HEX_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
+
+
 def _fetch_latest_release(repo):
     """Fetch GitHub latest release metadata."""
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -278,7 +281,7 @@ def _install_github_asset(name, info, env):
             import hashlib
             with open(sha_path, "r", encoding="utf-8") as fh:
                 sha_line = fh.read().strip().split()
-            if not sha_line or not re.fullmatch(r"[0-9a-fA-F]{64}", sha_line[0]):
+            if not sha_line or not SHA256_HEX_PATTERN.fullmatch(sha_line[0]):
                 ui.error("Invalid sha256 file format for mpv archive.")
                 try:
                     os.remove(archive_path)
