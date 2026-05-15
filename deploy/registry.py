@@ -104,6 +104,7 @@ SCRIPTS = [
             "type": "github_raw",
             "repo": "mpv-player/mpv",
             "branch": "master",
+            "pin": "v0.40.0",
             "files": [{"src": "TOOLS/lua/autoload.lua", "dest": "scripts/autoload.lua"}],
         },
         "config": None,
@@ -143,6 +144,7 @@ SCRIPTS = [
             "type": "github_raw",
             "repo": "mpv-player/mpv",
             "branch": "master",
+            "pin": "v0.40.0",
             "files": [{"src": "TOOLS/lua/pause-when-minimize.lua", "dest": "scripts/pause-when-minimize.lua"}],
         },
         "config": None,
@@ -164,12 +166,29 @@ SHADERS = {
     "extensions": [".glsl"],
 }
 
+ANIME4K_CHAINS = {
+    "off": "",
+    "fast": "Anime4K_Clamp_Highlights;Anime4K_Upscale_CNN_x2_S;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_S",
+    "A": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+    "A+A": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_Restore_CNN_M;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+    "B": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_Soft_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+    "C": "Anime4K_Clamp_Highlights;Anime4K_Upscale_Denoise_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+}
+
+SCALER_TIERS = {
+    "light": {"scale": "spline36", "cscale": "spline36", "dscale": "mitchell"},
+    "balanced": {"scale": "ewa_lanczos", "cscale": "spline36", "dscale": "mitchell"},
+    "quality": {"scale": "ewa_lanczos", "cscale": "ewa_lanczos", "dscale": "mitchell"},
+}
+
 SYSTEM_DEPS = {
     # ── Category A — CLI executables ── NEVER pip ──────────────
     "mpv": {
         "windows": {
             "method": "github_asset",
             "repo": "zhongfly/mpv-winbuild",
+            "pin": "2025-01-15",
+            "fallback_repo": "shinchiro/mpv-winbuild-cmake",
             # Asset selection: v3 (AVX2) vs regular decided at install time
             "install_dir": WINDOWS_MPV_DIR,
             "ensure_in_dir": WINDOWS_MPV_DIR,
@@ -290,7 +309,7 @@ MPV_EXPERIENCE_PROFILES = {
     # Per-OS technical compatibility fallbacks are applied in deployer.py.
     "windows-like": {
         "gpu_api": "d3d11",
-        "hwdec": "auto-safe",
+        "hwdec": "d3d11va",
         # Empty means no explicit override; let mpv pick a suitable context.
         "gpu_context": "",
         "vo": "gpu-next",
@@ -308,7 +327,7 @@ MPV_EXPERIENCE_PROFILES = {
 PLATFORM_NATIVE_MPV_DEFAULTS = {
     "windows": {
         "gpu_api": "d3d11",
-        "hwdec": "auto-safe",
+        "hwdec": "d3d11va",
         "gpu_context": "",
         "vo": "gpu-next",
     },

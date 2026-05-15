@@ -92,6 +92,9 @@ def _find_7z():
     return None
 
 
+SHA256_HEX_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
+
+
 def _fetch_latest_release(repo):
     """Fetch GitHub latest release metadata."""
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
@@ -165,6 +168,21 @@ def _add_to_path(directory):
             ui.success(f"Added {directory} to user PATH")
             # Also update current process PATH so mpv is findable immediately
             os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + directory
+            broadcast_cmd = [
+                "powershell", "-NoProfile", "-Command",
+                "$sig=@'\n"
+                "[DllImport(\"user32.dll\", SetLastError=true, CharSet=CharSet.Auto)]\n"
+                "public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);\n"
+                "'@; "
+                "Add-Type -MemberDefinition $sig -Name NativeMethods -Namespace Win32; "
+                "$HWND_BROADCAST = [intptr]0xffff; "
+                "$WM_SETTINGCHANGE = 0x1A; "
+                "$result = [uintptr]::Zero; "
+                "[Win32.NativeMethods]::SendMessageTimeout($HWND_BROADCAST, $WM_SETTINGCHANGE, [uintptr]::Zero, 'Environment', 2, 5000, [ref]$result) | Out-Null"
+            ]
+            broadcast_result = subprocess.run(broadcast_cmd, capture_output=True, text=True, timeout=10)
+            if broadcast_result.returncode != 0:
+                ui.warn("Failed to broadcast PATH change to other processes.")
         else:
             ui.info(f"{directory} already in PATH")
         return True
@@ -173,85 +191,154 @@ def _add_to_path(directory):
         return False
 
 
+def _fetch_release(repo, pin=None):
+    """Fetch GitHub release metadata (latest or pinned tag)."""
+    if pin:
+        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{pin}"
+    else:
+        api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    req = urllib.request.Request(
+        api_url,
+        headers={"Accept": "application/json", "User-Agent": "mpv-config"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
 def _install_github_asset(name, info, env):
     """Download a GitHub release asset (.7z), extract, and add to PATH."""
     repo = info["repo"]
+    fallback_repo = info.get("fallback_repo")
+    pin = info.get("pin")
     install_dir = info.get("install_dir", r"C:\Program Files\mpv")
-    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
 
-    # 1. Fetch latest release metadata
-    ui.step(f"Fetching latest release from {repo}...")
-    try:
-        req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            release = json.loads(resp.read())
-    except Exception as e:
-        ui.error(f"Failed to fetch release info: {e}")
-        return False
+    def _attempt_repo(target_repo):
+        """Attempt download+install from the specified repo."""
+        nonlocal pin
+        ui.step(f"Fetching release from {target_repo}...")
+        try:
+            release = _fetch_release(target_repo, pin=pin)
+        except Exception as e:
+            ui.error(f"Failed to fetch release info: {e}")
+            return False
 
-    # 2. Select asset based on AVX2 support
-    if env.has_avx2:
-        pattern = re.compile(r"^mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z$")
-        label = "v3 (AVX2)"
-    else:
-        pattern = re.compile(r"^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$")
-        label = "x86_64"
+        # 2. Select asset based on AVX2 support
+        if env.has_avx2:
+            pattern = re.compile(r"^mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z$")
+            label = "v3 (AVX2)"
+        else:
+            pattern = re.compile(r"^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$")
+            label = "x86_64"
 
-    asset = None
-    for a in release.get("assets", []):
-        if pattern.match(a["name"]):
-            asset = a
-            break
+        asset = None
+        assets = release.get("assets", [])
+        for a in assets:
+            if pattern.match(a["name"]):
+                asset = a
+                break
 
-    if not asset:
-        ui.error(f"No matching {label} asset found in {repo} release")
-        return False
+        if not asset:
+            ui.error(f"No matching {label} asset found in {target_repo} release")
+            return False
 
-    download_url = asset["browser_download_url"]
-    asset_name = asset["name"]
-    asset_size_mb = asset.get("size", 0) / (1024 * 1024)
+        download_url = asset["browser_download_url"]
+        asset_name = asset["name"]
+        asset_size_mb = asset.get("size", 0) / (1024 * 1024)
 
-    # 3. Ensure 7-Zip is available for extraction
-    if not _ensure_7zip():
-        ui.error("Cannot extract .7z archive without 7-Zip.")
-        return False
+        sha_asset = None
+        for a in assets:
+            if a.get("name") == f"{asset_name}.sha256":
+                sha_asset = a
+                break
+        if not sha_asset:
+            ui.error(f"Missing sha256 for {asset_name} in {target_repo} release")
+            return False
 
-    sevenz = _find_7z()
-    if not sevenz:
-        ui.error("7z.exe not found even after installation.")
-        return False
+        # 3. Ensure 7-Zip is available for extraction
+        if not _ensure_7zip():
+            ui.error("Cannot extract .7z archive without 7-Zip.")
+            return False
 
-    # 4. Download asset
-    os.makedirs(install_dir, exist_ok=True)
-    archive_path = os.path.join(install_dir, asset_name)
+        sevenz = _find_7z()
+        if not sevenz:
+            ui.error("7z.exe not found even after installation.")
+            return False
 
-    ui.step(f"Downloading {asset_name} ({label}, {asset_size_mb:.1f} MB)...")
-    try:
-        urllib.request.urlretrieve(download_url, archive_path)
-    except Exception as e:
-        ui.error(f"Download failed: {e}")
-        return False
+        # 4. Download asset + sha256
+        os.makedirs(install_dir, exist_ok=True)
+        archive_path = os.path.join(install_dir, asset_name)
+        sha_path = os.path.join(install_dir, f"{asset_name}.sha256")
 
-    # 5. Extract
-    ui.step(f"Extracting to {install_dir}...")
-    ok = _run([sevenz, "x", "-y", f"-o{install_dir}", archive_path])
-    if not ok:
-        ui.error("Extraction failed.")
-        return False
+        ui.step(f"Downloading {asset_name} ({label}, {asset_size_mb:.1f} MB)...")
+        try:
+            urllib.request.urlretrieve(download_url, archive_path)
+            urllib.request.urlretrieve(sha_asset["browser_download_url"], sha_path)
+        except Exception as e:
+            ui.error(f"Download failed: {e}")
+            return False
 
-    # Clean up archive
-    try:
-        os.remove(archive_path)
-    except OSError:
-        pass
+        try:
+            import hashlib
+            with open(sha_path, "r", encoding="utf-8") as fh:
+                sha_line = fh.read().strip().split()
+            if not sha_line or not SHA256_HEX_PATTERN.fullmatch(sha_line[0]):
+                ui.error("Invalid sha256 file format for mpv archive.")
+                try:
+                    os.remove(archive_path)
+                    os.remove(sha_path)
+                except OSError:
+                    pass
+                return False
+            expected = sha_line[0]
+            h = hashlib.sha256()
+            with open(archive_path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            actual = h.hexdigest()
+            if not expected or actual.lower() != expected.lower():
+                ui.error("SHA256 verification failed for mpv archive.")
+                try:
+                    os.remove(archive_path)
+                    os.remove(sha_path)
+                except OSError:
+                    pass
+                return False
+        except Exception as e:
+            ui.error(f"SHA256 verification failed: {e}")
+            try:
+                os.remove(archive_path)
+                os.remove(sha_path)
+            except OSError:
+                pass
+            return False
 
-    _flatten_single_dir(install_dir)
+        # 5. Extract
+        ui.step(f"Extracting to {install_dir}...")
+        ok = _run([sevenz, "x", "-y", f"-o{install_dir}", archive_path])
+        if not ok:
+            ui.error("Extraction failed.")
+            return False
 
-    # 6. Add to PATH
-    _add_to_path(install_dir)
+        # Clean up archive + sha
+        try:
+            os.remove(archive_path)
+            os.remove(sha_path)
+        except OSError:
+            pass
 
-    ui.success(f"mpv {label} installed to {install_dir}")
-    return True
+        _flatten_single_dir(install_dir)
+
+        # 6. Add to PATH
+        _add_to_path(install_dir)
+
+        ui.success(f"mpv {label} installed to {install_dir}")
+        return True
+
+    ok = _attempt_repo(repo)
+    if not ok and fallback_repo:
+        ui.warn(f"Primary mpv repo failed, trying fallback: {fallback_repo}")
+        ok = _attempt_repo(fallback_repo)
+    return ok
 
 
 def _install_github_release_zip(name, info, env):
@@ -524,7 +611,7 @@ def _uninstall_uv_tool(info, env):
                     pass
     return ok
 
-def _install_one(name, dep_info, env):
+def _install_one(name, dep_info, env, mpv_version=None):
     """Install a single dependency using the appropriate method."""
     platform = env.platform_key
 
@@ -533,6 +620,8 @@ def _install_one(name, dep_info, env):
     if not info:
         ui.warn(f"No install method for {name} on {platform}")
         return False
+    if name == "mpv" and mpv_version:
+        info = {**info, "pin": mpv_version}
 
     method = info["method"]
 
@@ -734,7 +823,7 @@ def uninstall_deps(env, remove_python=False, dry_run=False, pre_existing_pkgs=No
     return results
 
 
-def install_deps(env, dry_run=False, audit_log=None):
+def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     """
     Install all missing system dependencies.
 
@@ -819,7 +908,7 @@ def install_deps(env, dry_run=False, audit_log=None):
         try:
             with ui.spinner(f"Installing {name}..."):
                 dep_info = SYSTEM_DEPS.get(name, {})
-                ok = _install_one(name, dep_info, env)
+        ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})
