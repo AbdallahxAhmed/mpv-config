@@ -28,7 +28,7 @@ d3d11-output-format       = auto
 d3d11-flip                = {{D3D11_FLIP}}
 
 # ─── Hardware decoding — TRUE zero-copy on Windows/NVIDIA ────────────
-# VALIDATED: d3d11va keeps frames in VRAM end-to-end (decode→shaders→present).
+# VALIDATED: d3d11va keeps frames in VRAM end-to-end (decode->shaders->present).
 # Measured on RTX 3060: d3d11va = 1.4ms avg frame time vs nvdec-copy = 5.3ms.
 # -copy variants are only needed for CPU vf= filters, NEVER for glsl-shaders.
 hwdec                     = {{HWDEC}}

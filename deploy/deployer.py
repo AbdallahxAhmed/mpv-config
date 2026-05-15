@@ -90,6 +90,10 @@ def _resolve_display_mode(mode):
     }
 
 
+BPP_10BIT = 30
+BPP_8BIT_MIN = 1
+
+
 def _detect_dither_depth(env):
     import subprocess
     if env.os != "windows":
@@ -103,9 +107,9 @@ def _detect_dither_depth(env):
         if res.returncode == 0 and res.stdout.strip():
             try:
                 bpp = int(float(res.stdout.strip()))
-                if bpp >= 30:
+                if bpp >= BPP_10BIT:
                     return "10"
-                if bpp > 0:
+                if bpp >= BPP_8BIT_MIN:
                     return "8"
             except ValueError:
                 return None
@@ -264,7 +268,10 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                         raise
 
         # Move restored files into config_dir (which still exists with .git)
-        same_drive = os.path.splitdrive(temp_restore)[0].lower() == os.path.splitdrive(config_dir)[0].lower()
+        try:
+            same_drive = os.stat(temp_restore).st_dev == os.stat(config_dir).st_dev
+        except OSError:
+            same_drive = os.path.splitdrive(temp_restore)[0].lower() == os.path.splitdrive(config_dir)[0].lower()
         for item in os.listdir(temp_restore):
             src = os.path.join(temp_restore, item)
             dst = os.path.join(config_dir, item)
