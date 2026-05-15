@@ -438,8 +438,8 @@ def _patch_mpv_conf(
         dither_value = _detect_dither_depth(env) or "auto"
 
     if audit_log:
-       display_fps = _detect_display_fps(env)
-       detail = display_fps or "unknown"
+        display_fps = _detect_display_fps(env)
+        detail = display_fps or "unknown"
         audit_log.record_note("display_fps_detected", f"detected_display_fps={detail}")
         if display_mode == "auto":
             audit_log.record_note("display_mode", "auto → fixed (vrr requires explicit --display-mode vrr)")
