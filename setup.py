@@ -246,7 +246,7 @@ def _write_mpv_conf_user(dest_path, order, overrides):
 
 
 def _migrate_input_conf(input_conf_path, audit_log=None):
-    """Update stale system keybindings in input.conf (e.g. F8 night mode)
+    """Update stale system keybindings in input.conf (e.g. F8 night mode, mouse right-click pause)
     while preserving all custom user keybindings and comments."""
     if not os.path.isfile(input_conf_path):
         return False
@@ -254,18 +254,21 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     with open(input_conf_path, "r", encoding="utf-8") as f:
         content = f.read()
 
+    updated_content = content
+
+    # 1. Migrate F8 night mode binding
     new_f8_binding = (
         'F8 cycle-values af '
         '"lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],lavfi=[alimiter=limit=0.9:level=false]" ""'
     )
 
-    pattern = re.compile(
+    pattern_f8 = re.compile(
         r'^[ \t]*F8[ \t]+cycle-values[ \t]+af[ \t]+["\']lavfi=\[dynaudnorm=[^"\']*\]["\'][ \t]+["\']["\'][ \t]*$',
         re.MULTILINE,
     )
 
-    if pattern.search(content):
-        updated_content = pattern.sub(new_f8_binding, content)
+    if pattern_f8.search(updated_content):
+        updated_content = pattern_f8.sub(new_f8_binding, updated_content)
         old_comment = (
             "# F8: (جديد) تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)\n"
             "# مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية"
@@ -282,14 +285,64 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         if old_comment in updated_content:
             updated_content = updated_content.replace(old_comment, new_comment)
 
-        if updated_content != content:
-            with open(input_conf_path, "w", encoding="utf-8") as f:
-                f.write(updated_content)
-            if audit_log:
-                audit_log.record_file(
-                    input_conf_path, "modify", "ok", "migrated F8 night mode binding"
-                )
-            return True
+    # 2. Migrate / ensure MBTN_RIGHT and MBTN_RIGHT_DBL mouse bindings
+    mbtn_right_match = re.search(
+        r'^[ \t]*MBTN_RIGHT[ \t]+([^\r\n#]+)', updated_content, re.MULTILINE
+    )
+    if mbtn_right_match:
+        current_cmd = mbtn_right_match.group(1).strip()
+        if current_cmd in ("context-menu", "show-text context-menu"):
+            updated_content = re.sub(
+                r'^[ \t]*MBTN_RIGHT[ \t]+[^\r\n#]+',
+                "MBTN_RIGHT       cycle pause",
+                updated_content,
+                count=1,
+                flags=re.MULTILINE,
+            )
+    else:
+        # MBTN_RIGHT is absent -> append mouse bindings block cleanly
+        mouse_block = (
+            "\n# ── Mouse Bindings ── Restore classic right-click pause over native context menu\n"
+            "MBTN_RIGHT       cycle pause\n"
+            "MBTN_RIGHT_DBL   ignore\n"
+        )
+        updated_content = updated_content.rstrip() + "\n" + mouse_block
+
+    # Check MBTN_RIGHT_DBL if MBTN_RIGHT was already present
+    mbtn_right_dbl_match = re.search(
+        r'^[ \t]*MBTN_RIGHT_DBL[ \t]+([^\r\n#]+)', updated_content, re.MULTILINE
+    )
+    if not mbtn_right_dbl_match:
+        updated_content = re.sub(
+            r'(^[ \t]*MBTN_RIGHT[ \t]+[^\r\n]+)',
+            r"\1\nMBTN_RIGHT_DBL   ignore",
+            updated_content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    elif mbtn_right_dbl_match.group(1).strip() in (
+        "context-menu",
+        "show-text context-menu",
+    ):
+        updated_content = re.sub(
+            r'^[ \t]*MBTN_RIGHT_DBL[ \t]+[^\r\n#]+',
+            "MBTN_RIGHT_DBL   ignore",
+            updated_content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    if updated_content != content:
+        with open(input_conf_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+        if audit_log:
+            audit_log.record_file(
+                input_conf_path,
+                "modify",
+                "ok",
+                "migrated input.conf bindings (F8, mouse)",
+            )
+        return True
 
     return False
 

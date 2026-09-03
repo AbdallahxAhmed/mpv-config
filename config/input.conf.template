@@ -111,6 +111,10 @@ F8 cycle-values af "lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],lavfi=[alimiter=li
 # ── Window close ── ensure WM close button kills mpv instantly ──
 CLOSE_WIN quit
 
+# ── Mouse Bindings ── Restore classic right-click pause over native context menu
+MBTN_RIGHT       cycle pause
+MBTN_RIGHT_DBL   ignore
+
 #######################################################################################
 #                                   نهاية الإعدادات                                   #
 #######################################################################################

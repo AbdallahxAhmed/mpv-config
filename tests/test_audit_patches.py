@@ -150,6 +150,60 @@ class TestAuditPatches(unittest.TestCase):
             )
             self.assertNotIn("dynaudnorm=f=250:g=31:p=0.5", new_content)
 
+    def test_input_conf_mouse_right_click_bindings(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        input_template = os.path.join(repo_root, "config", "input.conf.template")
+
+        with open(input_template, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("MBTN_RIGHT       cycle pause", content)
+        self.assertIn("MBTN_RIGHT_DBL   ignore", content)
+
+    def test_migrate_input_conf_updates_mbtn_right_from_context_menu(self):
+        from setup import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                "# User keys\n"
+                "MBTN_RIGHT context-menu\n"
+                "MBTN_RIGHT_DBL context-menu\n"
+                "w cycle sub\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("MBTN_RIGHT       cycle pause", new_content)
+            self.assertIn("MBTN_RIGHT_DBL   ignore", new_content)
+            self.assertIn("w cycle sub", new_content)
+            self.assertNotIn("context-menu", new_content)
+
+    def test_migrate_input_conf_appends_mbtn_right_when_absent(self):
+        from setup import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = "SPACE cycle pause\n"
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("SPACE cycle pause", new_content)
+            self.assertIn("MBTN_RIGHT       cycle pause", new_content)
+            self.assertIn("MBTN_RIGHT_DBL   ignore", new_content)
+
 
 if __name__ == "__main__":
     unittest.main()
