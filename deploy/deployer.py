@@ -479,6 +479,12 @@ def _patch_mpv_conf(
     # Keep legacy vendor-specific Linux hwdec optimization in native mode.
     # Also avoid copy-path overhead on Linux/NVIDIA in default profile.
     if selected_profile == "native":
+        # On Windows, "native" resolves to an empty profile; never let hwdec
+        # fall back to "auto" (which can select a -copy path and double the
+        # frame-delivery time). Pin zero-copy d3d11va to match the validated
+        # Windows/NVIDIA pipeline (1.4ms vs 5.3ms avg frame time).
+        if env.os == "windows" and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+            hwdec = "d3d11va"
         if env.gpu_vendor == "nvidia" and env.os == "linux":
             hwdec = "nvdec"
         elif env.gpu_vendor == "amd" and env.os == "linux":
@@ -503,6 +509,20 @@ def _patch_mpv_conf(
 
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def ensure_mpv_conf_user(config_dir, audit_log=None):
+    """Create an empty mpv.conf.user if absent so the template's trailing
+    `include = "~~/mpv.conf.user"` never dangles on a fresh install.
+    NEVER overwrites — existing user tweaks are the whole point of the file."""
+    user_path = os.path.join(config_dir, "mpv.conf.user")
+    if not os.path.exists(user_path):
+        with open(user_path, "w", encoding="utf-8") as f:
+            f.write("# mpv.conf.user — personal overrides.\n"
+                    "# Loaded LAST by mpv.conf; values here always win.\n"
+                    "# Re-running the installer never touches this file.\n")
+        if audit_log:
+            audit_log.record_file(user_path, "create", "ok", "seeded empty user override")
 
 
 def _normalize_windows_path(path):
@@ -797,6 +817,7 @@ def deploy(
             )
             if audit_log:
                 audit_log.record_file(dest, "modify", "ok", "patched from template")
+            ensure_mpv_conf_user(config_dir, audit_log=audit_log)
 
         # input.conf
         input_template = os.path.join(config_src, "input.conf.template")

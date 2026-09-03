@@ -60,12 +60,15 @@ prefetch-playlist         = yes
 # ─── Audio ───────────────────────────────────────────────────────────
 audio-channels            = auto-safe
 audio-normalize-downmix   = yes
-volume-max                = 150
+volume-max                = 200
 volume                    = 100
 alang                     = ar,jpn,jap,ja,en
 slang                     = ar,en
 
 # ─── Subtitles ───────────────────────────────────────────────────────
+# blend-subtitles=no: composite subs at DISPLAY resolution AFTER all scalers
+# and Anime4K passes. =yes would push glyph edges through the CNN restore/
+# upscale chain -> ringing, haloing, color bleed on text. Do not change.
 blend-subtitles           = no
 subs-with-matching-audio  = no
 sub-font                  = "Tahoma"
@@ -118,6 +121,9 @@ profile-restore           = copy-equal
 glsl-shaders              =
 scale                     = {{SCALE}}
 cscale                    = {{CSCALE}}
+# Calibrated deband: 1 pass is enough for clean sources; higher iterations
+# posterize and flatten fine detail (hair, film grain). grain=24 re-seeds
+# just enough noise to hide residual banding without a visible "snow" layer.
 deband                    = yes
 deband-iterations         = 1
 deband-threshold          = 48
@@ -137,6 +143,10 @@ profile-restore           = copy-equal
 glsl-shaders              = "{{ANIME_CHAIN}}"
 scale                     = spline36
 cscale                    = spline36
+# Anime deband is 2 passes: Anime4K Restore already suppresses flat-gradient
+# banding, so mpv's debander runs light on top rather than double-processing.
+# grain=32 masks CNN smoothing artifacts in dark scenes without softening
+# line art. Keep iterations <= 2 — higher flattens cel shading.
 deband                    = yes
 deband-iterations         = 2
 deband-threshold          = 48
@@ -148,26 +158,37 @@ tscale                    = oversample
 #######################################################################################
 # Auto-selection — simple fast substring match
 #######################################################################################
+# p.path is nil for dvd://, bd://, av://, piped stdin, and during early open.
+# (p.path or "") coerces nil -> "" so match() always receives a string and the
+# condition returns a real boolean instead of raising "attempt to index nil".
+# NOTE: this only fires on file:// — network URLs (YouTube) are matched by
+# protocol, not folder name, so streamed anime still needs CTRL+1..6 manually.
 [protocol.file]
 profile-desc              = "Auto-pick anime by path"
-profile-cond              = string.lower(p.path):match('anime') or string.lower(p.path):match('cartoon')
+profile-cond              = (p.path or ""):lower():match('anime') ~= nil or (p.path or ""):lower():match('cartoon') ~= nil
 profile                   = anime
 
 [default]
 profile                   = live-action
 
 #######################################################################################
-# Streaming — bigger cache, no interpolation overhead
+# Streaming — bigger cache + readahead for network jitter.
+# Sync is deliberately NOT downgraded here: on a fixed 144Hz panel, 30fps at
+# video-sync=audio gives 144/30 = 4.8 (non-integer) cadence = micro-judder.
+# Keeping display-resample + oversample aligns 30fps cleanly to vblank, and the
+# enlarged cache (800MiB / 60s readahead) absorbs the packet jitter that the old
+# video-sync=audio fallback was compensating for. Buffer starvation is handled
+# by cache-pause=no + readahead, not by abandoning vblank alignment.
 #######################################################################################
 [protocol.https]
-profile-desc              = "Network streaming"
+profile-desc              = "Network streaming: big cache, display-synced"
 profile-restore           = copy-equal
 cache                     = yes
 demuxer-max-bytes         = 800MiB
 demuxer-max-back-bytes    = 200MiB
 demuxer-readahead-secs    = 60
-interpolation             = no
-video-sync                = audio
+# video-sync and interpolation intentionally inherited from the base config
+# (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
 ytdl-format               = bestvideo[height<=?1080][vcodec!~='vp0?9']+bestaudio[acodec=opus]/bestvideo[height<=?1080]+bestaudio/best
 
 [protocol.http]

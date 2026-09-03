@@ -99,9 +99,14 @@ F6 cycle sub
 F7 cycle sub-visibility
 
 
-# F8: (جديد) تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)
+# F8: تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)
 # مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية
-F8 cycle-values af "lavfi=[dynaudnorm=f=250:g=31:p=0.5]" ""
+# f=500   : نافذة تحليل أطول = استجابة أهدأ، لا "تنفس" مسموع
+# g=15    : أقصى رفع 15dB بدلاً من 31 — لا يضخم هسهسة الخلفية
+# p=0.95  : هدف قمة قريب من المستوى الكامل، لا ضغط حاد نحو 50%
+# m=10    : سقف لمعدل تغير الكسب لكل إطار — يقتل ضخّ الكسب المفاجئ
+# alimiter: جدار حماية نهائي يمنع القص الرقمي عند رفع volume فوق 100%
+F8 cycle-values af "lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],lavfi=[alimiter=limit=0.9:level=false]" ""
 
 # ── Window close ── ensure WM close button kills mpv instantly ──
 CLOSE_WIN quit

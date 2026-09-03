@@ -245,6 +245,55 @@ def _write_mpv_conf_user(dest_path, order, overrides):
         f.write("\n".join(lines).rstrip() + "\n")
 
 
+def _migrate_input_conf(input_conf_path, audit_log=None):
+    """Update stale system keybindings in input.conf (e.g. F8 night mode)
+    while preserving all custom user keybindings and comments."""
+    if not os.path.isfile(input_conf_path):
+        return False
+
+    with open(input_conf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    new_f8_binding = (
+        'F8 cycle-values af '
+        '"lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],lavfi=[alimiter=limit=0.9:level=false]" ""'
+    )
+
+    pattern = re.compile(
+        r'^[ \t]*F8[ \t]+cycle-values[ \t]+af[ \t]+["\']lavfi=\[dynaudnorm=[^"\']*\]["\'][ \t]+["\']["\'][ \t]*$',
+        re.MULTILINE,
+    )
+
+    if pattern.search(content):
+        updated_content = pattern.sub(new_f8_binding, content)
+        old_comment = (
+            "# F8: (جديد) تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)\n"
+            "# مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية"
+        )
+        new_comment = (
+            "# F8: تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)\n"
+            "# مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية\n"
+            '# f=500   : نافذة تحليل أطول = استجابة أهدأ، لا "تنفس" مسموع\n'
+            "# g=15    : أقصى رفع 15dB بدلاً من 31 — لا يضخم هسهسة الخلفية\n"
+            "# p=0.95  : هدف قمة قريب من المستوى الكامل، لا ضغط حاد نحو 50%\n"
+            "# m=10    : سقف لمعدل تغير الكسب لكل إطار — يقتل ضخّ الكسب المفاجئ\n"
+            "# alimiter: جدار حماية نهائي يمنع القص الرقمي عند رفع volume فوق 100%"
+        )
+        if old_comment in updated_content:
+            updated_content = updated_content.replace(old_comment, new_comment)
+
+        if updated_content != content:
+            with open(input_conf_path, "w", encoding="utf-8") as f:
+                f.write(updated_content)
+            if audit_log:
+                audit_log.record_file(
+                    input_conf_path, "modify", "ok", "migrated F8 night mode binding"
+                )
+            return True
+
+    return False
+
+
 def cmd_install(args):
     """Full installation: detect → plan → confirm → install deps → fetch → deploy → verify."""
     ui.banner()
@@ -313,6 +362,8 @@ def cmd_install(args):
                 display_mode=args.display_mode,
                 dither_depth=args.dither_depth,
             )
+            if not args.dry_run:
+                ensure_mpv_conf_user(env.config_dir, audit_log=audit_log)
 
             # 9. Save lockfile
             if not args.dry_run:
@@ -434,6 +485,21 @@ def cmd_migrate(args):
             mpv_conf_path, "modify", "ok", "mpv.conf updated to new template"
         )
 
+        input_conf_path = os.path.join(config_dir, "input.conf")
+        if os.path.isfile(input_conf_path):
+            if _migrate_input_conf(input_conf_path, audit_log=audit_log):
+                ui.success("input.conf: F8 night mode binding updated")
+
+        opts_src = os.path.join(SCRIPT_DIR, "config", "script-opts")
+        opts_dst = os.path.join(config_dir, "script-opts")
+        tf_src = os.path.join(opts_src, "thumbfast.conf")
+        tf_dst = os.path.join(opts_dst, "thumbfast.conf")
+        if os.path.isfile(tf_src):
+            os.makedirs(opts_dst, exist_ok=True)
+            shutil.copy2(tf_src, tf_dst)
+            if audit_log:
+                audit_log.record_file(tf_dst, "copy", "ok", "deployed thumbfast.conf")
+
         ui.panel(
             "Migration complete. User overrides saved to mpv.conf.user.",
             title="✅ Migration",
@@ -446,6 +512,20 @@ def cmd_migrate(args):
         except Exception:
             pass
         raise
+
+
+def ensure_mpv_conf_user(config_dir, audit_log=None):
+    """Create an empty mpv.conf.user if absent so the template's trailing
+    `include = "~~/mpv.conf.user"` never dangles on a fresh install.
+    NEVER overwrites — existing user tweaks are the whole point of the file."""
+    user_path = os.path.join(config_dir, "mpv.conf.user")
+    if not os.path.exists(user_path):
+        with open(user_path, "w", encoding="utf-8") as f:
+            f.write("# mpv.conf.user — personal overrides.\n"
+                    "# Loaded LAST by mpv.conf; values here always win.\n"
+                    "# Re-running the installer never touches this file.\n")
+        if audit_log:
+            audit_log.record_file(user_path, "create", "ok", "seeded empty user override")
 
 
 def cmd_update(args):
