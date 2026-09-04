@@ -750,8 +750,8 @@ function hash()
         cmd["stdin_data"] = path
         args = {"sh", "-c", md5 .. " | cut -d ' ' -f 1 | tr '[:lower:]' '[:upper:]'" }
     else --windows
-        -- https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/get-filehash?view=powershell-7.3
-        local hash_command ="$s = [System.IO.MemoryStream]::new(); $w = [System.IO.StreamWriter]::new($s); $w.write(\"" .. path .. "\"); $w.Flush(); $s.Position = 0; Get-FileHash -Algorithm MD5 -InputStream $s | Select-Object -ExpandProperty Hash"
+        local escaped = path:gsub('\\', '\\\\'):gsub('"', '\\"')
+        local hash_command = "$bytes = [System.Text.Encoding]::UTF8.GetBytes(\"" .. escaped .. "\"); [System.BitConverter]::ToString([System.Security.Cryptography.MD5]::Create().ComputeHash($bytes)).Replace('-','')"
         args = {"powershell", "-NoProfile", "-Command", hash_command}
     end
     cmd["args"] = args
