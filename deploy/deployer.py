@@ -767,7 +767,7 @@ def deploy(
             ui.success(f"{item}/: {count} file(s) deployed via {method}")
             results.append({"name": item, "status": "ok", "detail": f"{count} files via {method}"})
 
-    # 3b. Override with repo-vendored/patched scripts (ensures patches like thumbfast storyboard & smart-paste persist across installs)
+    # 3b. Override with repo-vendored/patched scripts (ensures patches like thumbfast storyboard, smart-paste, SmartSkip & ytdl_hook persist across installs)
     repo_scripts = os.path.join(repo_dir, "scripts")
     if os.path.isdir(repo_scripts):
         scripts_dst = os.path.join(config_dir, "scripts")

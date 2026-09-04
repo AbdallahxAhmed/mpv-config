@@ -220,10 +220,12 @@ class TestAuditPatches(unittest.TestCase):
         with open(template_file, "r", encoding="utf-8") as f:
             content = f.read()
 
+        self.assertIn("ytdl                      = no", content)
         self.assertIn("ytdl-raw-options-append = no-playlist=", content)
         self.assertNotIn("player_client=android,web", content)
         self.assertIn("ytdl-raw-options-append = write-auto-subs=", content)
         self.assertIn("ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat", content)
+        self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)
 
     def test_template_youtube_auto_subs_bounded(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -345,10 +347,12 @@ class TestAuditPatches(unittest.TestCase):
         tf = os.path.join(repo_root, "scripts", "thumbfast.lua")
         sp = os.path.join(repo_root, "scripts", "smart-paste.lua")
         ss = os.path.join(repo_root, "scripts", "SmartSkip.lua")
+        yh = os.path.join(repo_root, "scripts", "ytdl_hook.lua")
 
         self.assertTrue(os.path.isfile(tf), "scripts/thumbfast.lua must exist in repo")
         self.assertTrue(os.path.isfile(sp), "scripts/smart-paste.lua must exist in repo")
         self.assertTrue(os.path.isfile(ss), "scripts/SmartSkip.lua must exist in repo")
+        self.assertTrue(os.path.isfile(yh), "scripts/ytdl_hook.lua must exist in repo")
 
         with open(tf, "r", encoding="utf-8") as f:
             tf_content = f.read()
@@ -360,6 +364,12 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn('mp.add_hook("on_load", 10', sp_content)
         self.assertIn("watch%?v=", sp_content)
         self.assertIn("start_loading_indicator", sp_content)
+
+        with open(yh, "r", encoding="utf-8") as f:
+            yh_content = f.read()
+        self.assertIn('tostring(data):gsub', yh_content)
+        self.assertIn('json_name ~= "ytdl_description" and json_name ~= "description"', yh_content)
+        self.assertIn("user-data/mpv/ytdl/json-subprocess-result", yh_content)
 
     def test_mpv_conf_template_idle_mode(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

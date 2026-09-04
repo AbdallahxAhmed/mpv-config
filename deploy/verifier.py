@@ -121,6 +121,8 @@ def verify(config_dir, env):
         check(f"uosc {ziggy_name} executable", os.access(ziggy, os.X_OK), "must be executable")
     check_file("thumbfast", "scripts/thumbfast.lua")
     check_file("SmartSkip", "scripts/SmartSkip.lua")
+    check_file("smart-paste", "scripts/smart-paste.lua")
+    check_file("ytdl_hook", "scripts/ytdl_hook.lua")
     check_file("sponsorblock", "scripts/sponsorblock.lua")
     check_file("sponsorblock.py", "scripts/sponsorblock_shared/sponsorblock.py")
     check_dir("autosubsync", "scripts/autosubsync", min_files=1)

@@ -87,11 +87,13 @@ screenshot-directory      = {{SCREENSHOT_DIR}}
 screenshot-template       = "%F_%P"
 
 # ─── ytdl ────────────────────────────────────────────────────────────
+ytdl                      = no
 ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
 ytdl-raw-options-append = no-playlist=
 ytdl-raw-options-append = format-sort=res:1080,vbr,abr
 ytdl-raw-options-append = write-auto-subs=
 ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat
+ytdl-raw-options-append = socket-timeout=15
 
 # ─── Shader cache — critical for Anime4K first-frame speed ───────────
 gpu-shader-cache          = yes
@@ -199,6 +201,7 @@ ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
 ytdl-raw-options-append   = write-auto-subs=
 ytdl-raw-options-append   = sub-langs=ar.*,en.*,-live_chat
+ytdl-raw-options-append   = socket-timeout=15
 
 [protocol.http]
 profile                   = protocol.https
