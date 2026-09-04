@@ -1,6 +1,7 @@
--- smart-paste.lua - Robust, layout-agnostic clipboard URL loader for mpv
--- Handles all edge cases: leading/trailing whitespace, quotes, partial URLs (watch?v=, youtu.be, etc.)
--- Provides immediate OSD visual feedback upon pressing Ctrl+v / Ctrl+ر
+-- smart-paste.lua - Robust, layout-agnostic clipboard & drag-and-drop URL loader for mpv
+-- Handles all edge cases: leading/trailing whitespace, quotes, partial URLs (watch?v=, youtu.be, shorts/)
+-- Intercepts on_load hook so drag-and-drop & relative URLs are automatically normalized
+-- Provides continuous OSD visual spinner feedback while yt-dlp resolves the stream
 
 local function trim(s)
     if not s then return nil end
@@ -17,7 +18,7 @@ local function strip_quotes(s)
     return s
 end
 
-local function sanitize_url(raw)
+local function normalize_url(raw)
     if not raw or type(raw) ~= "string" then return nil end
     local text = trim(raw)
     if not text or text == "" then return nil end
@@ -25,17 +26,38 @@ local function sanitize_url(raw)
     text = strip_quotes(text)
     if not text or text == "" then return nil end
 
-    -- Normalize partial URLs
-    if text:find("^watch%?v=") then
-        text = "https://www.youtube.com/" .. text
-    elseif text:find("^youtu%.be/") then
-        text = "https://" .. text
-    elseif text:find("^youtube%.com/") then
-        text = "https://www." .. text
-    elseif text:find("^www%.") then
-        text = "https://" .. text
-    elseif text:find("^[%w%-]+%.%a%a+/.+") and not text:find("^%a+://") and not text:find("^[a-zA-Z]:[/\\]") then
-        text = "https://" .. text
+    -- Already a valid full URL
+    if text:find("^https?://") then
+        return text
+    end
+
+    -- Check if it contains a YouTube watch link (even if mpv or drag-and-drop prepended local working dir)
+    local watch_id = text:match("watch%?v=([%w%-_]+.*)")
+    if watch_id then
+        return "https://www.youtube.com/watch?v=" .. watch_id
+    end
+
+    -- Check for shorts
+    local shorts_id = text:match("shorts/([%w%-_]+.*)") or text:match("shorts\\([%w%-_]+.*)")
+    if shorts_id then
+        return "https://www.youtube.com/shorts/" .. shorts_id
+    end
+
+    -- Check for youtu.be
+    local ytid = text:match("youtu%.be/([%w%-_]+.*)") or text:match("youtu%.be\\([%w%-_]+.*)")
+    if ytid then
+        return "https://youtu.be/" .. ytid
+    end
+
+    -- Check for www.youtube.com or youtube.com without protocol
+    local yt_path = text:match("youtube%.com/(.*)") or text:match("youtube%.com\\(.*)")
+    if yt_path then
+        return "https://www.youtube.com/" .. yt_path
+    end
+
+    -- General domain without protocol (e.g., vimeo.com/..., twitch.tv/...)
+    if text:find("^[%w%-]+%.%a%a+/.+") and not text:find("^[a-zA-Z]:[/\\]") then
+        return "https://" .. text
     end
 
     return text
@@ -49,7 +71,57 @@ local function get_clipboard_content()
     return nil
 end
 
-local pending_url = nil
+local loading_timer = nil
+local current_loading_url = nil
+local spinner_frames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+local spinner_idx = 1
+
+local function start_loading_indicator(url)
+    current_loading_url = url
+    local short = url
+    if #short > 55 then
+        short = short:sub(1, 52) .. "..."
+    end
+
+    if loading_timer then
+        loading_timer:kill()
+        loading_timer = nil
+    end
+
+    spinner_idx = 1
+    loading_timer = mp.add_periodic_timer(0.12, function()
+        local frame = spinner_frames[spinner_idx]
+        spinner_idx = (spinner_idx % #spinner_frames) + 1
+        mp.osd_message(string.format("%s Loading stream: %s", frame, short), 1)
+    end)
+    mp.osd_message(string.format("⠋ Loading stream: %s", short), 1)
+end
+
+local function stop_loading_indicator()
+    if loading_timer then
+        loading_timer:kill()
+        loading_timer = nil
+    end
+    current_loading_url = nil
+    mp.osd_message("", 0)
+end
+
+-- Intercept on_load hook (priority 10, before ytdl_hook at priority 50)
+mp.add_hook("on_load", 10, function()
+    local path = mp.get_property("stream-open-filename")
+    if not path or type(path) ~= "string" then return end
+
+    local normalized = normalize_url(path)
+    if normalized and normalized ~= path then
+        mp.msg.info("smart-paste: rewriting '" .. path .. "' -> '" .. normalized .. "'")
+        mp.set_property("stream-open-filename", normalized)
+        path = normalized
+    end
+
+    if path and (path:find("^https?://") or path:find("^ytdl://")) then
+        start_loading_indicator(path)
+    end
+end)
 
 local function paste_to_open()
     local raw = get_clipboard_content()
@@ -59,20 +131,14 @@ local function paste_to_open()
         return
     end
 
-    local url = sanitize_url(raw)
+    local url = normalize_url(raw)
     if not url or url == "" then
         mp.osd_message("Clipboard contains no valid URL or path", 2)
         mp.msg.warn("smart-paste: invalid clipboard content: " .. tostring(raw))
         return
     end
 
-    pending_url = url
-    local short = url
-    if #short > 60 then
-        short = short:sub(1, 57) .. "..."
-    end
-
-    mp.osd_message("Loading: " .. short, 4)
+    start_loading_indicator(url)
     mp.msg.info("smart-paste: loading " .. url)
     mp.commandv("loadfile", url, "replace")
 end
@@ -84,7 +150,7 @@ local function paste_to_playlist()
         return
     end
 
-    local url = sanitize_url(raw)
+    local url = normalize_url(raw)
     if not url or url == "" then
         mp.osd_message("Clipboard contains no valid URL or path", 2)
         return
@@ -105,14 +171,14 @@ local function paste_to_playlist()
 end
 
 mp.register_event("file-loaded", function()
-    pending_url = nil
+    stop_loading_indicator()
 end)
 
 mp.register_event("end-file", function(event)
-    if pending_url and event and event.reason == "error" then
-        mp.osd_message("Failed to open link (unavailable or invalid URL)", 5)
-        mp.msg.warn("smart-paste: failed to load " .. tostring(pending_url))
-        pending_url = nil
+    stop_loading_indicator()
+    if event and event.reason == "error" then
+        mp.osd_message("Failed to open link (unavailable or invalid URL)", 4)
+        mp.msg.warn("smart-paste: failed to load stream")
     end
 end)
 

@@ -355,6 +355,12 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("user-data/mpv/ytdl/json-subprocess-result", tf_content)
         self.assertIn("resized_storyboard or not using_storyboards", tf_content)
 
+        with open(sp, "r", encoding="utf-8") as f:
+            sp_content = f.read()
+        self.assertIn('mp.add_hook("on_load", 10', sp_content)
+        self.assertIn("watch%?v=", sp_content)
+        self.assertIn("start_loading_indicator", sp_content)
+
     def test_mpv_conf_template_idle_mode(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         template_file = os.path.join(repo_root, "config", "mpv.conf.template")
