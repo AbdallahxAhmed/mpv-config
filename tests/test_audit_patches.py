@@ -362,6 +362,47 @@ class TestAuditPatches(unittest.TestCase):
             content = f.read()
         self.assertIn("idle                      = yes", content)
 
+    def test_installer_uv_tool_uses_env_bin_dir(self):
+        from unittest.mock import patch
+        from deploy.installer import _install_uv_tool
+        from deploy.detector import Environment
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        captured_kwargs = {}
+
+        def fake_run(cmd, check=True, env=None):
+            captured_kwargs["cmd"] = cmd
+            captured_kwargs["env"] = env
+            return True
+
+        with patch("deploy.installer._run", side_effect=fake_run), \
+             patch("shutil.which", return_value="C:\\dummy\\uv.exe"), \
+             patch("deploy.installer._add_to_path"):
+            ok = _install_uv_tool({"pkg": "testpkg", "bin_dir": "C:\\custom\\bin"}, env)
+            self.assertTrue(ok)
+            self.assertIn("testpkg", captured_kwargs["cmd"])
+            self.assertNotIn("--bin-dir", captured_kwargs["cmd"])
+            self.assertIsNotNone(captured_kwargs.get("env"))
+            self.assertEqual(captured_kwargs["env"].get("UV_TOOL_BIN_DIR"), "C:\\custom\\bin")
+
+    def test_verifier_mpv_launch_includes_idle_no(self):
+        from unittest.mock import patch
+        from deploy.verifier import verify
+        from deploy.detector import Environment
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        captured_cmds = []
+
+        def fake_run_check(cmd):
+            captured_cmds.append(cmd)
+            return True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("deploy.verifier._run_check", side_effect=fake_run_check):
+                verify(tmpdir, env)
+                mpv_cmds = [c for c in captured_cmds if "mpv" in c[0]]
+                self.assertTrue(any("--idle=no" in c for c in mpv_cmds))
+
 
 if __name__ == "__main__":
     unittest.main()
