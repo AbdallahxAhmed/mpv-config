@@ -72,12 +72,19 @@ local function get_clipboard_content()
 end
 
 local loading_timer = nil
+local loading_start_time = nil
 local current_loading_url = nil
 local spinner_frames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 local spinner_idx = 1
 
 local function start_loading_indicator(url)
+    if current_loading_url == url and loading_timer then
+        return
+    end
+
     current_loading_url = url
+    loading_start_time = mp.get_time()
+
     local short = url
     if #short > 55 then
         short = short:sub(1, 52) .. "..."
@@ -89,21 +96,30 @@ local function start_loading_indicator(url)
     end
 
     spinner_idx = 1
-    loading_timer = mp.add_periodic_timer(0.12, function()
+    local function update_osd()
+        local elapsed = mp.get_time() - (loading_start_time or mp.get_time())
         local frame = spinner_frames[spinner_idx]
         spinner_idx = (spinner_idx % #spinner_frames) + 1
-        mp.osd_message(string.format("%s Loading stream: %s", frame, short), 1)
-    end)
-    mp.osd_message(string.format("⠋ Loading stream: %s", short), 1)
+        mp.osd_message(string.format("%s Resolving stream [%.1fs]: %s", frame, elapsed, short), 1)
+    end
+
+    loading_timer = mp.add_periodic_timer(0.1, update_osd)
+    update_osd()
 end
 
-local function stop_loading_indicator()
+local function stop_loading_indicator(show_done)
     if loading_timer then
         loading_timer:kill()
         loading_timer = nil
     end
+    if show_done and loading_start_time then
+        local elapsed = mp.get_time() - loading_start_time
+        mp.osd_message(string.format("Stream loaded (%.1fs)", elapsed), 2)
+    else
+        mp.osd_message("", 0)
+    end
     current_loading_url = nil
-    mp.osd_message("", 0)
+    loading_start_time = nil
 end
 
 -- Intercept on_load hook (priority 10, before ytdl_hook at priority 50)
@@ -135,6 +151,12 @@ local function paste_to_open()
     if not url or url == "" then
         mp.osd_message("Clipboard contains no valid URL or path", 2)
         mp.msg.warn("smart-paste: invalid clipboard content: " .. tostring(raw))
+        return
+    end
+
+    if current_loading_url == url and loading_timer then
+        local elapsed = mp.get_time() - (loading_start_time or mp.get_time())
+        mp.osd_message(string.format("Already loading stream [%.1fs]... please wait", elapsed), 2)
         return
     end
 
@@ -171,11 +193,11 @@ local function paste_to_playlist()
 end
 
 mp.register_event("file-loaded", function()
-    stop_loading_indicator()
+    stop_loading_indicator(true)
 end)
 
 mp.register_event("end-file", function(event)
-    stop_loading_indicator()
+    stop_loading_indicator(false)
     if event and event.reason == "error" then
         mp.osd_message("Failed to open link (unavailable or invalid URL)", 4)
         mp.msg.warn("smart-paste: failed to load stream")
