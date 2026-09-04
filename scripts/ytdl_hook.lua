@@ -589,13 +589,26 @@ local function formats_to_edl(json, formats, use_all_formats)
                         title = title .. " "
                     end
                     title = title .. "muxed-" .. index
+                elseif sub.media_type == "audio" and (track.language or track.format_note) then
+                    local desc_parts = {}
+                    if track.format_note and #track.format_note > 0 then
+                        table.insert(desc_parts, track.format_note)
+                    end
+                    if track.language and #track.language > 0 and (not track.format_note or not track.format_note:lower():find(track.language:lower(), 1, true)) then
+                        table.insert(desc_parts, "[" .. track.language:upper() .. "]")
+                    end
+                    if #desc_parts > 0 then
+                        title = table.concat(desc_parts, " ") .. " (" .. (track.format or track.ext or "audio") .. ")"
+                    end
                 end
                 local flags = {}
                 if is_default then
                     flags[#flags + 1] = "default"
                 end
+                local lang = track.language or track.lang
                 hdr[#hdr + 1] = "!track_meta,title=" ..
                     edl_escape(title) .. ",byterate=" .. byterate ..
+                    (lang and (",lang=" .. edl_escape(lang)) or "") ..
                     (dominated and ",program_id=" .. next_program_id or "") ..
                     (#flags > 0 and ",flags=" .. table.concat(flags, "+") or "")
             end

@@ -28,6 +28,9 @@
 # │ F8          │  Night mode (normalize loud audio)               │
 # ├─────────────┼───────────────────────────────────────────────────┤
 # │             │  📜 Scripts — Everyday (single letter)           │
+# │ c           │  Subtitles menu (uosc)                           │
+# │ Ctrl+c      │  YouTube auto-subs menu (on-demand)              │
+# │ a           │  Audio tracks & dubs menu (uosc)                 │
 # │ h           │  History — open watch history (memo)             │
 # │ n           │  Subtitle syNc menu (autosubsync)                │
 # │ RIGHT       │  Fast-forward (evafast)                          │
@@ -127,6 +130,16 @@ Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist
 
 # ─── Script Keybindings (conflict-free) ──────────────────────────
 
+# Subtitles menu (uosc) — c = Subtitles
+c        script-binding uosc/subtitles
+
+# YouTube auto-subtitles on-demand menu — Ctrl+c
+Ctrl+c   script-binding ytdl_sub_menu/open
+Ctrl+C   script-binding ytdl_sub_menu/open
+
+# Audio tracks & dubs menu (uosc) — a = Audio
+a        script-binding uosc/audio
+
 # History (memo) — h = History
 h    script-binding memo-history
 
@@ -138,6 +151,15 @@ Shift+B  script-binding sponsorblock_downvote
 n    script-binding autosubsync-menu
 
 # ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
+# Subtitles menu (uosc) — ؤ = c
+ؤ        script-binding uosc/subtitles
+
+# YouTube auto-subtitles on-demand menu — Ctrl+ؤ = Ctrl+c
+Ctrl+ؤ   script-binding ytdl_sub_menu/open
+
+# Audio tracks & dubs menu (uosc) — ش = a
+ش        script-binding uosc/audio
+
 # History (memo) — ا = h (History)
 ا        script-binding memo-history
 
@@ -161,3 +183,4 @@ G        script-binding sponsorblock_submit_segment
 # Instant play from clipboard — Ctrl+ر = Ctrl+v
 Ctrl+ر           script-binding smart_paste/paste-to-open
 Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist
+

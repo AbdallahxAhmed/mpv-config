@@ -313,7 +313,7 @@ class TestAuditPatches(unittest.TestCase):
             content = f.read()
 
         self.assertIn(
-            "controls=menu,gap,<has_sub>subtitles,<has_many_audio>audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen",
+            "controls=menu,gap,subtitles,audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen",
             content,
         )
 

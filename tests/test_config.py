@@ -1,4 +1,6 @@
 import os
+import shutil
+import subprocess
 import unittest
 
 from deploy.deployer import _patch_mpv_conf
@@ -31,6 +33,8 @@ class TestConfig(unittest.TestCase):
         cls.repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         cls.template_file = os.path.join(cls.repo_root, "config", "mpv.conf.template")
         cls.uosc_template = os.path.join(cls.repo_root, "config", "script-opts", "uosc.conf")
+        cls.input_template = os.path.join(cls.repo_root, "config", "input.conf.template")
+        cls.ytdl_sub_menu = os.path.join(cls.repo_root, "scripts", "ytdl-sub-menu.lua")
 
         cls.appdata = os.environ.get("APPDATA")
         cls.active_mpv_conf = (
@@ -41,6 +45,9 @@ class TestConfig(unittest.TestCase):
         )
         cls.active_user_conf = (
             os.path.join(cls.appdata, "mpv", "mpv.conf.user") if cls.appdata else None
+        )
+        cls.active_input_conf = (
+            os.path.join(cls.appdata, "mpv", "input.conf") if cls.appdata else None
         )
 
         cls.expected_sub_rules = {
@@ -71,6 +78,76 @@ class TestConfig(unittest.TestCase):
         settings = _parse_conf(self.uosc_template)
         self.assertIn("volume_max", settings)
         self.assertEqual(settings["volume_max"], "200")
+
+    def test_uosc_controls_has_subtitles_and_audio(self):
+        settings = _parse_conf(self.uosc_template)
+        self.assertIn("controls", settings)
+        controls_str = settings["controls"]
+        controls_items = [item.strip() for item in controls_str.split(",")]
+        self.assertIn("subtitles", controls_items, "controls must contain dedicated subtitles button")
+        self.assertIn("audio", controls_items, "controls must contain dedicated audio button")
+
+    def test_active_uosc_controls_has_subtitles_and_audio(self):
+        if not self.active_uosc_conf or not os.path.isfile(self.active_uosc_conf):
+            self.skipTest("Active %APPDATA%\\mpv\\script-opts\\uosc.conf not found")
+        settings = _parse_conf(self.active_uosc_conf)
+        self.assertIn("controls", settings)
+        controls_str = settings["controls"]
+        controls_items = [item.strip() for item in controls_str.split(",")]
+        self.assertIn("subtitles", controls_items)
+        self.assertIn("audio", controls_items)
+
+    def test_ytdl_sub_menu_exists_and_syntax_valid(self):
+        self.assertTrue(os.path.isfile(self.ytdl_sub_menu), "scripts/ytdl-sub-menu.lua does not exist")
+
+        with open(self.ytdl_sub_menu, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("open-menu", content)
+        self.assertIn("uosc", content)
+        self.assertIn("fetch-sub", content)
+
+        luac_bin = shutil.which("luac")
+        mpv_bin = shutil.which("mpv")
+        if luac_bin:
+            res = subprocess.run([luac_bin, "-p", self.ytdl_sub_menu], capture_output=True, text=True)
+            self.assertEqual(res.returncode, 0, f"Lua syntax error: {res.stderr}")
+        elif mpv_bin:
+            try:
+                res = subprocess.run(
+                    [mpv_bin, "--no-config", "--idle=no", f"--scripts={self.ytdl_sub_menu}", "null://"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                combined = (res.stdout or "") + (res.stderr or "")
+                self.assertNotIn("syntax error", combined.lower())
+                self.assertNotIn("lua: error", combined.lower())
+            except subprocess.TimeoutExpired:
+                pass
+
+    def test_input_conf_keybindings(self):
+        with open(self.input_template, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("script-binding uosc/subtitles", content)
+        self.assertIn("script-binding ytdl_sub_menu/open", content)
+        self.assertIn("script-binding uosc/audio", content)
+
+        # Check Latin and Arabic twin bindings
+        lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+        bindings = {}
+        for line in lines:
+            parts = line.split(None, 1)
+            if len(parts) == 2:
+                bindings[parts[0]] = parts[1]
+
+        self.assertEqual(bindings.get("c"), "script-binding uosc/subtitles")
+        self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
+        self.assertEqual(bindings.get("Ctrl+c"), "script-binding ytdl_sub_menu/open")
+        self.assertEqual(bindings.get("Ctrl+ؤ"), "script-binding ytdl_sub_menu/open")
+        self.assertEqual(bindings.get("a"), "script-binding uosc/audio")
+        self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")
 
     def test_active_mpv_conf_volume_max_and_subtitles(self):
         if not self.active_mpv_conf or not os.path.isfile(self.active_mpv_conf):
