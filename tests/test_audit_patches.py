@@ -381,6 +381,9 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("user-data/mpv/ytdl/json-subprocess-result", yh_content)
         self.assertNotIn('if not mp.get_property_bool("ytdl", true) then return end', yh_content)
         self.assertNotIn('mp.get_property_bool("ytdl"', yh_content)
+        self.assertIn("known_paths", yh_content)
+        self.assertIn("C:/Program Files/mpv/yt-dlp/yt-dlp.exe", yh_content)
+        self.assertIn("utils.file_info", yh_content)
 
     def test_mpv_conf_template_idle_mode(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

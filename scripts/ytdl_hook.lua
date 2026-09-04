@@ -959,29 +959,56 @@ local function run_ytdl_hook(url)
             end
         end
 
-        for _, path in pairs(ytdl.paths_to_search) do
-            -- search for youtube-dl in mpv's config dir
-            local exesuf = platform_is_windows() and not path:lower():match("%.exe$")
-                           and ".exe" or ""
-            local ytdl_cmd = mp.find_config_file(path .. exesuf)
-            if ytdl_cmd then
-                msg.verbose("Found youtube-dl at: " .. ytdl_cmd)
-                ytdl.path = ytdl_cmd
-                command[1] = ytdl.path
-                result = exec(command)
-                break
-            else
-                msg.verbose("No youtube-dl found with path " .. path .. exesuf ..
-                            " in config directories")
-                command[1] = path
-                result = exec(command)
-                if result.error_string == "init" then
-                    msg.verbose("youtube-dl with path " .. path ..
-                                " not found in PATH or not enough permissions")
-                else
-                    msg.verbose("Found youtube-dl with path " .. path .. " in PATH")
-                    ytdl.path = path
+        local known_paths = {}
+        if o.ytdl_path and o.ytdl_path ~= "" then
+            for path in o.ytdl_path:gmatch("[^" .. separator .. "]+") do
+                table.insert(known_paths, path)
+            end
+        end
+        table.insert(known_paths, "C:/Program Files/mpv/yt-dlp/yt-dlp.exe")
+        table.insert(known_paths, "C:/Program Files/mpv/yt-dlp.exe")
+        table.insert(known_paths, mp.command_native({"expand-path", "~~/yt-dlp.exe"}))
+        table.insert(known_paths, mp.find_config_file("yt-dlp.exe"))
+        table.insert(known_paths, mp.find_config_file("yt-dlp"))
+
+        for _, kpath in ipairs(known_paths) do
+            if kpath and kpath ~= "" then
+                local info = utils.file_info(kpath)
+                if info and info.is_file then
+                    msg.verbose("Found youtube-dl at known path: " .. kpath)
+                    ytdl.path = kpath
+                    command[1] = ytdl.path
+                    result = exec(command)
                     break
+                end
+            end
+        end
+
+        if not ytdl.path or ytdl.path == "" then
+            for _, path in pairs(ytdl.paths_to_search) do
+                -- search for youtube-dl in mpv's config dir
+                local exesuf = platform_is_windows() and not path:lower():match("%.exe$")
+                               and ".exe" or ""
+                local ytdl_cmd = mp.find_config_file(path .. exesuf)
+                if ytdl_cmd then
+                    msg.verbose("Found youtube-dl at: " .. ytdl_cmd)
+                    ytdl.path = ytdl_cmd
+                    command[1] = ytdl.path
+                    result = exec(command)
+                    break
+                else
+                    msg.verbose("No youtube-dl found with path " .. path .. exesuf ..
+                                " in config directories")
+                    command[1] = path
+                    result = exec(command)
+                    if result.error_string == "init" then
+                        msg.verbose("youtube-dl with path " .. path ..
+                                    " not found in PATH or not enough permissions")
+                    else
+                        msg.verbose("Found youtube-dl with path " .. path .. " in PATH")
+                        ytdl.path = path
+                        break
+                    end
                 end
             end
         end
