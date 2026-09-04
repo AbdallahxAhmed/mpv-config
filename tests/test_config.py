@@ -203,6 +203,28 @@ class TestConfig(unittest.TestCase):
             for param, expected in self.expected_sub_rules.items():
                 self.assertEqual(settings.get(param), expected)
 
+    def test_template_has_no_hardcoded_drive_paths(self):
+        with open(self.template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertNotIn("C:/", content, "Template must not contain hardcoded C:/ drive paths")
+        self.assertNotIn("C:\\", content, "Template must not contain hardcoded C:\\ drive paths")
+        self.assertNotIn("script-opts-append = ytdl_hook-ytdl_path", content)
+
+    def test_active_configs_portability_and_ytdl_hook(self):
+        if not self.active_mpv_conf or not os.path.isfile(self.active_mpv_conf):
+            self.skipTest("Active %APPDATA%\\mpv\\mpv.conf not found")
+
+        with open(self.active_mpv_conf, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertNotIn("ytdl_hook-ytdl_path", content, "Active mpv.conf should not contain hardcoded ytdl_hook-ytdl_path")
+
+        active_hook = os.path.join(self.appdata, "mpv", "script-opts", "ytdl_hook.conf") if self.appdata else None
+        if active_hook and os.path.isfile(active_hook):
+            with open(active_hook, "r", encoding="utf-8") as f:
+                hook_content = f.read()
+            self.assertIn("ytdl_path=", hook_content)
+
 
 if __name__ == "__main__":
     unittest.main()

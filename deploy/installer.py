@@ -1046,3 +1046,243 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
                 )
 
     return results
+
+
+def _get_target_tools_dir(env=None):
+    """
+    Determine default install directory for binaries:
+    C:\\Program Files\\mpv if running with elevation / writable,
+    otherwise %APPDATA%\\mpv\\tools (or ~/.local/bin on Linux).
+    """
+    if env and env.os != "windows":
+        return os.path.expanduser("~/.local/bin")
+
+    prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    mpv_dir = os.path.join(prog_files, "mpv")
+
+    is_writable = False
+    try:
+        os.makedirs(mpv_dir, exist_ok=True)
+        test_path = os.path.join(mpv_dir, ".perm_test")
+        with open(test_path, "w") as f:
+            f.write("ok")
+        os.remove(test_path)
+        is_writable = True
+    except Exception:
+        is_writable = False
+
+    if is_writable:
+        return mpv_dir
+
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        tools_dir = os.path.join(appdata, "mpv", "tools")
+    else:
+        tools_dir = os.path.expanduser("~/.mpv/tools")
+    os.makedirs(tools_dir, exist_ok=True)
+    return tools_dir
+
+
+def _unblock_path(path):
+    """Unblock downloaded files on Windows using PowerShell Unblock-File."""
+    if sys.platform != "win32":
+        return
+    try:
+        if os.path.isfile(path):
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Unblock-File -LiteralPath '{path}'"],
+                capture_output=True,
+                timeout=10,
+            )
+        elif os.path.isdir(path):
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", f"Get-ChildItem -LiteralPath '{path}' -Recurse | Unblock-File"],
+                capture_output=True,
+                timeout=15,
+            )
+    except Exception:
+        pass
+
+
+def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, audit_log=None):
+    """
+    Automated Dependency Suite Pipeline (Self-Healing Fetcher):
+      - yt-dlp: latest 64-bit Windows binary from yt-dlp/yt-dlp
+      - ffmpeg-full: latest release archive (ffmpeg.exe, ffprobe.exe, ffplay.exe)
+      - alass: latest release (alass.exe) from kaegi/alass
+      - ffsubsync: pip/uv installation/upgrade
+      - Unblock files on Windows
+      - Update ytdl_hook.conf with localized path
+    """
+    if env is None:
+        from deploy import detector
+        env = detector.detect()
+
+    ui.header("Syncing MPV Dependencies Suite")
+    target = target_dir or _get_target_tools_dir(env)
+    os.makedirs(target, exist_ok=True)
+    ui.info(f"Target directory: {target}")
+
+    if env.os == "windows":
+        _add_to_path(target)
+
+    results = []
+
+    # 1. yt-dlp
+    ui.step("Checking yt-dlp...")
+    ytdlp_exe = os.path.join(target, "yt-dlp.exe")
+    if dry_run:
+        results.append({"name": "yt-dlp", "status": "skipped", "detail": "dry-run"})
+    else:
+        try:
+            url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+            ui.step("Downloading latest yt-dlp.exe...")
+            _download_asset(url, ytdlp_exe)
+            _unblock_path(ytdlp_exe)
+            ui.success(f"yt-dlp: verified at {ytdlp_exe}")
+            results.append({"name": "yt-dlp", "status": "ok", "path": ytdlp_exe})
+            if audit_log:
+                audit_log.record_file(ytdlp_exe, "download", "ok", "yt-dlp binary")
+        except Exception as e:
+            ui.error(f"yt-dlp download failed: {e}")
+            results.append({"name": "yt-dlp", "status": "failed", "detail": str(e)})
+
+    # 2. ffmpeg-full
+    ui.step("Checking ffmpeg-full suite (ffmpeg, ffprobe, ffplay)...")
+    if dry_run:
+        results.append({"name": "ffmpeg-full", "status": "skipped", "detail": "dry-run"})
+    else:
+        try:
+            ffmpeg_bins = ["ffmpeg.exe", "ffprobe.exe", "ffplay.exe"] if env.os == "windows" else ["ffmpeg", "ffprobe", "ffplay"]
+            already_have_ffmpeg = not force and all(os.path.isfile(os.path.join(target, b)) for b in ffmpeg_bins)
+            if already_have_ffmpeg:
+                ui.success(f"ffmpeg-full: already present in {target}")
+                results.append({"name": "ffmpeg-full", "status": "ok", "detail": "already present"})
+            else:
+                ui.step("Fetching latest ffmpeg-full release (BtbN/FFmpeg-Builds)...")
+                release = _fetch_latest_release("BtbN/FFmpeg-Builds")
+                patterns = [
+                    r"^ffmpeg-master-latest-win64-gpl\.zip$",
+                    r"^ffmpeg-master-latest-win64-gpl-shared\.zip$",
+                    r"^ffmpeg-.*-win64-gpl\.zip$",
+                ]
+                asset = _select_release_asset(release, patterns)
+                if not asset:
+                    raise RuntimeError("No matching ffmpeg release asset found")
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    archive_path = os.path.join(tmpdir, asset["name"])
+                    ui.step(f"Downloading {asset['name']} ({asset.get('size', 0) / (1024*1024):.1f} MB)...")
+                    _download_asset(asset["browser_download_url"], archive_path)
+                    extract_dir = os.path.join(tmpdir, "extracted")
+                    _extract_zip(archive_path, extract_dir)
+
+                    found_count = 0
+                    for root, _, files in os.walk(extract_dir):
+                        for f in files:
+                            if f.lower() in ("ffmpeg.exe", "ffprobe.exe", "ffplay.exe", "ffmpeg", "ffprobe", "ffplay"):
+                                src_f = os.path.join(root, f)
+                                dst_f = os.path.join(target, f)
+                                shutil.copy2(src_f, dst_f)
+                                _unblock_path(dst_f)
+                                found_count += 1
+
+                    ui.success(f"ffmpeg-full: extracted {found_count} binaries to {target}")
+                    results.append({"name": "ffmpeg-full", "status": "ok", "path": target})
+                    if audit_log:
+                        audit_log.record_package("ffmpeg-full", False, "install", "ok", f"extracted to {target}")
+        except Exception as e:
+            ui.warn(f"ffmpeg-full fetch notice: {e}")
+            results.append({"name": "ffmpeg-full", "status": "failed", "detail": str(e)})
+
+    # 3. alass
+    ui.step("Checking alass (subtitle auto-synchronization)...")
+    alass_exe = os.path.join(target, "alass.exe" if env.os == "windows" else "alass")
+    if dry_run:
+        results.append({"name": "alass", "status": "skipped", "detail": "dry-run"})
+    else:
+        try:
+            if not force and os.path.isfile(alass_exe):
+                ui.success(f"alass: already present at {alass_exe}")
+                results.append({"name": "alass", "status": "ok", "path": alass_exe})
+            else:
+                ui.step("Fetching latest alass release (kaegi/alass)...")
+                release = _fetch_latest_release("kaegi/alass")
+                patterns = [
+                    r"^alass-.*windows.*x64.*\.zip$",
+                    r"^alass-.*win64.*\.zip$",
+                    r"^alass-.*win.*\.zip$",
+                ] if env.os == "windows" else [r"^alass-.*linux.*\.tar\.gz$", r"^alass-.*linux.*\.zip$"]
+                asset = _select_release_asset(release, patterns)
+                if asset:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        archive_path = os.path.join(tmpdir, asset["name"])
+                        _download_asset(asset["browser_download_url"], archive_path)
+                        extract_dir = os.path.join(tmpdir, "extracted")
+                        _extract_zip(archive_path, extract_dir)
+                        for root, _, files in os.walk(extract_dir):
+                            for f in files:
+                                if f.lower() in ("alass.exe", "alass-cli.exe", "alass"):
+                                    src_f = os.path.join(root, f)
+                                    dst_f = os.path.join(target, f)
+                                    shutil.copy2(src_f, dst_f)
+                                    _unblock_path(dst_f)
+                        ui.success(f"alass: verified at {target}")
+                        results.append({"name": "alass", "status": "ok", "path": target})
+                else:
+                    ui.warn("No matching alass asset found")
+                    results.append({"name": "alass", "status": "skipped", "detail": "no asset"})
+        except Exception as e:
+            ui.warn(f"alass fetch notice: {e}")
+            results.append({"name": "alass", "status": "failed", "detail": str(e)})
+
+    # 4. ffsubsync
+    ui.step("Checking ffsubsync (Python/pip/uv)...")
+    if dry_run:
+        results.append({"name": "ffsubsync", "status": "skipped", "detail": "dry-run"})
+    else:
+        try:
+            installed_ffsubsync = False
+            if shutil.which("uv"):
+                ui.step("Installing/upgrading ffsubsync via uv tool...")
+                installed_ffsubsync = _run(["uv", "tool", "install", "--upgrade", "ffsubsync"], check=False)
+            if not installed_ffsubsync and shutil.which("python"):
+                ui.step("Installing/upgrading ffsubsync via python -m pip...")
+                installed_ffsubsync = _run([sys.executable, "-m", "pip", "install", "--upgrade", "ffsubsync"], check=False)
+            if not installed_ffsubsync and shutil.which("pip"):
+                ui.step("Installing/upgrading ffsubsync via pip...")
+                installed_ffsubsync = _run(["pip", "install", "--upgrade", "ffsubsync"], check=False)
+
+            if installed_ffsubsync or shutil.which("ffsubsync"):
+                ui.success("ffsubsync: verified")
+                results.append({"name": "ffsubsync", "status": "ok"})
+            else:
+                ui.warn("ffsubsync: could not automatically install via pip/uv")
+                results.append({"name": "ffsubsync", "status": "skipped", "detail": "pip/uv failed"})
+        except Exception as e:
+            ui.warn(f"ffsubsync install notice: {e}")
+            results.append({"name": "ffsubsync", "status": "failed", "detail": str(e)})
+
+    # 5. Local deployment artifact: update active ytdl_hook.conf
+    try:
+        from deploy.deployer import _resolve_ytdl_path
+        resolved_ytdl = _resolve_ytdl_path(env)
+        config_dir = getattr(env, "config_dir", None)
+        if not config_dir:
+            if env.os == "windows":
+                config_dir = os.path.join(os.environ.get("APPDATA", ""), "mpv")
+            else:
+                config_dir = os.path.expanduser("~/.config/mpv")
+        if config_dir and os.path.isdir(config_dir):
+            opts_dir = os.path.join(config_dir, "script-opts")
+            os.makedirs(opts_dir, exist_ok=True)
+            hook_conf = os.path.join(opts_dir, "ytdl_hook.conf")
+            with open(hook_conf, "w", encoding="utf-8") as f:
+                f.write(f"ytdl_path={resolved_ytdl}\n")
+            ui.success(f"Updated {hook_conf} (ytdl_path={resolved_ytdl})")
+    except Exception as e:
+        ui.warn(f"Could not update ytdl_hook.conf: {e}")
+
+    ui.success("MPV dependencies suite synchronization finished.")
+    return results
+

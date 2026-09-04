@@ -740,6 +740,40 @@ def _find_binary(name, env):
     return None
 
 
+def _resolve_ytdl_path(env):
+    """Resolve localized yt-dlp binary path dynamically."""
+    candidates = []
+    if env.os == "windows":
+        prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        candidates.extend([
+            os.path.join(prog_files, "mpv", "yt-dlp", "yt-dlp.exe"),
+            os.path.join(prog_files, "mpv", "yt-dlp.exe"),
+        ])
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            candidates.append(os.path.join(appdata, "mpv", "tools", "yt-dlp.exe"))
+            candidates.append(os.path.join(appdata, "mpv", "tools", "yt-dlp", "yt-dlp.exe"))
+    else:
+        candidates.extend([
+            os.path.expanduser("~/.local/bin/yt-dlp"),
+            "/usr/local/bin/yt-dlp",
+            "/usr/bin/yt-dlp",
+        ])
+
+    for c in candidates:
+        if os.path.isfile(c):
+            if env.os == "windows":
+                return _normalize_windows_path(c)
+            return c
+
+    which_path = _find_binary("yt-dlp", env)
+    if which_path:
+        return which_path
+
+    return "yt-dlp"
+
+
+
 # ─── Line Endings ──────────────────────────────────────────────────────
 
 def _normalize_line_endings(directory, env):
@@ -910,6 +944,16 @@ def deploy(
             results.append({"name": "script-opts", "status": "ok"})
             if audit_log:
                 audit_log.record_file(opts_dst, "copy", "ok", "script-opts deployed")
+
+        # Dynamic local deployment artifact: ytdl_hook.conf
+        resolved_ytdl = _resolve_ytdl_path(env)
+        ytdl_dest = os.path.join(opts_dst, "ytdl_hook.conf")
+        with open(ytdl_dest, "w", encoding="utf-8") as f:
+            f.write(f"ytdl_path={resolved_ytdl}\n")
+        ui.success(f"ytdl_hook.conf deployed (ytdl_path={resolved_ytdl})")
+        results.append({"name": "ytdl_hook.conf", "status": "ok", "detail": f"ytdl_path={resolved_ytdl}"})
+        if audit_log:
+            audit_log.record_file(ytdl_dest, "modify", "ok", f"localized ytdl_path={resolved_ytdl}")
 
         # 5. Patch templates
         ui.step("Patching platform-specific configs...")

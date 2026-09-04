@@ -227,7 +227,9 @@ class TestAuditPatches(unittest.TestCase):
         self.assertNotIn("sub-langs=", content)
         self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)
         self.assertIn("ytdl-raw-options-append = format-sort=res:1080,vbr,abr", content)
-        self.assertIn("script-opts-append = ytdl_hook-ytdl_path=C:/Program Files/mpv/yt-dlp/yt-dlp.exe", content)
+        self.assertNotIn("ytdl_hook-ytdl_path", content)
+        self.assertNotIn("C:/", content)
+        self.assertNotIn("C:\\", content)
 
     def test_ytdl_hook_conf_and_pinned_binary(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -237,7 +239,24 @@ class TestAuditPatches(unittest.TestCase):
         with open(hook_conf, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("ytdl_path=C:/Program Files/mpv/yt-dlp/yt-dlp.exe", content)
+        self.assertIn("ytdl_path=yt-dlp", content)
+        self.assertNotIn("C:/", content)
+
+        # Verify dynamic resolution logic
+        from deploy.deployer import _resolve_ytdl_path
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        resolved = _resolve_ytdl_path(env)
+        self.assertTrue(resolved)
+
+    def test_sync_dependencies_dry_run(self):
+        from deploy.installer import sync_dependencies, _get_target_tools_dir
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        target = _get_target_tools_dir(env)
+        self.assertTrue(target)
+        results = sync_dependencies(env=env, dry_run=True)
+        self.assertTrue(any(r["name"] == "yt-dlp" and r["status"] == "skipped" for r in results))
+        self.assertTrue(any(r["name"] == "ffmpeg-full" and r["status"] == "skipped" for r in results))
+        self.assertTrue(any(r["name"] == "alass" and r["status"] == "skipped" for r in results))
 
     def test_input_conf_clipboard_binding(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

@@ -727,6 +727,26 @@ def cmd_update(args):
             shutil.rmtree(staging_dir, ignore_errors=True)
 
 
+def cmd_sync_deps(args):
+    """Sync MPV dependency suite (yt-dlp, ffmpeg-full, alass, ffsubsync)."""
+    ui.banner()
+    env = detect()
+    audit_log = _audit_log_for(env)
+    audit_log.start_session("sync-deps", env)
+    try:
+        from deploy.installer import sync_dependencies
+        results = sync_dependencies(env=env, dry_run=args.dry_run, audit_log=audit_log)
+        ui.summary(results)
+        ui.panel("Dependency synchronization complete!", title="✨ Success", style="green")
+        audit_log.complete_session("completed")
+    except Exception:
+        try:
+            audit_log.complete_session("failed")
+        except Exception:
+            pass
+        raise
+
+
 def cmd_verify(args):
     """Verify the current installation."""
     ui.banner()
@@ -1061,6 +1081,7 @@ def _has_explicit_action(args):
             args.rollback is not None,
             args.uninstall,
             args.migrate_from_old,
+            getattr(args, "sync_deps", False),
         ]
     )
 
@@ -1222,6 +1243,11 @@ def main():
         default=None,
         help="Override pinned mpv Windows build tag (e.g. 2025-01-15)",
     )
+    parser.add_argument(
+        "--sync-deps",
+        action="store_true",
+        help="Automated dependency provisioning (yt-dlp, ffmpeg-full, alass, ffsubsync)",
+    )
 
     args = parser.parse_args()
 
@@ -1247,6 +1273,8 @@ def main():
             cmd_status(args)
         elif args.update:
             cmd_update(args)
+        elif args.sync_deps:
+            cmd_sync_deps(args)
         else:
             cmd_install(args)
     except KeyboardInterrupt:

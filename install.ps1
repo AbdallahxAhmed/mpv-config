@@ -16,6 +16,11 @@
 #    MPV_BOOTSTRAPPED=1        — internal flag, set by self-elevation
 # ───────────────────────────────────────────────────────────────────
 
+[CmdletBinding()]
+param(
+    [switch]$SyncDeps
+)
+
 # IMPORTANT: We deliberately do NOT use `$ErrorActionPreference = "Stop"` at
 # script scope. When this script is piped via `irm | iex`, any cmdlet that
 # writes to stderr (git, pip, winget) can terminate the entire pipeline and
@@ -119,20 +124,19 @@ if (-not $isAdmin) {
     # Launch elevated shell directly (most reliable method).
     # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
     # Try with -Environment first (pwsh 7.3+), fall back without it (PS 5.1).
+    $elevatedArgs = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", $tempScript
+    )
+    if ($SyncDeps) { $elevatedArgs += "-SyncDeps" }
+
     try {
-        Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-            "-NoProfile",
-            "-ExecutionPolicy", "Bypass",
-            "-File", $tempScript
-        ) -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
+        Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList $elevatedArgs -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
     } catch {
         # PS 5.1's Start-Process doesn't support -Environment.
         try {
-            Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList @(
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-File", $tempScript
-            ) -ErrorAction Stop
+            Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList $elevatedArgs -ErrorAction Stop
         } catch {
             Write-Host "ERROR: UAC was cancelled or elevation failed." -ForegroundColor Red
             Remove-Item -Force $tempScript -ErrorAction SilentlyContinue
@@ -159,6 +163,143 @@ Write-Host ""
 $psEditionInfo = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { "Desktop" }
 Write-Host "  PowerShell: $($PSVersionTable.PSVersion) ($psEditionInfo)" -ForegroundColor DarkGray
 Write-Host ""
+
+# ─── Automated Dependency Suite Pipeline ──────────────────────────────
+function Sync-MpvDependencies {
+    [CmdletBinding()]
+    param(
+        [string]$TargetDir = "",
+        [switch]$Force
+    )
+
+    Write-Host ""
+    Write-Host "+================================================================+" -ForegroundColor Cyan
+    Write-Host "|       Automated Dependency Suite Pipeline (Sync-Deps)          |" -ForegroundColor Cyan
+    Write-Host "+================================================================+" -ForegroundColor Cyan
+    Write-Host ""
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $TargetDir) {
+        if ($isAdmin) {
+            $TargetDir = "$env:ProgramFiles\mpv"
+        } else {
+            $TargetDir = "$env:APPDATA\mpv\tools"
+        }
+    }
+
+    if (-not (Test-Path $TargetDir)) {
+        New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
+    }
+
+    if ($TargetDir -like "*tools*") {
+        $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+        if ($userPath -notlike "*$TargetDir*") {
+            [Environment]::SetEnvironmentVariable("PATH", "$userPath;$TargetDir", "User")
+            $env:PATH = "$env:PATH;$TargetDir"
+            Write-Host "  + Added $TargetDir to User PATH" -ForegroundColor Green
+        }
+    }
+
+    # 1. yt-dlp (64-bit Windows binary)
+    Write-Host "  > Provisioning yt-dlp (64-bit)..." -ForegroundColor Gray
+    $ytdlpDestDir = if ($isAdmin) { Join-Path $TargetDir "yt-dlp" } else { $TargetDir }
+    if (-not (Test-Path $ytdlpDestDir)) { New-Item -ItemType Directory -Path $ytdlpDestDir -Force | Out-Null }
+    $ytdlpExe = Join-Path $ytdlpDestDir "yt-dlp.exe"
+    try {
+        Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile $ytdlpExe -UseBasicParsing
+        Unblock-File -LiteralPath $ytdlpExe -ErrorAction SilentlyContinue
+        Write-Host "  + yt-dlp verified: $ytdlpExe" -ForegroundColor Green
+    } catch {
+        Write-Host "  ! yt-dlp download notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 2. ffmpeg-full (ffmpeg, ffprobe, ffplay from BtbN/Gyan release)
+    Write-Host "  > Provisioning ffmpeg-full suite..." -ForegroundColor Gray
+    $ffmpegDestDir = if ($isAdmin) { Join-Path $TargetDir "ffmpeg\bin" } else { $TargetDir }
+    if (-not (Test-Path $ffmpegDestDir)) { New-Item -ItemType Directory -Path $ffmpegDestDir -Force | Out-Null }
+    try {
+        $zipUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+        $tempZip = Join-Path $env:TEMP "ffmpeg-release.zip"
+        Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing
+        $tempExtract = Join-Path $env:TEMP "ffmpeg-extract"
+        if (Test-Path $tempExtract) { Remove-Item -Recurse -Force $tempExtract }
+        Expand-Archive -LiteralPath $tempZip -DestinationPath $tempExtract -Force
+        $bins = Get-ChildItem -Path $tempExtract -Recurse -Filter "*.exe" | Where-Object { $_.Name -in @("ffmpeg.exe", "ffprobe.exe", "ffplay.exe") }
+        foreach ($b in $bins) {
+            $destFile = Join-Path $ffmpegDestDir $b.Name
+            Copy-Item -LiteralPath $b.FullName -Destination $destFile -Force
+            Unblock-File -LiteralPath $destFile -ErrorAction SilentlyContinue
+        }
+        Remove-Item -Force $tempZip -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $tempExtract -ErrorAction SilentlyContinue
+        Write-Host "  + ffmpeg-full (ffmpeg, ffprobe, ffplay) verified in: $ffmpegDestDir" -ForegroundColor Green
+    } catch {
+        Write-Host "  ! ffmpeg-full fetch notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 3. alass (subtitle auto-synchronization from kaegi/alass)
+    Write-Host "  > Provisioning alass (subtitle auto-sync)..." -ForegroundColor Gray
+    $alassDestDir = if ($isAdmin) { Join-Path $TargetDir "alass" } else { $TargetDir }
+    if (-not (Test-Path $alassDestDir)) { New-Item -ItemType Directory -Path $alassDestDir -Force | Out-Null }
+    try {
+        $alassRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/kaegi/alass/releases/latest" -Headers @{ "User-Agent" = "mpv-config" }
+        $asset = $alassRelease.assets | Where-Object { $_.name -match "windows.*x64|win64|win" } | Select-Object -First 1
+        if ($asset) {
+            $tempAlassZip = Join-Path $env:TEMP $asset.name
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempAlassZip -UseBasicParsing
+            $tempAlassExtract = Join-Path $env:TEMP "alass-extract"
+            if (Test-Path $tempAlassExtract) { Remove-Item -Recurse -Force $tempAlassExtract }
+            Expand-Archive -LiteralPath $tempAlassZip -DestinationPath $tempAlassExtract -Force
+            $alassBins = Get-ChildItem -Path $tempAlassExtract -Recurse -Filter "*.exe"
+            foreach ($ab in $alassBins) {
+                $destFile = Join-Path $alassDestDir $ab.Name
+                Copy-Item -LiteralPath $ab.FullName -Destination $destFile -Force
+                Unblock-File -LiteralPath $destFile -ErrorAction SilentlyContinue
+            }
+            Remove-Item -Force $tempAlassZip -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tempAlassExtract -ErrorAction SilentlyContinue
+            Write-Host "  + alass verified in: $alassDestDir" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  ! alass fetch notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 4. ffsubsync (Python/pip/uv)
+    Write-Host "  > Provisioning ffsubsync..." -ForegroundColor Gray
+    try {
+        if (Get-Command uv.exe -ErrorAction SilentlyContinue) {
+            & uv tool install --upgrade ffsubsync 2>$null
+        } elseif (Get-Command python.exe -ErrorAction SilentlyContinue) {
+            & python -m pip install --upgrade ffsubsync 2>$null
+        } elseif (Get-Command pip.exe -ErrorAction SilentlyContinue) {
+            & pip install --upgrade ffsubsync 2>$null
+        }
+        Write-Host "  + ffsubsync verified" -ForegroundColor Green
+    } catch {
+        Write-Host "  ! ffsubsync notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 5. Local deployment artifact: update ytdl_hook.conf
+    try {
+        $optsDir = "$env:APPDATA\mpv\script-opts"
+        if (-not (Test-Path $optsDir)) { New-Item -ItemType Directory -Path $optsDir -Force | Out-Null }
+        $resolvedYtdl = if (Test-Path $ytdlpExe) { $ytdlpExe.Replace('\', '/') } else { "yt-dlp" }
+        $hookConf = Join-Path $optsDir "ytdl_hook.conf"
+        "ytdl_path=$resolvedYtdl" | Out-File -FilePath $hookConf -Encoding utf8 -Force
+        Write-Host "  + Localized deployment artifact updated: $hookConf (ytdl_path=$resolvedYtdl)" -ForegroundColor Green
+    } catch {
+        Write-Host "  ! ytdl_hook.conf notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+if ($SyncDeps) {
+    Sync-MpvDependencies
+    if (-not $env:MPV_NO_PAUSE) {
+        Write-Host ""
+        Read-Host "Press Enter to close this window"
+    }
+    exit 0
+}
 
 # ─── Step 1: Check prerequisites ─────────────────────────────────────
 Write-Host "[1/4] Checking prerequisites..." -ForegroundColor White
