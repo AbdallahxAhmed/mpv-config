@@ -82,6 +82,14 @@ sub-shadow-offset         = 1
 sub-color                 = "#FFFFFFFF"
 sub-border-color          = "#FF000000"
 
+# Subtitle Timing & Display Sanitation
+sub-fix-timing = yes
+sub-ass-override = force
+sub-ass-force-margins = yes
+sub-ass-vsfilter-aspect-compat = no
+sub-ass-vsfilter-blur-compat = no
+demuxer-mkv-subtitle-preroll = yes
+
 # ─── Screenshot ──────────────────────────────────────────────────────
 screenshot-format         = png
 screenshot-png-compression = 4
