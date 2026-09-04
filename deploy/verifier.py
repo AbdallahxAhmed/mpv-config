@@ -171,7 +171,7 @@ def verify(config_dir, env):
     # ─── mpv launch test ─────────────────────────────────────────────
 
     ui.step("Testing mpv launch...")
-    mpv_ok = _run_check(["mpv", "--no-video", "--no-audio", "--frames=0", "--really-quiet"])
+    mpv_ok = _run_check(["mpv", "--no-video", "--no-audio", "--frames=0", "--really-quiet", "--idle=no"])
     check("mpv launch test", mpv_ok, "mpv runs without errors")
 
     # ─── Summary ─────────────────────────────────────────────────────
