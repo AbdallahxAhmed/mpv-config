@@ -1,3 +1,8 @@
+-- vendored ytdl_hook.lua: Unconditional execution
+-- Note: mpv's built-in ytdl hook is disabled via 'ytdl = no' in mpv.conf.
+-- The upstream ytdl disabled abort check is intentionally omitted/bypassed
+-- so this vendored hook runs unconditionally regardless of 'ytdl = no' in mpv.conf.
+
 local utils = require 'mp.utils'
 local msg = require 'mp.msg'
 local options = require 'mp.options'

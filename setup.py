@@ -332,7 +332,13 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             flags=re.MULTILINE,
         )
 
-    # 3. Migrate / ensure Ctrl+v clipboard loading
+    # 3. Clean up manual clipboard loadfile overrides and migrate to smart_paste
+    updated_content = re.sub(
+        r'^[ \t]*Ctrl\+(?:Shift\+)?[vV][ \t]+loadfile[^\r\n]*\r?\n?',
+        '',
+        updated_content,
+        flags=re.MULTILINE,
+    )
     ctrl_v_match = re.search(
         r'^[ \t]*Ctrl\+v[ \t]+([^\r\n#]+)', updated_content, re.IGNORECASE | re.MULTILINE
     )
@@ -347,17 +353,20 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         updated_content = updated_content.rstrip() + "\n" + smart_clipboard_block
     elif "smart_paste" not in ctrl_v_match.group(1):
         updated_content = re.sub(
-            r'^[ \t]*Ctrl\+[vV][ \t]+[^\r\n]+',
-            "Ctrl+v           script-binding smart_paste/paste-to-open\n"
-            "Ctrl+V           script-binding smart_paste/paste-to-open\n"
-            "Ctrl+Shift+v     script-binding smart_paste/paste-to-playlist\n"
-            "Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist",
+            r'^[ \t]*Ctrl\+(?:Shift\+)?[vV][ \t]+[^\r\n]+\r?\n?',
+            '',
             updated_content,
-            count=1,
             flags=re.MULTILINE,
         )
+        updated_content = updated_content.rstrip() + "\n" + smart_clipboard_block
 
     # 4. Migrate / ensure Arabic bilingual twin keybindings
+    updated_content = re.sub(
+        r'^[ \t]*Ctrl\+(?:Shift\+)?(?:ر|Ø±)[ \t]+loadfile[^\r\n]*\r?\n?',
+        '',
+        updated_content,
+        flags=re.MULTILINE,
+    )
     if not re.search(r'^[ \t]*ا[ \t]+script-binding', updated_content, re.MULTILINE):
         arabic_bindings = (
             "\n# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────\n"
@@ -382,14 +391,20 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         )
         updated_content = updated_content.rstrip() + "\n" + arabic_bindings
     else:
-        # Upgrade any existing raw loadfile / mojibake Arabic clipboard bindings
-        updated_content = re.sub(
-            r'^[ \t]*Ctrl\+(?:ر|Ø±)[ \t]+[^\r\n]+',
-            "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
-            "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist",
-            updated_content,
-            flags=re.MULTILINE,
-        )
+        # Upgrade any existing raw loadfile / legacy / mojibake Arabic clipboard bindings
+        ctrl_ar_match = re.search(r'^[ \t]*Ctrl\+(?:ر|Ø±)[ \t]+([^\r\n#]+)', updated_content, re.MULTILINE)
+        if not ctrl_ar_match or "smart_paste" not in ctrl_ar_match.group(1):
+            updated_content = re.sub(
+                r'^[ \t]*Ctrl\+(?:Shift\+)?(?:ر|Ø±)[ \t]+[^\r\n]+\r?\n?',
+                '',
+                updated_content,
+                flags=re.MULTILINE,
+            )
+            updated_content = updated_content.rstrip() + (
+                "\n# Instant play from clipboard — Ctrl+ر = Ctrl+v\n"
+                "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
+                "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist\n"
+            )
 
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:

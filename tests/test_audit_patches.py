@@ -269,7 +269,12 @@ class TestAuditPatches(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
-            old_content = 'SPACE cycle pause\nCtrl+v loadfile "${clipboard}"\n'
+            old_content = (
+                'SPACE cycle pause\n'
+                'Ctrl+v loadfile "${clipboard/text:${clipboard}}"\n'
+                'Ctrl+V loadfile "${clipboard/text:${clipboard}}"\n'
+                'Ctrl+ر loadfile "${clipboard/text:${clipboard}}"\n'
+            )
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
 
@@ -280,7 +285,10 @@ class TestAuditPatches(unittest.TestCase):
                 new_content = f.read()
 
             self.assertIn('Ctrl+v           script-binding smart_paste/paste-to-open', new_content)
-            self.assertNotIn('Ctrl+v loadfile "${clipboard}"', new_content)
+            self.assertIn('Ctrl+V           script-binding smart_paste/paste-to-open', new_content)
+            self.assertIn('Ctrl+ر           script-binding smart_paste/paste-to-open', new_content)
+            self.assertNotIn('loadfile "${clipboard/text:${clipboard}}"', new_content)
+            self.assertNotIn('loadfile "${clipboard}"', new_content)
 
     def test_template_1080p_high_bitrate_stream_selection(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -370,6 +378,8 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn('tostring(data):gsub', yh_content)
         self.assertIn('json_name ~= "ytdl_description" and json_name ~= "description"', yh_content)
         self.assertIn("user-data/mpv/ytdl/json-subprocess-result", yh_content)
+        self.assertNotIn('if not mp.get_property_bool("ytdl", true) then return end', yh_content)
+        self.assertNotIn('mp.get_property_bool("ytdl"', yh_content)
 
     def test_mpv_conf_template_idle_mode(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
