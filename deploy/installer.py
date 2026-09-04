@@ -21,11 +21,11 @@ from deploy.registry import SYSTEM_DEPS
 
 
 
-def _run(cmd, check=True):
+def _run(cmd, check=True, env=None):
     """Run a command, showing output. Returns success bool."""
     try:
         result = subprocess.run(
-            cmd, check=check, timeout=300,
+            cmd, check=check, timeout=300, env=env,
             # Don't capture — let user see install progress
         )
         if not check and result.returncode != 0:
@@ -645,9 +645,10 @@ def _install_uv_tool(info, env):
     if uv_python:
         ui.info(f"{pkg}: using uv with Python {uv_python} to prefer prebuilt wheels")
         cmd += ["--python", uv_python]
+    cmd_env = os.environ.copy()
     if bin_dir:
-        cmd += ["--bin-dir", bin_dir]
-    ok = _run(cmd)
+        cmd_env["UV_TOOL_BIN_DIR"] = bin_dir
+    ok = _run(cmd, env=cmd_env)
     if not ok:
         if uv_no_fallback:
             ui.warn("uv tool install failed; build fallbacks disabled for this tool.")
@@ -672,9 +673,14 @@ def _uninstall_uv_tool(info, env):
     if not pkg:
         return False
 
+    bin_dir = info.get("bin_dir")
+    cmd_env = os.environ.copy()
+    if bin_dir:
+        cmd_env["UV_TOOL_BIN_DIR"] = bin_dir
+
     ok = False
     if shutil.which("uv"):
-        ok = _run(["uv", "tool", "uninstall", pkg], check=False)
+        ok = _run(["uv", "tool", "uninstall", pkg], check=False, env=cmd_env)
     if not ok and shutil.which("pipx"):
         ok = _run(["pipx", "uninstall", pkg], check=False)
 
