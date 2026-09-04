@@ -91,9 +91,8 @@ ytdl                      = no
 ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
 ytdl-raw-options-append = no-playlist=
 ytdl-raw-options-append = format-sort=res:1080,vbr,abr
-ytdl-raw-options-append = write-auto-subs=
-ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat
 ytdl-raw-options-append = socket-timeout=15
+script-opts-append = ytdl_hook-ytdl_path=C:/Program Files/mpv/yt-dlp/yt-dlp.exe
 
 # ─── Shader cache — critical for Anime4K first-frame speed ───────────
 gpu-shader-cache          = yes
@@ -199,8 +198,6 @@ demuxer-readahead-secs    = 60
 ytdl-format               = bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best
 ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
-ytdl-raw-options-append   = write-auto-subs=
-ytdl-raw-options-append   = sub-langs=ar.*,en.*,-live_chat
 ytdl-raw-options-append   = socket-timeout=15
 
 [protocol.http]

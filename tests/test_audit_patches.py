@@ -223,20 +223,21 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("ytdl                      = no", content)
         self.assertIn("ytdl-raw-options-append = no-playlist=", content)
         self.assertNotIn("player_client=android,web", content)
-        self.assertIn("ytdl-raw-options-append = write-auto-subs=", content)
-        self.assertIn("ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat", content)
+        self.assertNotIn("write-auto-subs=", content)
+        self.assertNotIn("sub-langs=", content)
         self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)
+        self.assertIn("ytdl-raw-options-append = format-sort=res:1080,vbr,abr", content)
+        self.assertIn("script-opts-append = ytdl_hook-ytdl_path=C:/Program Files/mpv/yt-dlp/yt-dlp.exe", content)
 
-    def test_template_youtube_auto_subs_bounded(self):
+    def test_ytdl_hook_conf_and_pinned_binary(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+        hook_conf = os.path.join(repo_root, "config", "script-opts", "ytdl_hook.conf")
+        self.assertTrue(os.path.isfile(hook_conf), "config/script-opts/ytdl_hook.conf must exist")
 
-        with open(template_file, "r", encoding="utf-8") as f:
+        with open(hook_conf, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Verify auto-subs enabled and strictly bounded to prevent startup latency
-        self.assertIn("write-auto-subs=", content)
-        self.assertIn("sub-langs=ar.*,en.*,-live_chat", content)
+        self.assertIn("ytdl_path=C:/Program Files/mpv/yt-dlp/yt-dlp.exe", content)
 
     def test_input_conf_clipboard_binding(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
