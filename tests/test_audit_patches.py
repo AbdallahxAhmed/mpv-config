@@ -204,6 +204,165 @@ class TestAuditPatches(unittest.TestCase):
             self.assertIn("MBTN_RIGHT       cycle pause", new_content)
             self.assertIn("MBTN_RIGHT_DBL   ignore", new_content)
 
+    def test_template_watch_later_options_persists_volume_mute(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("watch-later-options       = start,vid,aid,sid,volume,mute", content)
+
+    def test_template_youtube_startup_latency_options(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("ytdl-raw-options-append = no-playlist=", content)
+        self.assertNotIn("player_client=android,web", content)
+        self.assertIn("ytdl-raw-options-append = write-auto-subs=", content)
+        self.assertIn("ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat", content)
+
+    def test_template_youtube_auto_subs_bounded(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Verify auto-subs enabled and strictly bounded to prevent startup latency
+        self.assertIn("write-auto-subs=", content)
+        self.assertIn("sub-langs=ar.*,en.*,-live_chat", content)
+
+    def test_input_conf_clipboard_binding(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        input_template = os.path.join(repo_root, "config", "input.conf.template")
+
+        with open(input_template, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('Ctrl+v           script-binding smart_paste/paste-to-open', content)
+
+    def test_migrate_input_conf_appends_clipboard_when_absent(self):
+        from setup import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = "SPACE cycle pause\nMBTN_RIGHT cycle pause\nMBTN_RIGHT_DBL ignore\n"
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn('Ctrl+v           script-binding smart_paste/paste-to-open', new_content)
+
+    def test_migrate_input_conf_upgrades_raw_clipboard(self):
+        from setup import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = 'SPACE cycle pause\nCtrl+v loadfile "${clipboard}"\n'
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn('Ctrl+v           script-binding smart_paste/paste-to-open', new_content)
+            self.assertNotIn('Ctrl+v loadfile "${clipboard}"', new_content)
+
+    def test_template_1080p_high_bitrate_stream_selection(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Check ytdl-format ceiling and removal of obsolete vp09 filter
+        self.assertIn('ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"', content)
+        self.assertNotIn("vp0?9", content)
+
+        # Check bitrate sorting
+        self.assertIn("ytdl-raw-options-append = format-sort=res:1080,vbr,abr", content)
+
+    def test_uosc_controls_toolbar_configured(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        uosc_conf = os.path.join(repo_root, "config", "script-opts", "uosc.conf")
+
+        with open(uosc_conf, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn(
+            "controls=menu,gap,<has_sub>subtitles,<has_many_audio>audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen",
+            content,
+        )
+
+    def test_input_conf_arabic_twin_bindings(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        input_template = os.path.join(repo_root, "config", "input.conf.template")
+
+        with open(input_template, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("ا        script-binding memo-history", content)
+        self.assertIn("ى        script-binding autosubsync-menu", content)
+        self.assertIn("ﻻ        script-binding sponsorblock_upvote", content)
+        self.assertIn("ﻵ        script-binding sponsorblock_downvote", content)
+        self.assertIn("ل        script-binding sponsorblock_set_segment", content)
+        self.assertIn('Ctrl+ر           script-binding smart_paste/paste-to-open', content)
+
+    def test_migrate_input_conf_appends_arabic_twins(self):
+        from setup import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = 'SPACE cycle pause\nCtrl+v script-binding smart_paste/paste-to-open\n'
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("ا        script-binding memo-history", new_content)
+            self.assertIn("ى        script-binding autosubsync-menu", new_content)
+            self.assertIn("ﻻ        script-binding sponsorblock_upvote", new_content)
+            self.assertIn('Ctrl+ر           script-binding smart_paste/paste-to-open', new_content)
+
+    def test_vendored_scripts_exist_and_patched(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        tf = os.path.join(repo_root, "scripts", "thumbfast.lua")
+        sp = os.path.join(repo_root, "scripts", "smart-paste.lua")
+        ss = os.path.join(repo_root, "scripts", "SmartSkip.lua")
+
+        self.assertTrue(os.path.isfile(tf), "scripts/thumbfast.lua must exist in repo")
+        self.assertTrue(os.path.isfile(sp), "scripts/smart-paste.lua must exist in repo")
+        self.assertTrue(os.path.isfile(ss), "scripts/SmartSkip.lua must exist in repo")
+
+        with open(tf, "r", encoding="utf-8") as f:
+            tf_content = f.read()
+        self.assertIn("user-data/mpv/ytdl/json-subprocess-result", tf_content)
+        self.assertIn("resized_storyboard or not using_storyboards", tf_content)
+
+    def test_mpv_conf_template_idle_mode(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("idle                      = yes", content)
+
 
 if __name__ == "__main__":
     unittest.main()
+

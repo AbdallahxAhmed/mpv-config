@@ -13,10 +13,11 @@ border                    = {{BORDER}}
 # Prevents WM-level fullscreen from desyncing mpv's internal fs state.
 native-fs                 = {{NATIVE_FS}}
 {{/if}}
+idle                      = yes
 keep-open                 = yes
 force-window              = immediate
 save-position-on-quit     = yes
-watch-later-options       = start,vid,aid,sid
+watch-later-options       = start,vid,aid,sid,volume,mute
 
 # ─── Video output stack ──────────────────────────────────────────────
 vo                        = {{VO}}
@@ -86,7 +87,11 @@ screenshot-directory      = {{SCREENSHOT_DIR}}
 screenshot-template       = "%F_%P"
 
 # ─── ytdl ────────────────────────────────────────────────────────────
-ytdl-format = "bestvideo[height<=?1080][vcodec!~='vp0?9']+bestaudio[acodec=opus]/bestvideo[height<=?1080]+bestaudio/best"
+ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+ytdl-raw-options-append = no-playlist=
+ytdl-raw-options-append = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append = write-auto-subs=
+ytdl-raw-options-append = sub-langs=ar.*,en.*,-live_chat
 
 # ─── Shader cache — critical for Anime4K first-frame speed ───────────
 gpu-shader-cache          = yes
@@ -189,7 +194,11 @@ demuxer-max-back-bytes    = 200MiB
 demuxer-readahead-secs    = 60
 # video-sync and interpolation intentionally inherited from the base config
 # (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
-ytdl-format               = bestvideo[height<=?1080][vcodec!~='vp0?9']+bestaudio[acodec=opus]/bestvideo[height<=?1080]+bestaudio/best
+ytdl-format               = bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best
+ytdl-raw-options-append   = no-playlist=
+ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append   = write-auto-subs=
+ytdl-raw-options-append   = sub-langs=ar.*,en.*,-live_chat
 
 [protocol.http]
 profile                   = protocol.https

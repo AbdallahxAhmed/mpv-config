@@ -767,6 +767,20 @@ def deploy(
             ui.success(f"{item}/: {count} file(s) deployed via {method}")
             results.append({"name": item, "status": "ok", "detail": f"{count} files via {method}"})
 
+    # 3b. Override with repo-vendored/patched scripts (ensures patches like thumbfast storyboard & smart-paste persist across installs)
+    repo_scripts = os.path.join(repo_dir, "scripts")
+    if os.path.isdir(repo_scripts):
+        scripts_dst = os.path.join(config_dir, "scripts")
+        os.makedirs(scripts_dst, exist_ok=True)
+        for sname in os.listdir(repo_scripts):
+            s_src = os.path.join(repo_scripts, sname)
+            s_dst = os.path.join(scripts_dst, sname)
+            if os.path.isfile(s_src):
+                shutil.copy2(s_src, s_dst)
+                if audit_log:
+                    audit_log.record_file(s_dst, "copy", "ok", f"deployed repo script {sname}")
+        ui.success("repo scripts/ deployed & patched")
+
     # 4. Copy config files from repo
     config_src = os.path.join(repo_dir, "config")
     if os.path.isdir(config_src):

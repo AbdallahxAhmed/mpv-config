@@ -332,6 +332,65 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             flags=re.MULTILINE,
         )
 
+    # 3. Migrate / ensure Ctrl+v clipboard loading
+    ctrl_v_match = re.search(
+        r'^[ \t]*Ctrl\+v[ \t]+([^\r\n#]+)', updated_content, re.IGNORECASE | re.MULTILINE
+    )
+    smart_clipboard_block = (
+        "\n# Instant play from clipboard (with automatic URL normalization & instant OSD)\n"
+        "Ctrl+v           script-binding smart_paste/paste-to-open\n"
+        "Ctrl+V           script-binding smart_paste/paste-to-open\n"
+        "Ctrl+Shift+v     script-binding smart_paste/paste-to-playlist\n"
+        "Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist\n"
+    )
+    if not ctrl_v_match:
+        updated_content = updated_content.rstrip() + "\n" + smart_clipboard_block
+    elif "smart_paste" not in ctrl_v_match.group(1):
+        updated_content = re.sub(
+            r'^[ \t]*Ctrl\+[vV][ \t]+[^\r\n]+',
+            "Ctrl+v           script-binding smart_paste/paste-to-open\n"
+            "Ctrl+V           script-binding smart_paste/paste-to-open\n"
+            "Ctrl+Shift+v     script-binding smart_paste/paste-to-playlist\n"
+            "Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist",
+            updated_content,
+            count=1,
+            flags=re.MULTILINE,
+        )
+
+    # 4. Migrate / ensure Arabic bilingual twin keybindings
+    if not re.search(r'^[ \t]*ا[ \t]+script-binding', updated_content, re.MULTILINE):
+        arabic_bindings = (
+            "\n# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────\n"
+            "# History (memo) — ا = h (History)\n"
+            "ا        script-binding memo-history\n\n"
+            "# SponsorBlock voting — ﻻ = B (Upvote), Shift+ﻻ / ﻵ = Shift+B (Downvote)\n"
+            "ﻻ        script-binding sponsorblock_upvote\n"
+            "Shift+ﻻ  script-binding sponsorblock_downvote\n"
+            "ﻵ        script-binding sponsorblock_downvote\n\n"
+            "# SponsorBlock segment marking / submission — ل = g, Shift+ل / إ = G\n"
+            "ل        script-binding sponsorblock_set_segment\n"
+            "Shift+ل  script-binding sponsorblock_submit_segment\n"
+            "إ        script-binding sponsorblock_submit_segment\n\n"
+            "# Explicit Latin bindings for SponsorBlock segment marking\n"
+            "g        script-binding sponsorblock_set_segment\n"
+            "G        script-binding sponsorblock_submit_segment\n\n"
+            "# Subtitle sync (autosubsync) — ى = n (syNc)\n"
+            "ى        script-binding autosubsync-menu\n\n"
+            "# Instant play from clipboard — Ctrl+ر = Ctrl+v\n"
+            "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
+            "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist\n"
+        )
+        updated_content = updated_content.rstrip() + "\n" + arabic_bindings
+    else:
+        # Upgrade any existing raw loadfile / mojibake Arabic clipboard bindings
+        updated_content = re.sub(
+            r'^[ \t]*Ctrl\+(?:ر|Ø±)[ \t]+[^\r\n]+',
+            "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
+            "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist",
+            updated_content,
+            flags=re.MULTILINE,
+        )
+
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
@@ -340,7 +399,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
                 input_conf_path,
                 "modify",
                 "ok",
-                "migrated input.conf bindings (F8, mouse)",
+                "migrated input.conf bindings (F8, mouse, clipboard, arabic)",
             )
         return True
 
@@ -552,6 +611,18 @@ def cmd_migrate(args):
             shutil.copy2(tf_src, tf_dst)
             if audit_log:
                 audit_log.record_file(tf_dst, "copy", "ok", "deployed thumbfast.conf")
+
+        repo_scripts = os.path.join(SCRIPT_DIR, "scripts")
+        if os.path.isdir(repo_scripts):
+            scripts_dst = os.path.join(config_dir, "scripts")
+            os.makedirs(scripts_dst, exist_ok=True)
+            for sname in os.listdir(repo_scripts):
+                s_src = os.path.join(repo_scripts, sname)
+                s_dst = os.path.join(scripts_dst, sname)
+                if os.path.isfile(s_src):
+                    shutil.copy2(s_src, s_dst)
+                    if audit_log:
+                        audit_log.record_file(s_dst, "copy", "ok", f"deployed repo script {sname}")
 
         ui.panel(
             "Migration complete. User overrides saved to mpv.conf.user.",

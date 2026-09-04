@@ -115,6 +115,12 @@ CLOSE_WIN quit
 MBTN_RIGHT       cycle pause
 MBTN_RIGHT_DBL   ignore
 
+# Instant play from clipboard (with automatic URL normalization & instant OSD)
+Ctrl+v           script-binding smart_paste/paste-to-open
+Ctrl+V           script-binding smart_paste/paste-to-open
+Ctrl+Shift+v     script-binding smart_paste/paste-to-playlist
+Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist
+
 #######################################################################################
 #                                   نهاية الإعدادات                                   #
 #######################################################################################
@@ -130,3 +136,28 @@ Shift+B  script-binding sponsorblock_downvote
 
 # Subtitle sync (autosubsync) — n = syNc
 n    script-binding autosubsync-menu
+
+# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
+# History (memo) — ا = h (History)
+ا        script-binding memo-history
+
+# SponsorBlock voting — ﻻ = B (Upvote), Shift+ﻻ / ﻵ = Shift+B (Downvote)
+ﻻ        script-binding sponsorblock_upvote
+Shift+ﻻ  script-binding sponsorblock_downvote
+ﻵ        script-binding sponsorblock_downvote
+
+# SponsorBlock segment marking / submission — ل = g, Shift+ل / إ = G
+ل        script-binding sponsorblock_set_segment
+Shift+ل  script-binding sponsorblock_submit_segment
+إ        script-binding sponsorblock_submit_segment
+
+# Explicit Latin bindings for SponsorBlock segment marking
+g        script-binding sponsorblock_set_segment
+G        script-binding sponsorblock_submit_segment
+
+# Subtitle sync (autosubsync) — ى = n (syNc)
+ى        script-binding autosubsync-menu
+
+# Instant play from clipboard — Ctrl+ر = Ctrl+v
+Ctrl+ر           script-binding smart_paste/paste-to-open
+Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist
