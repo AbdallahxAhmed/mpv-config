@@ -433,7 +433,107 @@ class TestAuditPatches(unittest.TestCase):
                 mpv_cmds = [c for c in captured_cmds if "mpv" in c[0]]
                 self.assertTrue(any("--idle=no" in c for c in mpv_cmds))
 
+    def test_ensure_windows_shortcuts_enforces_userprofile_working_directory(self):
+        from unittest.mock import patch, MagicMock
+        from deploy.deployer import ensure_windows_shortcuts
+        from deploy.detector import Environment
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        captured_powershell_cmds = []
+
+        def fake_subprocess_run(cmd, capture_output=True, text=True, timeout=15):
+            captured_powershell_cmds.append(cmd)
+            mock_res = MagicMock()
+            mock_res.stdout = "SHORTCUT_OK: C:\\dummy\\mpv.lnk\n"
+            return mock_res
+
+        with patch("subprocess.run", side_effect=fake_subprocess_run), \
+             patch("shutil.which", return_value=r"C:\Program Files\mpv\mpv.exe"):
+            updated = ensure_windows_shortcuts(env)
+            self.assertEqual(len(updated), 1)
+            self.assertIn("C:\\dummy\\mpv.lnk", updated)
+
+            self.assertEqual(len(captured_powershell_cmds), 1)
+            cmd_args = captured_powershell_cmds[0]
+            self.assertIn("powershell", cmd_args[0].lower())
+            script_text = cmd_args[cmd_args.index("-Command") + 1]
+
+            # Enforce WorkingDirectory is set to $userProfile
+            self.assertIn("$sc.WorkingDirectory = $userProfile", script_text)
+            self.assertNotIn("$sc.WorkingDirectory = ''", script_text)
+            self.assertNotIn("$sc.WorkingDirectory = 'C:\\Windows\\System32'", script_text)
+
+    def test_ensure_mpv_conf_user_strips_self_include(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            user_path = os.path.join(tmpdir, "mpv.conf.user")
+            corrupt_content = (
+                "# Preserved user overrides\n"
+                "volume = 90\n"
+                "\n"
+                "[protocol.http]\n"
+                'include = "~~/mpv.conf.user"\n'
+            )
+            with open(user_path, "w", encoding="utf-8") as f:
+                f.write(corrupt_content)
+
+            ensure_mpv_conf_user(tmpdir)
+
+            with open(user_path, "r", encoding="utf-8") as f:
+                cleaned = f.read()
+
+            self.assertNotIn('include = "~~/mpv.conf.user"', cleaned)
+            self.assertNotIn("[protocol.http]", cleaned)
+            self.assertIn("volume = 90", cleaned)
+
+    def test_extract_overrides_ignores_include_directive(self):
+        from setup import _extract_overrides
+
+        conf_content = (
+            "volume = 80\n"
+            'include = "~~/mpv.conf.user"\n'
+            "[protocol.http]\n"
+            'include = "~~/mpv.conf.user"\n'
+        )
+        defaults = {}
+        order, overrides = _extract_overrides(conf_content, defaults)
+
+        for section, pairs in overrides.items():
+            for key, val in pairs:
+                self.assertNotEqual(key.lower(), "include")
+
+    def test_mpv_conf_template_clipboard_monitor_and_default_include(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        with open(template_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("clipboard-monitor         = yes", content)
+
+        # [default] must precede the user overrides include so it is not grouped into [protocol.http]
+        http_idx = content.find("[protocol.http]")
+        default_idx = content.find("[default]\n#######################################################################################\n# User overrides")
+        include_idx = content.find('include                   = "~~/mpv.conf.user"')
+
+        self.assertNotEqual(http_idx, -1)
+        self.assertNotEqual(default_idx, -1)
+        self.assertNotEqual(include_idx, -1)
+        self.assertTrue(http_idx < default_idx < include_idx)
+
+    def test_smart_paste_type_safe_clipboard(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        sp_file = os.path.join(repo_root, "scripts", "smart-paste.lua")
+
+        with open(sp_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('if not s or type(s) ~= "string" then return nil end', content)
+        self.assertIn('mp.commandv("update-clipboard", "text")', content)
+        self.assertIn('type(val) == "string"', content)
+        self.assertIn('type(val) == "table"', content)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

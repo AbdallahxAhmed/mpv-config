@@ -4,7 +4,7 @@
 -- Provides continuous OSD visual spinner feedback while yt-dlp resolves the stream
 
 local function trim(s)
-    if not s then return nil end
+    if not s or type(s) ~= "string" then return nil end
     return s:match("^%s*(.-)%s*$")
 end
 
@@ -64,10 +64,17 @@ local function normalize_url(raw)
 end
 
 local function get_clipboard_content()
+    -- Prompt mpv to update clipboard property if supported
+    pcall(function() mp.commandv("update-clipboard", "text") end)
+
     local val = mp.get_property("clipboard/text")
-    if val and trim(val) ~= "" then return val end
+    if type(val) == "string" and trim(val) ~= "" then return val end
+
     val = mp.get_property("clipboard")
-    if val and trim(val) ~= "" then return val end
+    if type(val) == "string" and trim(val) ~= "" then return val end
+    if type(val) == "table" and val.text and type(val.text) == "string" and trim(val.text) ~= "" then
+        return val.text
+    end
     return nil
 end
 

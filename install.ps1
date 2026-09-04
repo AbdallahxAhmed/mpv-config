@@ -284,6 +284,37 @@ Set-Location $INSTALL_DIR
 & $python setup.py
 $deployExit = $LASTEXITCODE
 
+# ─── Ensure Shortcuts enforce User WorkingDirectory ─────────────────
+try {
+    $mpvExe = "$env:ProgramFiles\mpv\mpv.exe"
+    if (-not (Test-Path $mpvExe)) {
+        $foundMpv = Get-Command mpv.exe -ErrorAction SilentlyContinue
+        if ($foundMpv) { $mpvExe = $foundMpv.Source }
+    }
+    if (Test-Path $mpvExe) {
+        $wsh = New-Object -ComObject WScript.Shell
+        $shortcutTargets = @(
+            @{ Path = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\mpv.lnk"; Always = $true },
+            @{ Path = "$env:USERPROFILE\Desktop\mpv.lnk"; Always = $false }
+        )
+        foreach ($t in $shortcutTargets) {
+            $p = $t.Path
+            if ((Test-Path $p) -or $t.Always) {
+                $pDir = Split-Path -Parent $p
+                if (-not (Test-Path $pDir)) { New-Item -ItemType Directory -Path $pDir -Force | Out-Null }
+                $sc = $wsh.CreateShortcut($p)
+                $sc.TargetPath = $mpvExe
+                $sc.WorkingDirectory = "$env:USERPROFILE"
+                $sc.IconLocation = "$mpvExe,0"
+                $sc.Save()
+                Write-Host "  + Shortcut verified: $p (WorkingDirectory: $env:USERPROFILE)" -ForegroundColor Green
+            }
+        }
+    }
+} catch {
+    Write-Host "  ! Shortcut configuration notice: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "---------------------------------------------" -ForegroundColor Gray
 Write-Host "  Install dir: $INSTALL_DIR" -ForegroundColor Gray

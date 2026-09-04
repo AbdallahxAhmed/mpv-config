@@ -19,6 +19,9 @@ force-window              = immediate
 save-position-on-quit     = yes
 watch-later-options       = start,vid,aid,sid,volume,mute
 
+# ─── Clipboard ────────────────────────────────────────────────────────
+clipboard-monitor         = yes
+
 # ─── Video output stack ──────────────────────────────────────────────
 vo                        = {{VO}}
 gpu-api                   = {{GPU_API}}
@@ -203,6 +206,7 @@ ytdl-raw-options-append   = socket-timeout=15
 [protocol.http]
 profile                   = protocol.https
 
+[default]
 #######################################################################################
 # User overrides (created by --migrate-from-old or manual edits)
 #######################################################################################

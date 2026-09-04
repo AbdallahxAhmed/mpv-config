@@ -514,7 +514,8 @@ def _patch_mpv_conf(
 def ensure_mpv_conf_user(config_dir, audit_log=None):
     """Create an empty mpv.conf.user if absent so the template's trailing
     `include = "~~/mpv.conf.user"` never dangles on a fresh install.
-    NEVER overwrites — existing user tweaks are the whole point of the file."""
+    NEVER overwrites — existing user tweaks are the whole point of the file.
+    Sanitizes any accidental recursive self-includes (e.g. include = "~~/mpv.conf.user")."""
     user_path = os.path.join(config_dir, "mpv.conf.user")
     if not os.path.exists(user_path):
         with open(user_path, "w", encoding="utf-8") as f:
@@ -523,6 +524,115 @@ def ensure_mpv_conf_user(config_dir, audit_log=None):
                     "# Re-running the installer never touches this file.\n")
         if audit_log:
             audit_log.record_file(user_path, "create", "ok", "seeded empty user override")
+    else:
+        try:
+            with open(user_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            cleaned_lines = []
+            modified = False
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.lower().startswith("include") and "mpv.conf.user" in stripped:
+                    modified = True
+                    continue
+                cleaned_lines.append(line)
+            cleaned_content = "\n".join(cleaned_lines)
+            cleaned_content = re.sub(
+                r'\[protocol\.http\]\s*(?=\Z|\[)',
+                '',
+                cleaned_content,
+                flags=re.MULTILINE
+            ).strip() + "\n"
+            if modified or cleaned_content.strip() != content.strip():
+                with open(user_path, "w", encoding="utf-8") as f:
+                    f.write(cleaned_content)
+                if audit_log:
+                    audit_log.record_file(user_path, "modify", "ok", "stripped self-referential includes")
+        except Exception as e:
+            ui.warn(f"Could not sanitize mpv.conf.user: {e}")
+
+
+def ensure_windows_shortcuts(env, audit_log=None):
+    """Ensure Windows Start Menu and Desktop shortcuts for mpv enforce
+    WorkingDirectory pointing to %USERPROFILE%."""
+    if env.os != "windows":
+        return []
+
+    import subprocess
+    userprofile = os.environ.get("USERPROFILE") or os.path.expandvars("%USERPROFILE%")
+    appdata = os.environ.get("APPDATA") or os.path.expandvars("%APPDATA%")
+    if not userprofile or not appdata:
+        return []
+
+    mpv_exe = shutil.which("mpv")
+    if not mpv_exe:
+        candidates = [
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "mpv", "mpv.exe"),
+            r"C:\Program Files\mpv\mpv.exe",
+        ]
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                mpv_exe = candidate
+                break
+
+    if not mpv_exe or not os.path.isfile(mpv_exe):
+        return []
+
+    start_menu_lnk = os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\mpv.lnk")
+    desktop_lnk = os.path.join(userprofile, r"Desktop\mpv.lnk")
+
+    mpv_exe_escaped = mpv_exe.replace('\\', '\\\\')
+    userprofile_escaped = userprofile.replace('\\', '\\\\')
+    start_menu_escaped = start_menu_lnk.replace('\\', '\\\\')
+    desktop_escaped = desktop_lnk.replace('\\', '\\\\')
+
+    ps_script = f"""
+$sh = New-Object -ComObject WScript.Shell
+$mpvExe = "{mpv_exe_escaped}"
+$userProfile = "{userprofile_escaped}"
+
+$targets = @(
+    @{{ Path = "{start_menu_escaped}"; Always = $true }},
+    @{{ Path = "{desktop_escaped}"; Always = $false }}
+)
+
+foreach ($t in $targets) {{
+    $p = $t.Path
+    if ((Test-Path $p) -or $t.Always) {{
+        $dir = Split-Path -Parent $p
+        if (-not (Test-Path $dir)) {{
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }}
+        $sc = $sh.CreateShortcut($p)
+        $sc.TargetPath = $mpvExe
+        $sc.WorkingDirectory = $userProfile
+        $sc.IconLocation = "$mpvExe,0"
+        $sc.Save()
+        Write-Output "SHORTCUT_OK: $p"
+    }}
+}}
+"""
+    updated = []
+    try:
+        res = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        for line in res.stdout.splitlines():
+            if line.startswith("SHORTCUT_OK:"):
+                lnk_path = line.split(":", 1)[1].strip()
+                updated.append(lnk_path)
+                ui.success(f"Shortcut updated: {lnk_path} (WorkingDirectory: {userprofile})")
+                if audit_log:
+                    audit_log.record_file(
+                        lnk_path, "modify", "ok", f"enforced WorkingDirectory={userprofile}"
+                    )
+    except Exception as e:
+        ui.warn(f"Could not update Windows shortcuts: {e}")
+
+    return updated
 
 
 def _normalize_windows_path(path):
@@ -858,7 +968,11 @@ def deploy(
         os.makedirs(os.path.join(config_dir, d), exist_ok=True)
     ui.success("Created shader_cache/ and chapters/")
 
-    # 7. Normalize line endings
+    # 7. Enforce Windows shortcuts with user WorkingDirectory
+    if env.os == "windows":
+        ensure_windows_shortcuts(env, audit_log=audit_log)
+
+    # 8. Normalize line endings
     _normalize_line_endings(config_dir, env)
 
     return results

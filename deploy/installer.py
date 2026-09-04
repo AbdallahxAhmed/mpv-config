@@ -410,6 +410,13 @@ def _install_github_asset(name, info, env):
         _flatten_single_dir(install_dir)
         _add_to_path(install_dir)
 
+        if env.os == "windows":
+            try:
+                from deploy.deployer import ensure_windows_shortcuts
+                ensure_windows_shortcuts(env)
+            except Exception:
+                pass
+
         ui.success(f"mpv {label} installed to {install_dir}")
         return True
 
