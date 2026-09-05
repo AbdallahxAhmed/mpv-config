@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import uuid
 from datetime import datetime
 
 from deploy import ui
@@ -97,26 +98,8 @@ BPP_8BIT_MIN = 1
 
 
 def _detect_dither_depth(env):
-    import subprocess
-    if env.os != "windows":
-        return None
-    try:
-        cmd = [
-            "powershell", "-NoProfile", "-Command",
-            "(Get-CimInstance Win32_VideoController).CurrentBitsPerPixel"
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-        if res.returncode == 0 and res.stdout.strip():
-            try:
-                bpp = int(float(res.stdout.strip()))
-                if bpp >= BPP_10BIT:
-                    return "10"
-                if bpp >= BPP_8BIT_MIN:
-                    return "8"
-            except ValueError:
-                return None
-    except Exception:
-        return None
+    # CurrentBitsPerPixel reflects packed framebuffer format, not reliable
+    # per-channel output depth; keep mpv default auto-selection.
     return None
 
 
@@ -225,8 +208,15 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
             "detail": f"dry run ({backup_source})",
         }
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_restore = f"{config_dir}.rollback.tmp.{timestamp}"
+    config_dir = os.path.abspath(os.path.expanduser(config_dir))
+    backup_source = os.path.abspath(os.path.expanduser(backup_source))
+    if backup_source == config_dir or backup_source.startswith(config_dir + os.sep):
+        raise ValueError("Backup path cannot be inside config directory")
+    if config_dir.startswith(backup_source + os.sep):
+        raise ValueError("Config directory cannot be nested inside backup path")
+
+    unique = uuid.uuid4().hex
+    temp_restore = f"{config_dir}.rollback.tmp.{unique}"
     safety_backup = None
 
     try:
@@ -234,7 +224,7 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
         shutil.copytree(backup_source, temp_restore, ignore=shutil.ignore_patterns(".git"))
 
         if os.path.isdir(config_dir):
-            safety_backup = f"{config_dir}.pre-rollback.{timestamp}"
+            safety_backup = f"{config_dir}.pre-rollback.{unique}"
             ui.step(f"Saving current config → {safety_backup}")
             shutil.copytree(config_dir, safety_backup, ignore=shutil.ignore_patterns(".git"))
             # Remove old config — skip .git, force-clear attributes on Windows
@@ -269,6 +259,9 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                     else:
                         raise
 
+        if not os.path.isdir(config_dir):
+            os.makedirs(config_dir, exist_ok=True)
+
         # Move restored files into config_dir (which still exists with .git)
         try:
             same_drive = os.stat(temp_restore).st_dev == os.stat(config_dir).st_dev
@@ -289,17 +282,6 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                 else:
                     shutil.copy2(src, dst)
         _remove_path(temp_restore)
-        
-        # Clean up any leftover symlinks pointing to 'deployed'
-        try:
-            for item in os.listdir(config_dir):
-                p = os.path.join(config_dir, item)
-                if os.path.islink(p):
-                    target = os.readlink(p)
-                    if "deployed" in target:
-                        os.unlink(p)
-        except Exception as e:
-            ui.warn(f"Failed to clean up remaining symlinks: {e}")
             
         ui.success(f"Rollback completed from: {backup_source}")
         if safety_backup:
@@ -328,9 +310,18 @@ def rollback_config(config_dir, backup_path=None, dry_run=False, audit_log=None)
                 ui.warn(f"Could not clean temporary rollback directory: {cleanup_err}")
         if safety_backup and os.path.isdir(safety_backup):
             ui.info(f"Restoring previous config from: {safety_backup}")
-            if os.path.lexists(config_dir):
-                _remove_path(config_dir)
-            shutil.move(safety_backup, config_dir)
+            os.makedirs(config_dir, exist_ok=True)
+            for item in os.listdir(config_dir):
+                if item == ".git":
+                    continue
+                _remove_path(os.path.join(config_dir, item))
+            for item in os.listdir(safety_backup):
+                src = os.path.join(safety_backup, item)
+                dst = os.path.join(config_dir, item)
+                if os.path.exists(dst):
+                    _remove_path(dst)
+                shutil.move(src, dst)
+            _remove_path(safety_backup)
         raise
 
 
@@ -344,6 +335,9 @@ def _resolve_mpv_profile(env, mpv_profile):
         defaults = dict(PLATFORM_NATIVE_MPV_DEFAULTS.get(env.platform_key, {}))
     else:
         defaults = dict(MPV_EXPERIENCE_PROFILES.get(selected_profile, fallback_profile))
+        if selected_profile == "windows-like" and env.os != "windows":
+            linux_fallback = MPV_EXPERIENCE_PROFILES.get("linux-like", {})
+            defaults.update(linux_fallback)
 
     return selected_profile, defaults
 

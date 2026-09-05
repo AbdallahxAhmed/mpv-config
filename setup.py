@@ -22,110 +22,21 @@ Usage:
 """
 
 import argparse
+import contextlib
 import json
 import os
 import re
 import shutil
 import sys
+import tempfile
+import uuid
 
 # Ensure we can import the deploy package from this script's directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 
-# ── Rich bootstrap guard ───────────────────────────────────────
-# Rich is needed by deploy.ui. If it is missing we must install it
-# BEFORE importing anything from deploy/.
-def _bootstrap_rich():
-    """Install rich via system package manager or isolated venv, then re-exec."""
-    import platform
-    import subprocess
-
-    # ── Try system package manager first ────────────────────────
-    if sys.platform != "win32":
-        try:
-            with open("/etc/os-release") as f:
-                os_release = f.read().lower()
-        except FileNotFoundError:
-            os_release = ""
-
-        if "arch" in os_release or "cachyos" in os_release or "endeavour" in os_release:
-            print("[bootstrap] Trying: sudo pacman -S --noconfirm python-rich")
-            rc = subprocess.call(
-                ["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-rich"]
-            )
-            if rc == 0:
-                # Verify import works after system install
-                try:
-                    import rich as _test  # noqa: F811
-
-                    return  # success — continue in this process
-                except ImportError:
-                    pass
-
-        elif any(d in os_release for d in ("ubuntu", "debian", "mint", "pop")):
-            print("[bootstrap] Trying: sudo apt install -y python3-rich")
-            rc = subprocess.call(["sudo", "apt", "install", "-y", "python3-rich"])
-            if rc == 0:
-                try:
-                    import rich as _test  # noqa: F811
-
-                    return
-                except ImportError:
-                    pass
-
-    # ── Venv fallback ───────────────────────────────────────────
-    venv_dir = os.path.expanduser("~/.local/share/mpv-config/venv")
-    venv_python = (
-        os.path.join(venv_dir, "Scripts", "python.exe")
-        if sys.platform == "win32"
-        else os.path.join(venv_dir, "bin", "python")
-    )
-    venv_pip = (
-        os.path.join(venv_dir, "Scripts", "pip.exe")
-        if sys.platform == "win32"
-        else os.path.join(venv_dir, "bin", "pip")
-    )
-
-    # Create or recreate venv if stale
-    needs_create = True
-    if os.path.isdir(venv_dir) and os.path.isfile(venv_python):
-        # Check if rich is already importable inside existing venv
-        r = subprocess.run(
-            [venv_python, "-c", "import rich"],
-            capture_output=True,
-        )
-        if r.returncode == 0:
-            # Rich available in venv — re-exec into it
-            print("[bootstrap] Rich found in existing venv. Re-executing...")
-            os.execv(venv_python, [venv_python] + sys.argv)
-        else:
-            # Venv exists but rich broken — recreate
-            import shutil
-
-            shutil.rmtree(venv_dir, ignore_errors=True)
-
-    if needs_create:
-        print(f"[bootstrap] Creating venv at {venv_dir} ...")
-        import venv as _venv_mod
-
-        _venv_mod.create(venv_dir, with_pip=True)
-
-    # pip install inside venv (ONLY place pip runs outside a venv is never)
-    print("[bootstrap] Installing rich inside venv ...")
-    subprocess.check_call([venv_pip, "install", "--quiet", "rich>=13.0.0"])
-
-    # Re-exec setup.py under the venv python
-    print("[bootstrap] Re-executing under venv python ...")
-    os.execv(venv_python, [venv_python] + sys.argv)
-
-
-try:
-    import rich  # noqa: F401
-except ImportError:
-    _bootstrap_rich()
-
-# ── Now safe to import deploy modules ───────────────────────────
+# ── Import deploy modules (ui has built-in non-rich fallback) ───
 from deploy import ui
 from deploy.audit_log import AuditLog
 from deploy.deployer import (
@@ -161,6 +72,48 @@ LATEST_BACKUP_SENTINEL = "__latest__"
 DEFAULT_INSTALL_DIR = os.path.expanduser("~/.mpv-deploy")
 DEFAULT_LAUNCHER = os.path.expanduser("~/.local/bin/mpv-config")
 MENU_MAX_OPTION = 8
+
+
+def _is_dry_run(args):
+    return bool(getattr(args, "dry_run", False))
+
+
+def _safe_realpath(path):
+    return os.path.realpath(os.path.abspath(os.path.expanduser(path)))
+
+
+def _ensure_distinct_paths(*paths):
+    normalized = [_safe_realpath(p) for p in paths]
+    for i, left in enumerate(normalized):
+        for right in normalized[i + 1:]:
+            if left == right:
+                raise ValueError(f"Overlapping paths are not allowed: {left}")
+            left_prefix = left + os.sep
+            right_prefix = right + os.sep
+            if left.startswith(right_prefix) or right.startswith(left_prefix):
+                raise ValueError(f"Nested paths are not allowed: {left} vs {right}")
+
+
+@contextlib.contextmanager
+def _operation_lock(config_dir):
+    os.makedirs(config_dir, exist_ok=True)
+    lock_path = os.path.join(config_dir, ".mpv-config.lock")
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as e:
+        raise RuntimeError(
+            f"Another mpv-config operation is already running. "
+            f"Remove stale lock if needed: {lock_path}"
+        ) from e
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        yield
+    finally:
+        try:
+            os.unlink(lock_path)
+        except FileNotFoundError:
+            pass
 
 
 def _audit_log_for(env):
@@ -446,109 +399,94 @@ def cmd_install(args):
             ui.warn("Installation cancelled by user.")
             return
 
-    # 4. Initialise audit log (creates the config dir early so the log can
-    #    be written even before deploy() runs).
-    os.makedirs(env.config_dir, exist_ok=True)
-    audit_log = _audit_log_for(env)
-    audit_log.start_session("install", env)
+    if _is_dry_run(args):
+        ui.info("[DRY RUN] Read-only preview only. No downloads, installs, or file writes.")
+        return
 
+    audit_log = None
     try:
-        # 5. Check connectivity
-        ui.header("Pre-flight Checks")
-        try:
-            import urllib.request
+        with _operation_lock(env.config_dir):
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("install", env)
+            # 5. Check connectivity
+            ui.header("Pre-flight Checks")
+            try:
+                import urllib.request
 
-            with ui.spinner("Checking internet connectivity..."):
-                urllib.request.urlopen("https://api.github.com", timeout=5)
-            ui.success("Internet connectivity: OK")
-        except Exception:
-            ui.error("Cannot reach GitHub. Check your internet connection.")
-            if not args.dry_run:
+                with ui.spinner("Checking internet connectivity..."):
+                    urllib.request.urlopen("https://api.github.com", timeout=5)
+                ui.success("Internet connectivity: OK")
+            except Exception:
+                ui.error("Cannot reach GitHub. Check your internet connection.")
                 audit_log.complete_session("failed")
                 sys.exit(1)
 
-        # 6. Install system dependencies
-        dep_results = install_deps(
-            env, dry_run=args.dry_run, audit_log=audit_log, mpv_version=args.mpv_version
-        )
-
-        # 7. Fetch scripts & shaders into a staging directory
-        staging_dir = os.path.join(SCRIPT_DIR, ".staging")
-        if os.path.exists(staging_dir):
-            shutil.rmtree(staging_dir)
-        os.makedirs(staging_dir)
-
-        try:
-            fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
-
-            # 8. Deploy to config dir
-            ui.info(f"mpv behavior profile: {args.mpv_profile}")
-            deploy_results = deploy(
-                staging_dir,
-                env,
-                SCRIPT_DIR,
-                dry_run=args.dry_run,
-                audit_log=audit_log,
-                mpv_profile=args.mpv_profile,
-                anime_preset=args.anime_preset,
-                scaler_tier=args.scaler_tier,
-                display_mode=args.display_mode,
-                dither_depth=args.dither_depth,
+            dep_results = install_deps(
+                env, dry_run=False, audit_log=audit_log, mpv_version=args.mpv_version
             )
-            if not args.dry_run:
+
+            staging_dir = tempfile.mkdtemp(prefix=".mpv-config-install-", dir=SCRIPT_DIR)
+            try:
+                fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
+                fetch_failed = any(r.get("status") == "failed" for r in fetch_results)
+                if fetch_failed:
+                    ui.summary(fetch_results)
+                    audit_log.complete_session("failed")
+                    sys.exit(1)
+
+                ui.info(f"mpv behavior profile: {args.mpv_profile}")
+                deploy_results = deploy(
+                    staging_dir,
+                    env,
+                    SCRIPT_DIR,
+                    dry_run=False,
+                    audit_log=audit_log,
+                    mpv_profile=args.mpv_profile,
+                    anime_preset=args.anime_preset,
+                    scaler_tier=args.scaler_tier,
+                    display_mode=args.display_mode,
+                    dither_depth=args.dither_depth,
+                )
                 ensure_mpv_conf_user(env.config_dir, audit_log=audit_log)
 
-            # 9. Save lockfile
-            if not args.dry_run:
-                lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
-                with open(lockfile_path, "w", encoding="utf-8") as f:
-                    json.dump(lockfile, f, indent=2)
-                ui.success(f"Lockfile saved: {lockfile_path}")
-                audit_log.record_file(
-                    lockfile_path, "create", "ok", "script version lockfile"
-                )
-
-            # 10. Verify
-            if not args.dry_run:
+                deploy_failed = any(r.get("status") == "failed" for r in deploy_results)
                 verify_results = verify(env.config_dir, env)
-                failed_checks = sum(
-                    1 for r in verify_results if r["status"] == "failed"
-                )
-                if failed_checks > 0:
+                verify_failed = any(r.get("status") == "failed" for r in verify_results)
+
+                lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
+                if not deploy_failed and not verify_failed:
+                    with open(lockfile_path, "w", encoding="utf-8") as f:
+                        json.dump(lockfile, f, indent=2)
+                    ui.success(f"Lockfile saved: {lockfile_path}")
+                    audit_log.record_file(
+                        lockfile_path, "create", "ok", "script version lockfile"
+                    )
+
+                all_results = dep_results + fetch_results + deploy_results + verify_results
+                ui.summary(all_results)
+
+                dep_failed = any(r.get("status") == "failed" for r in dep_results)
+                failed = dep_failed or deploy_failed or verify_failed
+                if failed:
                     report = audit_log.generate_diagnostic_report()
                     ui.panel(report, title="Diagnostic Report", style="yellow")
-            else:
-                verify_results = []
-
-            # 11. Final summary
-            all_results = dep_results + fetch_results + deploy_results + verify_results
-            ui.summary(fetch_results)
-
-            # Done!
-            if not args.dry_run:
-                failed = sum(1 for r in fetch_results if r["status"] == "failed")
-                if failed == 0:
-                    ui.panel(
-                        f"Deployment complete!\n[dim]Config dir: {env.config_dir}[/dim]",
-                        title="✅ Success",
-                        style="green",
-                    )
-                    audit_log.complete_session("completed")
-                else:
-                    ui.panel(
-                        f"Deployment finished with {failed} issue(s).\n[dim]Config dir: {env.config_dir}[/dim]",
-                        title="⚠️ Warning",
-                        style="yellow",
-                    )
                     audit_log.complete_session("completed_with_errors")
-        finally:
-            # Clean up staging
-            if os.path.exists(staging_dir):
-                shutil.rmtree(staging_dir, ignore_errors=True)
+                    sys.exit(1)
+
+                ui.panel(
+                    f"Deployment complete!\n[dim]Config dir: {env.config_dir}[/dim]",
+                    title="✅ Success",
+                    style="green",
+                )
+                audit_log.complete_session("completed")
+            finally:
+                if os.path.exists(staging_dir):
+                    shutil.rmtree(staging_dir, ignore_errors=True)
 
     except Exception:
         try:
-            audit_log.complete_session("failed")
+            if audit_log:
+                audit_log.complete_session("failed")
         except Exception:
             pass
         raise
@@ -568,92 +506,119 @@ def cmd_migrate(args):
         ui.error(f"No existing mpv.conf found at {mpv_conf_path}")
         return
 
-    os.makedirs(config_dir, exist_ok=True)
-    audit_log = _audit_log_for(env)
-    audit_log.start_session("migrate", env)
+    if _is_dry_run(args):
+        ui.info("[DRY RUN] Read-only preview only. Migration will not modify files.")
+        return
 
+    audit_log = None
     try:
-        backup_existing(config_dir, audit_log=audit_log)
-        with open(mpv_conf_path, "r", encoding="utf-8") as f:
-            existing_content = f.read()
+        with _operation_lock(config_dir):
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("migrate", env)
+            mpv_user_path = os.path.join(config_dir, "mpv.conf.user")
 
-        defaults = {}
-        if os.path.isfile(template_old_path):
-            with open(template_old_path, "r", encoding="utf-8") as f:
-                defaults = _parse_mpv_conf(f.read())
-        else:
-            ui.warn("Old template defaults not found; preserving all overrides.")
+            with open(mpv_conf_path, "r", encoding="utf-8") as f:
+                existing_content = f.read()
 
-        order, overrides = _extract_overrides(existing_content, defaults)
-        mpv_user_path = os.path.join(config_dir, "mpv.conf.user")
-        _write_mpv_conf_user(mpv_user_path, order, overrides)
-        audit_log.record_file(mpv_user_path, "modify", "ok", "migrated user overrides")
+            defaults = {}
+            if os.path.isfile(template_old_path):
+                with open(template_old_path, "r", encoding="utf-8") as f:
+                    defaults = _parse_mpv_conf(f.read())
+            else:
+                ui.warn("Old template defaults not found; preserving all overrides.")
 
-        override_notes = []
-        for section in order:
-            for key, value in overrides.get(section, []):
-                prefix = f"[{section}] " if section else ""
-                override_notes.append(f"{prefix}{key}={value}")
-        if override_notes:
-            audit_log.record_note("migrated_overrides", "; ".join(override_notes))
-        else:
-            audit_log.record_note("migrated_overrides", "none")
+            order, overrides = _extract_overrides(existing_content, defaults)
 
-        selected_profile, resolved_defaults = _resolve_mpv_profile(
-            env, args.mpv_profile
-        )
-        _patch_mpv_conf(
-            template_new_path,
-            mpv_conf_path,
-            env,
-            selected_profile=selected_profile,
-            resolved_defaults=resolved_defaults,
-            anime_preset=args.anime_preset,
-            scaler_tier=args.scaler_tier,
-            display_mode=args.display_mode,
-            dither_depth=args.dither_depth,
-            audit_log=audit_log,
-        )
-        audit_log.record_file(
-            mpv_conf_path, "modify", "ok", "mpv.conf updated to new template"
-        )
+            if os.path.isfile(mpv_user_path):
+                with open(mpv_user_path, "r", encoding="utf-8") as f:
+                    existing_user = f.read()
+                if existing_user.strip():
+                    candidate_path = os.path.join(
+                        config_dir, "mpv.conf.user.migrated.candidate"
+                    )
+                    _write_mpv_conf_user(candidate_path, order, overrides)
+                    ui.error(
+                        f"Refusing to overwrite non-empty {mpv_user_path}. "
+                        f"Review candidate file: {candidate_path}"
+                    )
+                    audit_log.record_file(
+                        candidate_path, "create", "ok", "generated migration candidate"
+                    )
+                    audit_log.complete_session("completed_with_errors")
+                    return
 
-        input_conf_path = os.path.join(config_dir, "input.conf")
-        if os.path.isfile(input_conf_path):
-            if _migrate_input_conf(input_conf_path, audit_log=audit_log):
-                ui.success("input.conf: F8 night mode binding updated")
+            backup_existing(config_dir, audit_log=audit_log)
+            _write_mpv_conf_user(mpv_user_path, order, overrides)
+            audit_log.record_file(
+                mpv_user_path, "modify", "ok", "migrated user overrides"
+            )
 
-        opts_src = os.path.join(SCRIPT_DIR, "config", "script-opts")
-        opts_dst = os.path.join(config_dir, "script-opts")
-        tf_src = os.path.join(opts_src, "thumbfast.conf")
-        tf_dst = os.path.join(opts_dst, "thumbfast.conf")
-        if os.path.isfile(tf_src):
-            os.makedirs(opts_dst, exist_ok=True)
-            shutil.copy2(tf_src, tf_dst)
-            if audit_log:
+            override_notes = []
+            for section in order:
+                for key, value in overrides.get(section, []):
+                    prefix = f"[{section}] " if section else ""
+                    override_notes.append(f"{prefix}{key}={value}")
+            if override_notes:
+                audit_log.record_note("migrated_overrides", "; ".join(override_notes))
+            else:
+                audit_log.record_note("migrated_overrides", "none")
+
+            selected_profile, resolved_defaults = _resolve_mpv_profile(
+                env, args.mpv_profile
+            )
+            _patch_mpv_conf(
+                template_new_path,
+                mpv_conf_path,
+                env,
+                selected_profile=selected_profile,
+                resolved_defaults=resolved_defaults,
+                anime_preset=args.anime_preset,
+                scaler_tier=args.scaler_tier,
+                display_mode=args.display_mode,
+                dither_depth=args.dither_depth,
+                audit_log=audit_log,
+            )
+            audit_log.record_file(
+                mpv_conf_path, "modify", "ok", "mpv.conf updated to new template"
+            )
+
+            input_conf_path = os.path.join(config_dir, "input.conf")
+            if os.path.isfile(input_conf_path):
+                if _migrate_input_conf(input_conf_path, audit_log=audit_log):
+                    ui.success("input.conf: F8 night mode binding updated")
+
+            opts_src = os.path.join(SCRIPT_DIR, "config", "script-opts")
+            opts_dst = os.path.join(config_dir, "script-opts")
+            tf_src = os.path.join(opts_src, "thumbfast.conf")
+            tf_dst = os.path.join(opts_dst, "thumbfast.conf")
+            if os.path.isfile(tf_src):
+                os.makedirs(opts_dst, exist_ok=True)
+                shutil.copy2(tf_src, tf_dst)
                 audit_log.record_file(tf_dst, "copy", "ok", "deployed thumbfast.conf")
 
-        repo_scripts = os.path.join(SCRIPT_DIR, "scripts")
-        if os.path.isdir(repo_scripts):
-            scripts_dst = os.path.join(config_dir, "scripts")
-            os.makedirs(scripts_dst, exist_ok=True)
-            for sname in os.listdir(repo_scripts):
-                s_src = os.path.join(repo_scripts, sname)
-                s_dst = os.path.join(scripts_dst, sname)
-                if os.path.isfile(s_src):
-                    shutil.copy2(s_src, s_dst)
-                    if audit_log:
-                        audit_log.record_file(s_dst, "copy", "ok", f"deployed repo script {sname}")
+            repo_scripts = os.path.join(SCRIPT_DIR, "scripts")
+            if os.path.isdir(repo_scripts):
+                scripts_dst = os.path.join(config_dir, "scripts")
+                os.makedirs(scripts_dst, exist_ok=True)
+                for sname in os.listdir(repo_scripts):
+                    s_src = os.path.join(repo_scripts, sname)
+                    s_dst = os.path.join(scripts_dst, sname)
+                    if os.path.isfile(s_src):
+                        shutil.copy2(s_src, s_dst)
+                        audit_log.record_file(
+                            s_dst, "copy", "ok", f"deployed repo script {sname}"
+                        )
 
-        ui.panel(
-            "Migration complete. User overrides saved to mpv.conf.user.",
-            title="✅ Migration",
-            style="green",
-        )
-        audit_log.complete_session("completed")
+            ui.panel(
+                "Migration complete. User overrides saved to mpv.conf.user.",
+                title="✅ Migration",
+                style="green",
+            )
+            audit_log.complete_session("completed")
     except Exception:
         try:
-            audit_log.complete_session("failed")
+            if audit_log:
+                audit_log.complete_session("failed")
         except Exception:
             pass
         raise
@@ -666,6 +631,33 @@ def ensure_mpv_conf_user(config_dir, audit_log=None):
     Sanitizes any accidental recursive self-includes (e.g. include = "~~/mpv.conf.user")."""
     from deploy.deployer import ensure_mpv_conf_user as _deployer_ensure_mpv_conf_user
     return _deployer_ensure_mpv_conf_user(config_dir, audit_log=audit_log)
+
+
+def _copy_tree_overlay(src, dst):
+    os.makedirs(dst, exist_ok=True)
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        target_root = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(target_root, exist_ok=True)
+        for d in dirs:
+            os.makedirs(os.path.join(target_root, d), exist_ok=True)
+        for f in files:
+            shutil.copy2(os.path.join(root, f), os.path.join(target_root, f))
+
+
+def _validate_update_staging(staging_dir):
+    required_dirs = ["scripts", "shaders", "fonts"]
+    missing = [
+        item for item in required_dirs if not os.path.isdir(os.path.join(staging_dir, item))
+    ]
+    if missing:
+        raise RuntimeError(f"Update staging missing required directories: {', '.join(missing)}")
+
+    script_files = 0
+    for root, _, files in os.walk(os.path.join(staging_dir, "scripts")):
+        script_files += len(files)
+    if script_files == 0:
+        raise RuntimeError("Update staging has zero script files")
 
 
 def cmd_update(args):
@@ -683,65 +675,132 @@ def cmd_update(args):
             ui.warn("Update cancelled by user.")
             return
 
-    audit_log = _audit_log_for(env)
-    audit_log.start_session("update", env)
+    if _is_dry_run(args):
+        ui.info("[DRY RUN] Read-only preview only. No downloads or file writes.")
+        return
 
-    staging_dir = os.path.join(SCRIPT_DIR, ".staging")
-    if os.path.exists(staging_dir):
-        shutil.rmtree(staging_dir)
-    os.makedirs(staging_dir)
+    audit_log = None
+    config_dir = env.config_dir
+    config_parent = os.path.dirname(config_dir) or config_dir
+    staging_dir = tempfile.mkdtemp(prefix=".mpv-config-update-stage-", dir=config_parent)
+    prepared_root = tempfile.mkdtemp(prefix=".mpv-config-update-prepared-", dir=config_parent)
+    backup_root = tempfile.mkdtemp(prefix=".mpv-config-update-backup-", dir=config_parent)
+    _ensure_distinct_paths(config_dir, staging_dir, prepared_root, backup_root, SCRIPT_DIR)
 
     try:
-        fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
+        with _operation_lock(config_dir):
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("update", env)
+            fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging_dir)
+            fetch_failed = [r for r in fetch_results if r.get("status") == "failed"]
+            if fetch_failed:
+                ui.summary(fetch_results)
+                audit_log.complete_session("failed")
+                raise RuntimeError("Update aborted because one or more fetches failed.")
 
-        # Deploy only scripts, shaders, fonts (not configs)
-        config_dir = env.config_dir
-        for item in ("scripts", "shaders", "fonts"):
-            src = os.path.join(staging_dir, item)
-            dst = os.path.join(config_dir, item)
-            if os.path.isdir(src):
+            repo_scripts = os.path.join(SCRIPT_DIR, "scripts")
+            if os.path.isdir(repo_scripts):
+                _copy_tree_overlay(repo_scripts, os.path.join(staging_dir, "scripts"))
+            _validate_update_staging(staging_dir)
+
+            managed_items = ("scripts", "shaders", "fonts")
+            for item in managed_items:
+                src = os.path.join(staging_dir, item)
+                if not os.path.isdir(src):
+                    continue
+                prepared = os.path.join(prepared_root, item)
+                backup = os.path.join(backup_root, item)
+                if os.path.exists(prepared):
+                    shutil.rmtree(prepared)
+                shutil.copytree(src, prepared, symlinks=False)
+                dst = os.path.join(config_dir, item)
                 if os.path.exists(dst):
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-                count = sum(len(f) for _, _, f in os.walk(dst))
-                ui.success(f"{item}/: {count} file(s) updated")
-                audit_log.record_file(dst, "copy", "ok", f"{count} file(s) updated")
+                    shutil.copytree(dst, backup, symlinks=False)
+                else:
+                    os.makedirs(dst, exist_ok=True)
 
-        # Save lockfile
-        lockfile_path = os.path.join(config_dir, ".deploy.lock.json")
-        with open(lockfile_path, "w", encoding="utf-8") as f:
-            json.dump(lockfile, f, indent=2)
-        audit_log.record_file(lockfile_path, "modify", "ok", "version lockfile updated")
+            old_lockfile = os.path.join(config_dir, ".deploy.lock.json")
+            lockfile_backup = os.path.join(backup_root, ".deploy.lock.json")
+            if os.path.isfile(old_lockfile):
+                shutil.copy2(old_lockfile, lockfile_backup)
 
-        ui.summary(fetch_results)
-        ui.panel("Update complete!", title="✨ Success", style="green")
-        audit_log.complete_session("completed")
+            try:
+                for item in managed_items:
+                    prepared = os.path.join(prepared_root, item)
+                    dst = os.path.join(config_dir, item)
+                    if os.path.isdir(prepared):
+                        _copy_tree_overlay(prepared, dst)
+                        count = sum(len(f) for _, _, f in os.walk(prepared))
+                        ui.success(f"{item}/: {count} file(s) updated")
+                        audit_log.record_file(dst, "copy", "ok", f"{count} file(s) updated")
+
+                lockfile_path = os.path.join(config_dir, ".deploy.lock.json")
+                with open(lockfile_path, "w", encoding="utf-8") as f:
+                    json.dump(lockfile, f, indent=2)
+                audit_log.record_file(lockfile_path, "modify", "ok", "version lockfile updated")
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                for item in managed_items:
+                    backup = os.path.join(backup_root, item)
+                    dst = os.path.join(config_dir, item)
+                    if os.path.isdir(backup):
+                        if os.path.exists(dst):
+                            shutil.rmtree(dst, ignore_errors=True)
+                        shutil.copytree(backup, dst, symlinks=False)
+                if os.path.isfile(lockfile_backup):
+                    shutil.copy2(lockfile_backup, old_lockfile)
+                raise
+
+            ui.summary(fetch_results)
+            ui.panel("Update complete!", title="✨ Success", style="green")
+            audit_log.complete_session("completed")
+    except KeyboardInterrupt:
+        if audit_log:
+            try:
+                audit_log.complete_session("cancelled")
+            except Exception:
+                pass
+        raise
     except Exception:
-        try:
-            audit_log.complete_session("failed")
-        except Exception:
-            pass
+        if audit_log:
+            try:
+                audit_log.complete_session("failed")
+            except Exception:
+                pass
         raise
     finally:
-        if os.path.exists(staging_dir):
-            shutil.rmtree(staging_dir, ignore_errors=True)
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        shutil.rmtree(prepared_root, ignore_errors=True)
+        shutil.rmtree(backup_root, ignore_errors=True)
 
 
 def cmd_sync_deps(args):
     """Sync MPV dependency suite (yt-dlp, ffmpeg-full, alass, ffsubsync)."""
     ui.banner()
     env = detect()
-    audit_log = _audit_log_for(env)
-    audit_log.start_session("sync-deps", env)
+    if _is_dry_run(args):
+        ui.info("[DRY RUN] Read-only preview only. Dependency sync skipped.")
+        return
+    audit_log = None
     try:
-        from deploy.installer import sync_dependencies
-        results = sync_dependencies(env=env, dry_run=args.dry_run, audit_log=audit_log)
-        ui.summary(results)
-        ui.panel("Dependency synchronization complete!", title="✨ Success", style="green")
-        audit_log.complete_session("completed")
+        with _operation_lock(env.config_dir):
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("sync-deps", env)
+            from deploy.installer import sync_dependencies
+            results = sync_dependencies(env=env, dry_run=False, audit_log=audit_log)
+            ui.summary(results)
+            failed = any(r.get("status") == "failed" for r in results)
+            if failed:
+                ui.panel("Dependency synchronization completed with failures.", title="⚠️ Warning", style="yellow")
+                audit_log.complete_session("completed_with_errors")
+                sys.exit(1)
+            ui.panel("Dependency synchronization complete!", title="✨ Success", style="green")
+            audit_log.complete_session("completed")
     except Exception:
         try:
-            audit_log.complete_session("failed")
+            if audit_log:
+                audit_log.complete_session("failed")
         except Exception:
             pass
         raise
@@ -826,16 +885,27 @@ def cmd_rollback(args):
             ui.warn("Rollback cancelled by user.")
             return
 
-    audit_log = _audit_log_for(env)
-    audit_log.start_session("rollback", env)
-
+    audit_log = None
     try:
-        result = rollback_config(
-            env.config_dir,
-            backup_path=requested_backup,
-            dry_run=args.dry_run,
-            audit_log=audit_log,
-        )
+        if _is_dry_run(args):
+            result = rollback_config(
+                env.config_dir,
+                backup_path=requested_backup,
+                dry_run=True,
+                audit_log=None,
+            )
+            ui.summary([result])
+            return
+
+        with _operation_lock(env.config_dir):
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("rollback", env)
+            result = rollback_config(
+                env.config_dir,
+                backup_path=requested_backup,
+                dry_run=False,
+                audit_log=audit_log,
+            )
         ui.summary([result])
 
         if result["status"] == "ok":
@@ -846,10 +916,12 @@ def cmd_rollback(args):
             )
             audit_log.complete_session("completed")
         else:
-            audit_log.complete_session("completed")
+            if audit_log:
+                audit_log.complete_session("completed")
     except Exception:
         try:
-            audit_log.complete_session("failed")
+            if audit_log:
+                audit_log.complete_session("failed")
         except Exception:
             pass
         raise
@@ -1020,36 +1092,65 @@ def cmd_uninstall(args):
             ui.warn("Uninstall cancelled by user.")
             return
 
-    # Start an audit session to record the uninstall
-    audit_log.start_session("uninstall", env)
-
-    remove_results = _remove_deployed_files(
-        env,
-        purge_config=args.purge_config,
-        remove_backups=args.remove_backups,
-        dry_run=args.dry_run,
-        audit_log=audit_log,
-    )
-
-    dep_results = []
-    if args.remove_deps:
-        dep_results = uninstall_deps(
+    if _is_dry_run(args):
+        remove_results = _remove_deployed_files(
             env,
-            remove_python=getattr(args, "remove_python", False),
-            dry_run=args.dry_run,
-            pre_existing_pkgs=pre_existing_pkgs,
+            purge_config=args.purge_config,
+            remove_backups=args.remove_backups,
+            dry_run=True,
+            audit_log=None,
+        )
+        dep_results = []
+        if args.remove_deps:
+            dep_results = uninstall_deps(
+                env,
+                remove_python=getattr(args, "remove_python", False),
+                dry_run=True,
+                pre_existing_pkgs=pre_existing_pkgs,
+                audit_log=None,
+            )
+        else:
+            dep_results.append(
+                {"name": "dependencies", "status": "skipped", "detail": "not requested"}
+            )
+        cleanup_results = _remove_launcher_and_install_dir(
+            remove_install_dir=args.remove_install_dir,
+            dry_run=True,
+            audit_log=None,
+        )
+        ui.summary(remove_results + dep_results + cleanup_results)
+        return
+
+    with _operation_lock(env.config_dir):
+        # Start an audit session to record the uninstall
+        audit_log.start_session("uninstall", env)
+
+        remove_results = _remove_deployed_files(
+            env,
+            purge_config=args.purge_config,
+            remove_backups=args.remove_backups,
+            dry_run=False,
             audit_log=audit_log,
         )
-    else:
-        dep_results.append(
-            {"name": "dependencies", "status": "skipped", "detail": "not requested"}
-        )
+        dep_results = []
+        if args.remove_deps:
+            dep_results = uninstall_deps(
+                env,
+                remove_python=getattr(args, "remove_python", False),
+                dry_run=False,
+                pre_existing_pkgs=pre_existing_pkgs,
+                audit_log=audit_log,
+            )
+        else:
+            dep_results.append(
+                {"name": "dependencies", "status": "skipped", "detail": "not requested"}
+            )
 
-    cleanup_results = _remove_launcher_and_install_dir(
-        remove_install_dir=args.remove_install_dir,
-        dry_run=args.dry_run,
-        audit_log=audit_log,
-    )
+        cleanup_results = _remove_launcher_and_install_dir(
+            remove_install_dir=args.remove_install_dir,
+            dry_run=False,
+            audit_log=audit_log,
+        )
 
     all_results = remove_results + dep_results + cleanup_results
     ui.summary(all_results)
@@ -1059,7 +1160,6 @@ def cmd_uninstall(args):
         report = audit_log.generate_diagnostic_report()
         ui.panel(report, title="Diagnostic Report", style="yellow")
 
-    if not args.dry_run:
         ui.panel("Uninstall completed.", title="🧹 Success", style="green")
         try:
             audit_log.complete_session("completed")

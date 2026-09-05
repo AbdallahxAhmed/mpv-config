@@ -40,6 +40,36 @@ class TestRollback(unittest.TestCase):
             self.assertFalse(any(".rollback.tmp." in src for src, _ in copytree_calls))
             self.assertTrue(any(".rollback.tmp." in src for src, _ in move_calls))
 
+    def test_rollback_creates_missing_config_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, "config")
+            backup_dir = os.path.join(tmpdir, "backup")
+            os.makedirs(backup_dir, exist_ok=True)
+            with open(os.path.join(backup_dir, "mpv.conf"), "w", encoding="utf-8") as f:
+                f.write("restored")
+
+            result = rollback_config(config_dir, backup_path=backup_dir)
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(os.path.isfile(os.path.join(config_dir, "mpv.conf")))
+
+    def test_rollback_failure_preserves_git_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, "config")
+            backup_dir = os.path.join(tmpdir, "backup")
+            os.makedirs(config_dir, exist_ok=True)
+            os.makedirs(os.path.join(config_dir, ".git"), exist_ok=True)
+            with open(os.path.join(config_dir, "old.txt"), "w", encoding="utf-8") as f:
+                f.write("old")
+            os.makedirs(backup_dir, exist_ok=True)
+            with open(os.path.join(backup_dir, "mpv.conf"), "w", encoding="utf-8") as f:
+                f.write("new")
+
+            with mock.patch("deploy.deployer.shutil.move", side_effect=RuntimeError("boom")):
+                with self.assertRaises(RuntimeError):
+                    rollback_config(config_dir, backup_path=backup_dir)
+
+            self.assertTrue(os.path.isdir(os.path.join(config_dir, ".git")))
+
 
 if __name__ == "__main__":
     unittest.main()

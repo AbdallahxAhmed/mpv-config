@@ -82,7 +82,8 @@ class AuditLog:
         Parameters
         ----------
         operation:
-            One of ``"install"``, ``"update"``, ``"uninstall"``, ``"rollback"``.
+            One of ``"install"``, ``"update"``, ``"uninstall"``,
+            ``"rollback"``, ``"migrate"``, ``"sync-deps"``.
         env:
             Detected ``Environment`` object (used for context metadata).
         """
@@ -244,13 +245,30 @@ class AuditLog:
         conservative default — we never remove something we did not install).
         """
         seen: Dict[str, bool] = {}
+        installed_by_us: Dict[str, bool] = {}
         for session in self._data["sessions"]:
-            if session.get("operation") not in ("install", "update"):
-                continue
             for name, info in session.get("packages", {}).items():
-                if name not in seen:
-                    # Default to True (pre-existing) if key is missing
-                    seen[name] = info.get("was_pre_existing", True)
+                action = info.get("action")
+                status = info.get("status")
+                was_pre_existing = info.get("was_pre_existing", True)
+
+                if action == "install":
+                    if status == "ok":
+                        seen.setdefault(name, was_pre_existing)
+                        installed_by_us[name] = not was_pre_existing
+                    elif name not in seen:
+                        seen[name] = True
+                elif action == "uninstall" and status == "ok":
+                    installed_by_us[name] = False
+                    seen[name] = True
+                elif name not in seen:
+                    seen[name] = True
+
+        for name, ours in installed_by_us.items():
+            if ours:
+                seen[name] = False
+            else:
+                seen[name] = True
         return seen
 
     def get_packages_installed_by_us(self) -> List[str]:

@@ -12,8 +12,6 @@ All network operations use urllib (stdlib) — zero external dependencies.
 import io
 import json
 import os
-import shutil
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -70,6 +68,43 @@ def _ensure_dir(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
 
+def _safe_join(root, relative_path):
+    rel = relative_path.replace("\\", "/").lstrip("/")
+    if not rel or rel.startswith("../") or "/../" in rel or rel.endswith("/.."):
+        raise ValueError(f"Unsafe relative path: {relative_path}")
+    if os.path.isabs(relative_path):
+        raise ValueError(f"Absolute destination path not allowed: {relative_path}")
+    normalized = os.path.normpath(rel)
+    if normalized.startswith("..") or normalized == ".":
+        raise ValueError(f"Unsafe normalized path: {relative_path}")
+    if ":" in normalized.split("/")[0]:
+        raise ValueError(f"Drive/UNC destination path not allowed: {relative_path}")
+    dest = os.path.realpath(os.path.join(root, normalized))
+    root_real = os.path.realpath(root)
+    if not dest.startswith(root_real + os.sep):
+        raise ValueError(f"Destination escapes staging directory: {relative_path}")
+    return dest
+
+
+def _safe_zip_name(name):
+    zname = name.replace("\\", "/")
+    if zname.startswith("/") or zname.startswith("\\") or zname.startswith("../"):
+        return None
+    if "/../" in zname or zname.endswith("/.."):
+        return None
+    if ":" in zname.split("/")[0]:
+        return None
+    parts = [p for p in zname.split("/") if p]
+    if any(p == ".." for p in parts):
+        return None
+    return "/".join(parts)
+
+
+def _zip_member_is_symlink(info):
+    mode = (info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
+    return bool(mode & 0o120000 == 0o120000)
+
+
 def _apply_zip_permissions(zip_info, dest_path):
     """Restore Unix permission bits from zip metadata when available."""
     if os.name == "nt":
@@ -80,7 +115,8 @@ def _apply_zip_permissions(zip_info, dest_path):
     mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
     if mode:
         try:
-            os.chmod(dest_path, mode)
+            safe_mode = (mode & 0o111) | 0o644
+            os.chmod(dest_path, safe_mode)
         except OSError as e:
             ui.warn(f"Could not restore permissions on {dest_path}: {e}")
 
@@ -106,7 +142,7 @@ def fetch_raw(script_entry, staging_dir):
     with ui.spinner(f"Downloading {name}..."):
         for f in files:
             url = GITHUB_RAW.format(repo=repo, branch=ref, path=f["src"])
-            dest = os.path.join(staging_dir, f["dest"])
+            dest = _safe_join(staging_dir, f["dest"])
             _ensure_dir(dest)
 
             try:
@@ -196,9 +232,14 @@ def fetch_release(entry, staging_dir, is_shader=False):
             for zi in zf.infolist():
                 if zi.is_dir():
                     continue
+                if _zip_member_is_symlink(zi):
+                    raise ValueError(f"Archive contains symlink member: {zi.filename}")
+                safe_name = _safe_zip_name(zi.filename)
+                if not safe_name:
+                    raise ValueError(f"Unsafe archive member path: {zi.filename}")
                 if any(zi.filename.endswith(ext) for ext in extensions):
                     basename = os.path.basename(zi.filename)
-                    dest_path = os.path.join(dest_dir, basename)
+                    dest_path = _safe_join(dest_dir, basename)
                     with zf.open(zi) as src, open(dest_path, "wb") as dst:
                         dst.write(src.read())
                     _apply_zip_permissions(zi, dest_path)
@@ -206,39 +247,52 @@ def fetch_release(entry, staging_dir, is_shader=False):
         else:
             # Script mode: use install.map to route files
             install_map = entry.get("install", {}).get("map", {})
+            matched_destinations = set()
+            matched_prefixes = {k: 0 for k in install_map}
             for zi in zf.infolist():
                 if zi.is_dir():
                     continue
+                if _zip_member_is_symlink(zi):
+                    raise ValueError(f"Archive contains symlink member: {zi.filename}")
+                safe_name = _safe_zip_name(zi.filename)
+                if not safe_name:
+                    raise ValueError(f"Unsafe archive member path: {zi.filename}")
                 # Check if this file matches any map entry
                 for src_prefix, dest_prefix in install_map.items():
                     # Normalize: zip entries may have a root dir like "uosc/"
                     # Try both with and without the first path component
-                    zpath = zi.filename
+                    zpath = safe_name
                     parts = zpath.split("/", 1)
                     zpath_stripped = parts[1] if len(parts) > 1 else zpath
 
                     for candidate in (zpath, zpath_stripped):
-                        if candidate.startswith(src_prefix) or f"{src_prefix}" in candidate:
-                            rel = candidate
-                            # Map source prefix to dest prefix
-                            if candidate.startswith(src_prefix):
-                                rel = dest_prefix + candidate[len(src_prefix):]
-                            else:
-                                # Find where src_prefix starts in candidate
-                                idx = candidate.find(src_prefix)
-                                if idx >= 0:
-                                    rel = dest_prefix + candidate[idx + len(src_prefix):]
-
-                            dest_path = os.path.join(staging_dir, rel)
+                        normalized_prefix = src_prefix.rstrip("/")
+                        if candidate == normalized_prefix or candidate.startswith(normalized_prefix + "/"):
+                            suffix = candidate[len(normalized_prefix):].lstrip("/")
+                            rel = os.path.join(dest_prefix, suffix).replace("\\", "/")
+                            dest_path = _safe_join(staging_dir, rel)
+                            if dest_path in matched_destinations:
+                                raise ValueError(f"Duplicate mapped destination: {rel}")
                             _ensure_dir(dest_path)
                             with zf.open(zi) as src, open(dest_path, "wb") as dst:
                                 dst.write(src.read())
                             _apply_zip_permissions(zi, dest_path)
+                            matched_destinations.add(dest_path)
+                            matched_prefixes[src_prefix] = matched_prefixes.get(src_prefix, 0) + 1
                             extracted_count += 1
                             break
                     else:
                         continue
                     break
+
+            missing = [k for k, count in matched_prefixes.items() if count == 0]
+            if missing:
+                raise FileNotFoundError(
+                    f"Release missing required mapped components: {', '.join(missing)}"
+                )
+
+    if extracted_count == 0:
+        raise FileNotFoundError(f"{name}: release contained no expected output files")
 
     ui.success(f"{name}: {extracted_count} file(s) extracted from {tag}")
 

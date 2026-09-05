@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from deploy.deployer import _patch_mpv_conf, ensure_mpv_conf_user
 from deploy.detector import Environment
@@ -467,7 +468,8 @@ class TestAuditPatches(unittest.TestCase):
             return mock_res
 
         with patch("subprocess.run", side_effect=fake_subprocess_run), \
-             patch("shutil.which", return_value=r"C:\Program Files\mpv\mpv.exe"):
+             patch("shutil.which", return_value=r"C:\Program Files\mpv\mpv.exe"), \
+             patch("os.path.isfile", return_value=True):
             updated = ensure_windows_shortcuts(env)
             self.assertEqual(len(updated), 1)
             self.assertIn("C:\\dummy\\mpv.lnk", updated)
@@ -551,8 +553,36 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn('type(val) == "string"', content)
         self.assertIn('type(val) == "table"', content)
 
+    def test_sync_dependencies_dry_run_is_read_only(self):
+        from deploy.installer import sync_dependencies
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        with mock.patch("deploy.installer.os.makedirs") as m_makedirs, \
+         mock.patch("deploy.installer._add_to_path") as m_add_path:
+        results = sync_dependencies(env=env, dry_run=True)
+
+        self.assertTrue(all(r["status"] == "skipped" for r in results))
+        m_makedirs.assert_not_called()
+        m_add_path.assert_not_called()
+
+    def test_detect_maps_fedora_platform_key(self):
+        from deploy import detector
+
+        with mock.patch("deploy.detector._detect_os", return_value="linux"), \
+         mock.patch("deploy.detector._detect_distro", return_value="fedora"), \
+         mock.patch("deploy.detector._detect_display", return_value="wayland"), \
+         mock.patch("deploy.detector._detect_gpu", return_value="nvidia"), \
+         mock.patch("deploy.detector._detect_avx2", return_value=False), \
+         mock.patch("deploy.detector._detect_pkg_manager", return_value="dnf"), \
+         mock.patch("deploy.detector._detect_python", return_value=("python3", "pip3")), \
+         mock.patch("deploy.detector._which", return_value=True), \
+         mock.patch("deploy.detector._resolve_config_dir", return_value="/tmp/mpv"), \
+         mock.patch("deploy.detector._check_installed", return_value=False):
+        env = detector.detect()
+
+        self.assertEqual(env.platform_key, "fedora")
+
 
 if __name__ == "__main__":
     unittest.main()
-
 
