@@ -466,6 +466,8 @@ def detect():
             env.platform_key = "macos"
         elif env.distro in ("arch",):
             env.platform_key = "arch"
+        elif env.distro in ("fedora",):
+            env.platform_key = "fedora"
         elif env.distro in ("ubuntu", "debian"):
             env.platform_key = "ubuntu"
         else:

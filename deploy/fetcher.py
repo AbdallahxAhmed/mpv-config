@@ -9,11 +9,11 @@ Supports three fetch strategies:
 All network operations use urllib (stdlib) — zero external dependencies.
 """
 
+import hashlib
 import io
 import json
 import os
-import shutil
-import tempfile
+import stat
 import time
 import urllib.error
 import urllib.request
@@ -21,8 +21,9 @@ import zipfile
 from datetime import datetime, timezone
 
 from deploy import ui
+from deploy.path_safety import relative_parts, safe_destination
 
-# ─── Constants ─────────────────────────────────────────────────────────
+# ─── Constants ───
 
 GITHUB_RAW = "https://raw.githubusercontent.com/{repo}/{branch}/{path}"
 GITHUB_API = "https://api.github.com/repos/{repo}/releases"
@@ -31,9 +32,12 @@ MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
 ZIP_UNIX_MODE_SHIFT = 16
 ZIP_UNIX_MODE_MASK = 0o7777
+MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
+MAX_EXPANDED_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 10000
 
 
-# ─── HTTP Helpers ──────────────────────────────────────────────────────
+# ─── HTTP Helpers ───
 
 def _request(url, binary=False):
     """Perform an HTTP GET with retries and exponential backoff."""
@@ -44,7 +48,9 @@ def _request(url, binary=False):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as resp:
-                data = resp.read()
+                data = resp.read(MAX_DOWNLOAD_BYTES + 1)
+                if len(data) > MAX_DOWNLOAD_BYTES:
+                    raise ValueError("Download exceeds safety size limit")
                 return data if binary else data.decode("utf-8")
         except urllib.error.HTTPError as e:
             if e.code == 404:
@@ -70,67 +76,105 @@ def _ensure_dir(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
 
+def _safe_join(root, relative_path):
+    return safe_destination(root, relative_path)
+
+
+def _safe_zip_name(name):
+    return "/".join(relative_parts(name, directory=True))
+
+
+def _zip_member_is_symlink(info):
+    return stat.S_ISLNK(info.external_attr >> ZIP_UNIX_MODE_SHIFT)
+
+
+def _zip_mode(info):
+    mode = info.external_attr >> ZIP_UNIX_MODE_SHIFT
+    kind = stat.S_IFMT(mode)
+    if info.create_system == 3 and kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+        raise ValueError(f"Archive contains a link or special file: {info.filename}")
+    return 0o644 | (mode & 0o111)
+
+
 def _apply_zip_permissions(zip_info, dest_path):
-    """Restore Unix permission bits from zip metadata when available."""
-    if os.name == "nt":
-        return
-    if zip_info.create_system != 3:  # 3 == Unix
-        return
-    # Per zip spec, Unix mode is stored in high 16 bits of external_attr.
-    mode = (zip_info.external_attr >> ZIP_UNIX_MODE_SHIFT) & ZIP_UNIX_MODE_MASK
-    if mode:
-        try:
-            os.chmod(dest_path, mode)
-        except OSError as e:
-            ui.warn(f"Could not restore permissions on {dest_path}: {e}")
+    if os.name != "nt" and zip_info.create_system == 3:
+        os.chmod(dest_path, _zip_mode(zip_info))
 
 
-# ─── Fetch: Raw Files ─────────────────────────────────────────────────
+def _write_component(staging_dir, outputs):
+    """Commit validated, fully downloaded files, cleaning partial writes on error."""
+    seen = set()
+    planned = []
+    for relative, data, mode in outputs:
+        dest = _safe_join(staging_dir, relative)
+        key = "/".join(relative_parts(relative)).casefold()
+        if key in seen or os.path.lexists(dest):
+            raise ValueError(f"Duplicate or existing output destination: {relative}")
+        seen.add(key)
+        planned.append((relative, dest, data, mode))
+    if not planned:
+        raise FileNotFoundError("Component contained no expected output files")
+    created_files, created_dirs = [], []
+    try:
+        for relative, dest, data, mode in planned:
+            parent = os.path.abspath(staging_dir)
+            for part in relative_parts(relative)[:-1]:
+                parent = os.path.join(parent, part)
+                if not os.path.exists(parent):
+                    os.mkdir(parent)
+                    created_dirs.append(parent)
+            _safe_join(staging_dir, relative)
+            with open(dest, "xb") as stream:
+                created_files.append(dest)
+                stream.write(data)
+            if mode is not None and os.name != "nt":
+                os.chmod(dest, mode)
+    except BaseException:
+        for created in reversed(created_files):
+            os.unlink(created)
+        for created in reversed(created_dirs):
+            os.rmdir(created)
+        raise
+    return [relative for relative, _, _, _ in planned]
+
+
+# ─── Fetch: Raw Files ───
 
 def fetch_raw(script_entry, staging_dir):
-    """
-    Download individual files from a GitHub repo's default branch.
-    Returns metadata dict or raises on failure.
-    """
+    """Download a complete component before exposing any staged output."""
     source = script_entry["source"]
     repo = source["repo"]
-    pin = source.get("pin")
-    branch = source.get("branch", "master")
-    ref = pin or branch
-    files = source["files"]
+    ref = source.get("pin") or source.get("branch", "master")
     name = script_entry["name"]
-
+    files = source["files"]
+    seen = set()
+    for item in files:
+        dest = _safe_join(staging_dir, item["dest"])
+        key = "/".join(relative_parts(item["dest"])).casefold()
+        if key in seen or os.path.lexists(dest):
+            raise ValueError(f"Duplicate or existing destination: {item['dest']}")
+        seen.add(key)
+    if not files:
+        raise FileNotFoundError(f"{name}: no configured files")
     ui.step(f"Fetching {name} from {repo}...")
-
-    fetched = []
+    outputs = []
     with ui.spinner(f"Downloading {name}..."):
-        for f in files:
-            url = GITHUB_RAW.format(repo=repo, branch=ref, path=f["src"])
-            dest = os.path.join(staging_dir, f["dest"])
-            _ensure_dir(dest)
-
-            try:
-                data = _request(url, binary=True)
-                with open(dest, "wb") as fh:
-                    fh.write(data)
-                fetched.append(f["dest"])
-            except FileNotFoundError:
-                raise FileNotFoundError(
-                    f"File not found: {f['src']} in {repo}. "
-                    f"The repository structure may have changed."
-                )
-
+        for item in files:
+            url = GITHUB_RAW.format(repo=repo, branch=ref, path=item["src"])
+            data = _request(url, binary=True)
+            if not data:
+                raise ValueError(f"Empty download for {item['src']}")
+            outputs.append((item["dest"], data, None))
+        fetched = _write_component(staging_dir, outputs)
     ui.success(f"{name}: {len(fetched)} file(s) downloaded")
-
     return {
-        "name": name,
-        "source": f"github:{repo}@{ref}",
-        "files": fetched,
+        "name": name, "source": f"github:{repo}@{ref}", "files": fetched,
+        "sha256": {relative: hashlib.sha256(data).hexdigest() for relative, data, _ in outputs},
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-# ─── Fetch: GitHub Release ────────────────────────────────────────────
+# ─── Fetch: GitHub Release ───
 
 def fetch_release(entry, staging_dir, is_shader=False):
     """
@@ -185,60 +229,54 @@ def fetch_release(entry, staging_dir, is_shader=False):
     with ui.spinner(f"Downloading {asset_name} ({tag})..."):
         zip_data = _request(asset_url, binary=True)
 
-    # Extract
-    extracted_count = 0
+    # Validate every archive member and every mapped destination before writes.
+    selected = []
+    seen = set()
     with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
-        if is_shader:
-            # Shader mode: extract all files with matching extensions
-            dest_dir = os.path.join(staging_dir, entry.get("dest", "shaders/"))
-            os.makedirs(dest_dir, exist_ok=True)
-            extensions = entry.get("extensions", [".glsl"])
-            for zi in zf.infolist():
-                if zi.is_dir():
-                    continue
-                if any(zi.filename.endswith(ext) for ext in extensions):
-                    basename = os.path.basename(zi.filename)
-                    dest_path = os.path.join(dest_dir, basename)
-                    with zf.open(zi) as src, open(dest_path, "wb") as dst:
-                        dst.write(src.read())
-                    _apply_zip_permissions(zi, dest_path)
-                    extracted_count += 1
-        else:
-            # Script mode: use install.map to route files
-            install_map = entry.get("install", {}).get("map", {})
-            for zi in zf.infolist():
-                if zi.is_dir():
-                    continue
-                # Check if this file matches any map entry
+        members = zf.infolist()
+        if len(members) > MAX_ARCHIVE_MEMBERS or sum(i.file_size for i in members) > MAX_EXPANDED_BYTES:
+            raise ValueError("Archive exceeds extraction safety limits")
+        install_map = entry.get("install", {}).get("map", {})
+        matched_prefixes = {key: 0 for key in install_map}
+        for info in members:
+            mode = _zip_mode(info)
+            safe_name = _safe_zip_name(info.filename)
+            if info.is_dir():
+                continue
+            relative = None
+            if is_shader:
+                extensions = entry.get("extensions", [".glsl"])
+                if any(safe_name.endswith(ext) for ext in extensions):
+                    prefix = "/".join(relative_parts(entry.get("dest", "shaders/"), directory=True))
+                    relative = prefix + "/" + safe_name.rsplit("/", 1)[-1]
+            else:
+                candidates = [safe_name]
+                if "/" in safe_name:
+                    candidates.append(safe_name.split("/", 1)[1])
                 for src_prefix, dest_prefix in install_map.items():
-                    # Normalize: zip entries may have a root dir like "uosc/"
-                    # Try both with and without the first path component
-                    zpath = zi.filename
-                    parts = zpath.split("/", 1)
-                    zpath_stripped = parts[1] if len(parts) > 1 else zpath
-
-                    for candidate in (zpath, zpath_stripped):
-                        if candidate.startswith(src_prefix) or f"{src_prefix}" in candidate:
-                            rel = candidate
-                            # Map source prefix to dest prefix
-                            if candidate.startswith(src_prefix):
-                                rel = dest_prefix + candidate[len(src_prefix):]
-                            else:
-                                # Find where src_prefix starts in candidate
-                                idx = candidate.find(src_prefix)
-                                if idx >= 0:
-                                    rel = dest_prefix + candidate[idx + len(src_prefix):]
-
-                            dest_path = os.path.join(staging_dir, rel)
-                            _ensure_dir(dest_path)
-                            with zf.open(zi) as src, open(dest_path, "wb") as dst:
-                                dst.write(src.read())
-                            _apply_zip_permissions(zi, dest_path)
-                            extracted_count += 1
+                    prefix = "/".join(relative_parts(src_prefix, directory=True)) + "/"
+                    for candidate in candidates:
+                        if candidate.startswith(prefix):
+                            dest_prefix = "/".join(relative_parts(dest_prefix, directory=True))
+                            relative = dest_prefix + "/" + candidate[len(prefix):]
+                            matched_prefixes[src_prefix] += 1
                             break
-                    else:
-                        continue
-                    break
+                    if relative:
+                        break
+            if relative is not None:
+                dest = _safe_join(staging_dir, relative)
+                key = relative.casefold()
+                if key in seen or os.path.lexists(dest):
+                    raise ValueError(f"Duplicate or existing archive output: {relative}")
+                seen.add(key)
+                selected.append((relative, info, mode if info.create_system == 3 else None))
+        if not is_shader:
+            missing = [key for key, count in matched_prefixes.items() if not count]
+            if missing:
+                raise FileNotFoundError(f"Release missing required mapped components: {', '.join(missing)}")
+        outputs = [(relative, zf.read(info), mode) for relative, info, mode in selected]
+    fetched = _write_component(staging_dir, outputs)
+    extracted_count = len(fetched)
 
     ui.success(f"{name}: {extracted_count} file(s) extracted from {tag}")
 
@@ -247,11 +285,13 @@ def fetch_release(entry, staging_dir, is_shader=False):
         "version": tag,
         "source": f"github:{repo}@{tag}",
         "files_count": extracted_count,
+        "files": fetched,
+        "sha256": {relative: hashlib.sha256(data).hexdigest() for relative, data, _ in outputs},
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-# ─── Orchestrator ──────────────────────────────────────────────────────
+# ─── Orchestrator ───
 
 def fetch_all(scripts, shaders, staging_dir):
     """
