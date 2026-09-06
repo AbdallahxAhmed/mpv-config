@@ -2,15 +2,17 @@
 audit_log.py — Operation audit log / manifest for safe rollback and uninstall.
 
 Records every action taken by the installer (package installs, file operations,
-backups) together with whether each package was pre-existing.  This makes
-rollback and uninstall safe: packages and files that existed before this tool
-was first run will never be automatically removed.
+backups) together with whether each package was pre-existing. Package removal
+requires an explicit successful-install record; ambiguous history is treated
+conservatively. This log is not permission to delete arbitrary user files.
 
 Log file: <mpv config dir>/.audit-log.json
 """
 
 import json
 import os
+import tempfile
+import warnings
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -39,41 +41,70 @@ class AuditLog:
             "sessions": [],
         }
         self._current_session: Optional[Dict[str, Any]] = None
+        self._invalid_source = False
         self._load()
 
-    # ─── Persistence ───────────────────────────────────────────────────
+    # ─── Persistence ────────────────────────────────────────────────
 
     def _load(self):
-        """Load an existing log file; start fresh if absent or corrupt."""
+        """Read without writes/renames; invalid provenance grants no ownership."""
+        if os.path.islink(self.log_path):
+            self._invalid_source = True
+            return
         if not os.path.isfile(self.log_path):
             return
         try:
             with open(self.log_path, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
-            if isinstance(data, dict) and "sessions" in data:
-                self._data = data
-        except (json.JSONDecodeError, OSError):
-            # Corrupt log — preserve it but start a clean one
-            corrupt_path = self.log_path + ".corrupt"
-            try:
-                os.replace(self.log_path, corrupt_path)
-            except OSError:
-                pass
+            if not isinstance(data, dict) or data.get("schema_version") != LOG_SCHEMA_VERSION:
+                raise ValueError("Unsupported audit log schema")
+            sessions = data.get("sessions")
+            if not isinstance(sessions, list):
+                raise ValueError("Malformed audit sessions")
+            for session in sessions:
+                if not isinstance(session, dict):
+                    raise ValueError("Malformed audit session")
+                packages = session.get("packages", {})
+                if not isinstance(packages, dict) or not all(isinstance(v, dict) for v in packages.values()):
+                    raise ValueError("Malformed package history")
+                for key in ("files", "backups", "notes"):
+                    values = session.get(key, [])
+                    if not isinstance(values, list) or not all(isinstance(v, dict) for v in values):
+                        raise ValueError("Malformed audit entries")
+                for entry in list(packages.values()) + session.get("files", []):
+                    if "error_context" in entry and not isinstance(entry["error_context"], dict):
+                        raise ValueError("Malformed error context")
+            self._data = data
+        except (ValueError, UnicodeError, OSError):
+            self._invalid_source = True
 
     def save(self):
-        """Write the current log to disk atomically (best-effort)."""
-        log_dir = os.path.dirname(self.log_path)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-        tmp = self.log_path + ".tmp"
+        """Best-effort atomic write; preserve a malformed source only on writes."""
+        tmp = None
         try:
-            with open(tmp, "w", encoding="utf-8") as fh:
+            if os.path.islink(self.log_path):
+                raise OSError("Refusing to write audit log through a symlink")
+            log_dir = os.path.dirname(os.path.abspath(self.log_path))
+            os.makedirs(log_dir, exist_ok=True)
+            if self._invalid_source and os.path.isfile(self.log_path):
+                # Unique name, no rename-on-read and no clobbering old evidence.
+                corrupt = self.log_path + ".corrupt." + uuid.uuid4().hex
+                with open(self.log_path, "rb") as old, open(corrupt, "xb") as saved:
+                    saved.write(old.read())
+                self._invalid_source = False
+            fd, tmp = tempfile.mkstemp(prefix=".audit-log-", suffix=".tmp", dir=log_dir)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(self._data, fh, indent=2, ensure_ascii=False)
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp, self.log_path)
-        except OSError:
-            pass  # Non-fatal: logging is best-effort
+        except OSError as exc:
+            warnings.warn(f"Audit log could not be saved: {exc}")
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.unlink(tmp)
 
-    # ─── Session lifecycle ─────────────────────────────────────────────
+    # ─── Session lifecycle ────────────────────────────────────────
 
     def start_session(self, operation: str, env) -> str:
         """
@@ -133,7 +164,7 @@ class AuditLog:
             )
         return self._current_session
 
-    # ─── Recording helpers ─────────────────────────────────────────────
+    # ─── Recording helpers ────────────────────────────────────────
 
     def record_package(
         self,
@@ -234,41 +265,28 @@ class AuditLog:
         self._require_session()["notes"].append(entry)
         self.save()
 
-    # ─── Query helpers ─────────────────────────────────────────────────
+    # ─── Query helpers ────────────────────────────────────────────
 
     def get_pre_existing_packages(self) -> Dict[str, bool]:
-        """
-        Return ``{package_name: was_pre_existing}`` based on the **first**
-        install/update session that recorded each package.
+        """Only successful, explicitly new installations establish ownership.
 
-        Packages absent from the log are treated as pre-existing (the safe
-        conservative default — we never remove something we did not install).
+        Missing/ambiguous records are conservative. Successful uninstall ends
+        ownership; ordinary skipped updates do not claim somebody else's tool.
         """
         seen: Dict[str, bool] = {}
-        installed_by_us: Dict[str, bool] = {}
         for session in self._data["sessions"]:
             for name, info in session.get("packages", {}).items():
-                action = info.get("action")
-                status = info.get("status")
-                was_pre_existing = info.get("was_pre_existing", True)
-
-                if action == "install":
-                    if status == "ok":
-                        seen.setdefault(name, was_pre_existing)
-                        installed_by_us[name] = not was_pre_existing
-                    elif name not in seen:
-                        seen[name] = True
+                seen.setdefault(name, True)
+                action, status = info.get("action"), info.get("status")
+                preexisting = info.get("was_pre_existing")
+                if not isinstance(preexisting, bool):
+                    seen[name] = True
                 elif action == "uninstall" and status == "ok":
-                    installed_by_us[name] = False
                     seen[name] = True
-                elif name not in seen:
+                elif action == "install" and status == "ok" and preexisting is False:
+                    seen[name] = False
+                elif status == "failed" or action not in ("install", "uninstall", "skip", "none"):
                     seen[name] = True
-
-        for name, ours in installed_by_us.items():
-            if ours:
-                seen[name] = False
-            else:
-                seen[name] = True
         return seen
 
     def get_packages_installed_by_us(self) -> List[str]:
