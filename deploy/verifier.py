@@ -1,8 +1,7 @@
-"""
-verifier.py — Post-deployment verification.
+"""Structure/binary checks and a script-disabled mpv startup sanity check.
 
-Runs a comprehensive check suite to ensure everything was deployed
-correctly and works as expected.
+These checks do not establish real GPU, HDR, subtitle, or network playback
+correctness. See docs/AUDIT.md for the manual playback validation checklist.
 """
 
 import os
@@ -13,7 +12,7 @@ from deploy import ui
 
 
 def _run_check(cmd):
-    """Run a command silently, return success."""
+    """Run a bounded, non-interactive command and return whether it succeeded."""
     try:
         subprocess.run(
             cmd, capture_output=True, timeout=10,
@@ -21,17 +20,13 @@ def _run_check(cmd):
             check=True,
         )
         return True
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return False
 
 
 def verify(config_dir, env):
-    """
-    Run verification checks on the deployed configuration.
-    Returns list of result dicts.
-    """
+    """Verify the explicitly selected configuration, without running its Lua scripts."""
     ui.header("Verifying Deployment")
-
     results = []
     checks_passed = 0
     checks_total = 0
@@ -41,37 +36,27 @@ def verify(config_dir, env):
         checks_total += 1
         if condition:
             checks_passed += 1
-            results.append({"name": name, "status": "ok", "detail": detail})
-        else:
-            results.append({"name": name, "status": "failed", "detail": detail})
+        results.append({"name": name, "status": "ok" if condition else "failed", "detail": detail})
 
     def check_file(name, rel_path):
-        path = os.path.join(config_dir, rel_path)
-        check(f"{name}", os.path.isfile(path), rel_path)
+        check(name, os.path.isfile(os.path.join(config_dir, rel_path)), rel_path)
 
     def check_dir(name, rel_path, min_files=0):
         path = os.path.join(config_dir, rel_path)
         exists = os.path.isdir(path)
-        count = 0
-        if exists:
-            count = sum(len(f) for _, _, f in os.walk(path))
-        ok = exists and count >= min_files
-        check(name, ok, f"{count} files" if exists else "missing")
+        count = sum(len(files) for _, _, files in os.walk(path)) if exists else 0
+        check(name, exists and count >= min_files, f"{count} files" if exists else "missing")
 
-    def check_binary(name, cmd):
+    def check_binary(name, cmd, optional=False):
         ok = _run_check(cmd)
-        check(f"{name} binary", ok)
-
-    def check_symlink(name, rel_path):
-        path = os.path.join(config_dir, rel_path)
-        is_symlink = os.path.islink(path)
-        is_valid = os.path.exists(path)
-        if not is_symlink:
-            check(f"{name} symlink", False, "not a symlink")
+        if optional and not ok:
+            results.append({"name": f"{name} binary", "status": "skipped", "detail": "optional"})
         else:
-            check(f"{name} symlink", is_valid, "valid symlink" if is_valid else "broken symlink")
+            check(f"{name} binary", ok)
 
-    # ─── Binary checks ──────────────────────────────────────────────
+    def check_directory_or_link(name, rel_path):
+        path = os.path.join(config_dir, rel_path)
+        check(name, os.path.isdir(path), "valid directory/link" if os.path.isdir(path) else "missing or broken link")
 
     ui.step("Checking binaries...")
     check_binary("mpv", ["mpv", "--version"])
@@ -79,118 +64,67 @@ def verify(config_dir, env):
     if env.os == "windows":
         check_binary("ffprobe", ["ffprobe", "-version"])
         check_binary("ffplay", ["ffplay", "-version"])
-    check_binary("yt-dlp", ["yt-dlp", "--version"])
-
-    python_cmd = env.python_cmd
-    check_binary("python", [python_cmd, "--version"])
-    check_binary("uv", ["uv", "--version"])
-
-    # Optional
-    if _run_check(["ffsubsync", "--version"]):
-        check("ffsubsync binary", True)
-    else:
-        ui.warn("ffsubsync: not found (optional)")
-        results.append({"name": "ffsubsync binary", "status": "skipped", "detail": "optional"})
-
+    from deploy.deployer import _resolve_ytdl_path
+    check_binary("yt-dlp", [_resolve_ytdl_path(env), "--version"])
+    check_binary("python", [env.python_cmd, "--version"])
+    # uv is an installer convenience, not a required mpv runtime dependency.
+    check_binary("uv", ["uv", "--version"], optional=True)
+    check_binary("ffsubsync", ["ffsubsync", "--version"], optional=True)
     if _run_check(["alass", "--version"]) or _run_check(["alass-cli", "--version"]):
         check("alass binary", True)
     else:
-        ui.warn("alass: not found (optional)")
         results.append({"name": "alass binary", "status": "skipped", "detail": "optional"})
-
-    # ─── Config files ────────────────────────────────────────────────
 
     ui.step("Checking config files...")
     check_file("mpv.conf", "mpv.conf")
     check_file("input.conf", "input.conf")
-
-    # ─── Scripts ─────────────────────────────────────────────────────
+    check_file("mpv.conf.user", "mpv.conf.user")
 
     ui.step("Checking scripts...")
-    if env.os in ("linux", "macos"):
-        check_symlink("scripts dir", "scripts")
-        
+    check_directory_or_link("scripts directory", "scripts")
     check_dir("uosc", "scripts/uosc", min_files=1)
-    # env.os is normalized by detector.py to "windows" | "linux" | "macos".
-    ziggy_by_os = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}
-    ziggy_name = ziggy_by_os.get(env.os)
+    ziggy_name = {"linux": "ziggy-linux", "macos": "ziggy-darwin"}.get(env.os)
     if ziggy_name:
-        rel = f"scripts/uosc/bin/{ziggy_name}"
-        ziggy = os.path.join(config_dir, rel)
-        check(f"uosc {ziggy_name}", os.path.isfile(ziggy), rel)
+        relative = f"scripts/uosc/bin/{ziggy_name}"
+        ziggy = os.path.join(config_dir, relative)
+        check(f"uosc {ziggy_name}", os.path.isfile(ziggy), relative)
         check(f"uosc {ziggy_name} executable", os.access(ziggy, os.X_OK), "must be executable")
-    check_file("thumbfast", "scripts/thumbfast.lua")
-    check_file("SmartSkip", "scripts/SmartSkip.lua")
-    check_file("smart-paste", "scripts/smart-paste.lua")
-    check_file("ytdl_hook", "scripts/ytdl_hook.lua")
-    check_file("sponsorblock", "scripts/sponsorblock.lua")
+    for name in ("thumbfast", "SmartSkip", "smart-paste", "ytdl_hook", "ytdl-sub-menu", "sponsorblock", "autoload", "memo", "evafast", "pause-when-minimize"):
+        check_file(name, f"scripts/{name}.lua")
     check_file("sponsorblock.py", "scripts/sponsorblock_shared/sponsorblock.py")
     check_dir("autosubsync", "scripts/autosubsync", min_files=1)
-    check_file("autoload", "scripts/autoload.lua")
-    check_file("memo", "scripts/memo.lua")
-    check_file("evafast", "scripts/evafast.lua")
-    check_file("pause-when-minimize", "scripts/pause-when-minimize.lua")
 
-    # ─── Shaders ─────────────────────────────────────────────────────
-
-    ui.step("Checking shaders...")
-    if env.os in ("linux", "macos"):
-        check_symlink("shaders dir", "shaders")
-        
+    ui.step("Checking shaders and fonts...")
+    check_directory_or_link("shaders directory", "shaders")
     check_dir("Anime4K shaders", "shaders", min_files=10)
-
-    # ─── Fonts ───────────────────────────────────────────────────────
-
-    ui.step("Checking fonts...")
     check_dir("uosc fonts", "fonts", min_files=1)
 
-    # ─── Script-opts ─────────────────────────────────────────────────
-
     ui.step("Checking script-opts...")
-    check_file("uosc.conf", "script-opts/uosc.conf")
-    check_file("SmartSkip.conf", "script-opts/SmartSkip.conf")
-    check_file("autosubsync.conf", "script-opts/autosubsync.conf")
-    check_file("evafast.conf", "script-opts/evafast.conf")
-    check_file("memo.conf", "script-opts/memo.conf")
+    for name in ("uosc", "SmartSkip", "autosubsync", "evafast", "memo", "ytdl_hook", "thumbfast"):
+        check_file(name + ".conf", f"script-opts/{name}.conf")
 
-    # ─── Config content checks ───────────────────────────────────────
-
-    ui.step("Validating config content...")
-
-    # Check all template-generated files for unresolved placeholders
-    for conf_name, conf_path in [
-        ("mpv.conf", os.path.join(config_dir, "mpv.conf")),
-        ("input.conf", os.path.join(config_dir, "input.conf")),
-        ("autosubsync.conf", os.path.join(config_dir, "script-opts", "autosubsync.conf")),
-    ]:
-        if os.path.isfile(conf_path):
-            with open(conf_path, "r", encoding="utf-8") as f:
-                content = f.read()
+    for relative in ("mpv.conf", "input.conf", "script-opts/autosubsync.conf"):
+        path = os.path.join(config_dir, relative)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8") as stream:
+                content = "\n".join(line for line in stream if not line.lstrip().startswith("#"))
             has_placeholders = "{{" in content
-            check(f"{conf_name}: no unresolved placeholders", not has_placeholders,
-                  f"found {{{{...}}}} in {conf_name}" if has_placeholders else "clean")
+            check(f"{relative}: no unresolved placeholders", not has_placeholders,
+                  "unresolved template" if has_placeholders else "clean")
 
-    # ─── mpv launch test ─────────────────────────────────────────────
-
-    ui.step("Testing mpv launch...")
-    mpv_ok = _run_check(["mpv", "--no-video", "--no-audio", "--frames=0", "--really-quiet", "--idle=no"])
-    check("mpv launch test", mpv_ok, "mpv runs without errors")
-
-    # ─── Summary ─────────────────────────────────────────────────────
-
+    ui.step("Testing selected config startup (scripts disabled)...")
+    mpv_ok = _run_check([
+        "mpv", f"--config-dir={os.path.abspath(config_dir)}", "--load-scripts=no",
+        "--no-video", "--no-audio", "--frames=0", "--really-quiet", "--idle=no",
+    ])
+    check("mpv launch test", mpv_ok, "startup only; real playback/GPU not tested")
     rows = []
-    for r in results:
-        status_styled = "[green]OK[/green]" if r["status"] == "ok" else "[red]FAILED[/red]"
-        if r["status"] == "skipped": status_styled = "[dim]SKIPPED[/dim]"
-        detail = f"[dim]{r['detail']}[/dim]" if r['detail'] else ""
-        rows.append([status_styled, r["name"], detail])
-        
+    for result in results:
+        label = {"ok": "[green]OK[/green]", "failed": "[red]FAILED[/red]", "skipped": "[dim]SKIPPED[/dim]"}[result["status"]]
+        rows.append([label, result["name"], result["detail"]])
     ui.table("Verification Results", ["Status", "Check", "Detail"], rows)
-
-    print()
     if checks_passed == checks_total:
-        ui.success(f"All {checks_total} checks passed! ✨")
+        ui.success(f"All {checks_total} automated checks passed; manual playback validation remains.")
     else:
         ui.warn(f"{checks_passed}/{checks_total} checks passed")
-
     return results
