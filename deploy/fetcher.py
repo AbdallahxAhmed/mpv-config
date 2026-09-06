@@ -25,8 +25,8 @@ from deploy.path_safety import relative_parts, safe_destination
 
 # ─── Constants ───
 
-GITHUB_RAW = "{{https://raw.githubusercontent.com/{repo}}}/{branch}/{path}"
-GITHUB_API = "{{https://api.github.com/repos/{repo}}}/releases"
+GITHUB_RAW = "https://raw.githubusercontent.com/{repo}/{branch}/{path}"
+GITHUB_API = "https://api.github.com/repos/{repo}/releases"
 USER_AGENT = "mpv-auto-deploy/1.0"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
