@@ -44,7 +44,7 @@ class AuditLog:
         self._invalid_source = False
         self._load()
 
-    # ─── Persistence ────────────────────────────────────────────────
+    # ─── Persistence ───
 
     def _load(self):
         """Read without writes/renames; invalid provenance grants no ownership."""
@@ -104,7 +104,7 @@ class AuditLog:
             if tmp and os.path.exists(tmp):
                 os.unlink(tmp)
 
-    # ─── Session lifecycle ────────────────────────────────────────
+    # ─── Session lifecycle ───
 
     def start_session(self, operation: str, env) -> str:
         """
@@ -164,7 +164,7 @@ class AuditLog:
             )
         return self._current_session
 
-    # ─── Recording helpers ────────────────────────────────────────
+    # ─── Recording helpers ───
 
     def record_package(
         self,
@@ -265,7 +265,7 @@ class AuditLog:
         self._require_session()["notes"].append(entry)
         self.save()
 
-    # ─── Query helpers ────────────────────────────────────────────
+    # ─── Query helpers ───
 
     def get_pre_existing_packages(self) -> Dict[str, bool]:
         """Only successful, explicitly new installations establish ownership.

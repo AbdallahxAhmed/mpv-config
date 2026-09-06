@@ -23,10 +23,10 @@ from datetime import datetime, timezone
 from deploy import ui
 from deploy.path_safety import relative_parts, safe_destination
 
-# ─── Constants ───────────────────────────────────────────────────
+# ─── Constants ───
 
-GITHUB_RAW = "https://raw.githubusercontent.com/{repo}/{branch}/{path}"
-GITHUB_API = "https://api.github.com/repos/{repo}/releases"
+GITHUB_RAW = "{{https://raw.githubusercontent.com/{repo}}}/{branch}/{path}"
+GITHUB_API = "{{https://api.github.com/repos/{repo}}}/releases"
 USER_AGENT = "mpv-auto-deploy/1.0"
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds, doubles each retry
@@ -37,7 +37,7 @@ MAX_EXPANDED_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 10000
 
 
-# ─── HTTP Helpers ──────────────────────────────────────────────
+# ─── HTTP Helpers ───
 
 def _request(url, binary=False):
     """Perform an HTTP GET with retries and exponential backoff."""
@@ -138,7 +138,7 @@ def _write_component(staging_dir, outputs):
     return [relative for relative, _, _, _ in planned]
 
 
-# ─── Fetch: Raw Files ──────────────────────────────────────────
+# ─── Fetch: Raw Files ───
 
 def fetch_raw(script_entry, staging_dir):
     """Download a complete component before exposing any staged output."""
@@ -174,7 +174,7 @@ def fetch_raw(script_entry, staging_dir):
     }
 
 
-# ─── Fetch: GitHub Release ──────────────────────────────────────
+# ─── Fetch: GitHub Release ───
 
 def fetch_release(entry, staging_dir, is_shader=False):
     """
@@ -291,7 +291,7 @@ def fetch_release(entry, staging_dir, is_shader=False):
     }
 
 
-# ─── Orchestrator ──────────────────────────────────────────────
+# ─── Orchestrator ───
 
 def fetch_all(scripts, shaders, staging_dir):
     """
