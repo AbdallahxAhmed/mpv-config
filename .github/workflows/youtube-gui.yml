@@ -21,3 +21,36 @@ jobs:
         env:
           SUITE: ${{ matrix.suite }}
         run: lua5.4 "tests/lua/test_${SUITE}.lua"
+  luajit:
+    name: LuaJIT (GUI scripts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit
+      - name: Parse changed playback scripts
+        run: >-
+          luajit -e 'assert(loadfile("scripts/smart-paste.lua")); assert(loadfile("scripts/ytdl-sub-menu.lua")); assert(loadfile("scripts/modules/stream_policy.lua")); assert(loadfile("scripts/ytdl_hook.lua"))'
+  upgrade:
+    name: GUI upgrade safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: python3 -m unittest discover -s tests -p 'test_youtube_gui_upgrade.py' -v
+  native:
+    name: Native mpv (${{ matrix.case }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [load_and_reuse, cancel_on_file_change]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
+      - name: Test real mpv with localhost captions
+        env:
+          CASE: ${{ matrix.case }}
+          NATIVE_MPV_REQUIRED: '1'
+        run: python3 tests/test_youtube_runtime.py "CaptionPlayback.test_${CASE}" -v
