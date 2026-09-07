@@ -104,7 +104,7 @@ end
 local loading_timer = nil
 local loading_start_time = nil
 local current_loading_url = nil
-local spinner_frames = {"\u{280B}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283C}", "\u{2834}", "\u{2826}", "\u{2827}", "\u{2807}", "\u{280F}"}
+local spinner_frames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 local spinner_idx = 1
 
 local function start_loading_indicator(url)
@@ -133,7 +133,7 @@ local function start_loading_indicator(url)
         mp.osd_message(string.format("%s Resolving stream [%.1fs]: %s", frame, elapsed, short), 1)
     end
 
-    loading_timer = mp.add_periodic_timer(0.1, update_osd)
+    loading_timer = mp.add_periodic_timer(0.25, update_osd)
     update_osd()
 end
 
@@ -152,9 +152,9 @@ local function stop_loading_indicator(show_done)
     loading_start_time = nil
 end
 
--- Intercept on_load hook. NOTE: the vendored ytdl_hook also registers on_load
--- at priority 10, so this normalization must stay side-effect free.
-mp.add_hook("on_load", 10, function()
+-- Normalize before the vendored ytdl hook (priority 10), not alongside it.
+-- No extraction or subprocess is performed by this normalization step.
+mp.add_hook("on_load", 5, function()
     local path = mp.get_property("stream-open-filename")
     if not path or type(path) ~= "string" then return end
 
