@@ -1,0 +1,23 @@
+name: YouTube GUI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  lua:
+    name: YouTube (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [stream_policy, caption_menu]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Lua
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+      - name: Run offline regressions
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: lua5.4 "tests/lua/test_${SUITE}.lua"
