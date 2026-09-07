@@ -31,6 +31,8 @@ class CaptionPlayback(unittest.TestCase):
         module = config / 'scripts/modules/stream_policy.lua'
         module.parent.mkdir(parents=True)
         shutil.copyfile(ROOT / 'scripts/modules/stream_policy.lua', module)
+        # --no-config would also disable find_config_file for this isolated directory.
+        (config / 'mpv.conf').write_text('# Isolated native caption test\n')
         self.image = self.root / 'clip.ppm'
         self.image.write_bytes(b'P6\n16 16\n255\n' + b'\0' * 768)
         self.hits = collections.Counter()
@@ -60,7 +62,7 @@ class CaptionPlayback(unittest.TestCase):
         self.url = 'http://127.0.0.1:' + str(server.server_port)
         ipc = self.root / 'ipc'
         self.process = subprocess.Popen([
-            binary, '--no-config', '--config-dir=' + str(config), '--load-scripts=no',
+            binary, '--config-dir=' + str(config), '--load-scripts=no',
             '--script=' + str(ROOT / 'scripts/ytdl-sub-menu.lua'), '--ytdl=no',
             '--vo=null', '--ao=null', '--force-window=no', '--idle=yes', '--keep-open=yes',
             '--image-display-duration=20', '--input-ipc-server=' + str(ipc),
@@ -137,7 +139,8 @@ class CaptionPlayback(unittest.TestCase):
         self.assertEqual(sum(self.hits.values()), 0)
         before = self.get('time-pos')
         self.command('script-message-to', 'ytdl_sub_menu', 'fetch-sub', 'en')
-        self.wait(lambda: any(t.get('selected') for t in self.subtitles()))
+        self.wait(lambda: any(t.get('selected') for t in self.subtitles())
+                  and self.get('sub-visibility') is True)
         self.assertTrue(self.get('sub-visibility'))
         self.assertGreaterEqual(self.get('time-pos'), before)
         self.assertEqual(self.hits['/caption.vtt'], 1)
