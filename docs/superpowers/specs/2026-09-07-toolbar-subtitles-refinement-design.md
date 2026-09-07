@@ -1,7 +1,7 @@
-# Design Spec: Toolbar Monograms, Uniform Spacing, Stable Volume & Subtitles Refinement
+# Design Spec: Toolbar Monograms, Uniform Spacing, Stable Volume, Loop & Subtitles Refinement
 
 **Date**: 2026-09-07  
-**Status**: Revised Specification (Incorporating Technical Review Feedback)  
+**Status**: Revised Specification (Incorporating Technical Edge Cases & Windows Architecture)  
 **Target Platform**: MPV on Windows (1080p 27-inch display, 96 DPI)
 
 ---
@@ -10,31 +10,46 @@
 
 This specification refines MPV/uosc toolbar aesthetics, alignment, and subtitle fetching to deliver a clean, broadcast-grade interface on a 1080p 27" display without performance bottlenecks or visual artifacts:
 
-1. **Centered Typography Monograms**: Replace clunky corner badges (`[AR]`, `[1080p]`) with centered 2-letter monograms (`AR`/`EN` for audio, `HD`/`4K` for quality) using explicit ASS typography and baseline optical alignment.
-2. **ISO-639-2 Language Code Normalization**: Map 3-letter codes (`ara` $\to$ `AR`, `eng` $\to$ `EN`, `jpn` $\to$ `JA`) to guaranteed 2-character monograms, preventing horizontal text overflow inside 32px buttons.
+1. **Centered Typography Monograms**: Replace clunky corner badges (`[AR]`, `[1080p]`) with centered 2-letter monograms (`AR`/`EN` for audio, `HD`/`4K` for quality) using explicit ASS typography and dynamic optical scaling.
+2. **ISO-639-2 Normalization & Audio Title Fallback**: Map 3-letter codes (`ara` $\to$ `AR`, `eng` $\to$ `EN`, `jpn` $\to$ `JA`) with regex pattern scanning on track `title` (e.g. `[ENG] Dual-Audio`, `Arabic Dub`) to prevent text overflow and identify language when `lang` metadata is missing.
 3. **Widescreen & Aspect Ratio Detection**: Classify quality based on `(w >= 3840 or h >= 2160)` for `4K` and `(w >= 1280 or h >= 720)` for `HD`, ensuring 2.39:1 widescreen and ultrawide media (e.g. 1920x800, 3840x1600) are never miscategorized as SD.
 4. **Uniform Toolbar Spacing & Sizing**: Enforce `controls_size=32`, `controls_spacing=10`, and eliminate all ad-hoc `gap` spacers to guarantee sub-pixel sharpness and uniform button margins.
 5. **Intuitive Stable Volume**: Use `graphic_eq` (sound equalizer bars) representing audio dynamic range compression/leveling, verifying seamless live-stream filter graph reloads.
-6. **Ultra-Fast, Authenticated Subtitle Fetching**:
-   - Filter auto-generated and auto-translated lists down to **Arabic (`ar`)** and **English (`en`)** by default, with an expandable `"More languages..."` entry for full access.
-   - Replace slow `yt-dlp` re-scraping passes with lightweight, asynchronous `curl.exe` requests passing mpv's active session headers (`User-Agent`, `Cookie`, `http-header-fields`), dropping fetch latency from 2–6s to under 300ms and eliminating HTTP 429 errors.
+6. **Dedicated File Loop Button**: Re-insert `loop-file` (`cycle:repeat_one:loop-file:no/inf!?Loop file`) into the controls immediately after Stable Volume for one-click repeat toggling with native active state highlighting.
+7. **Ultra-Fast, Authenticated Subtitle Fetching**:
+   - Force `&fmt=vtt` in the timedtext query string, overriding YouTube's default XML/JSON (`srv3`/`json3`) responses.
+   - Execute Windows-native `curl.exe` asynchronously via structured argument array (`mp.command_native_async({name = 'subprocess', args = ...})`), bypassing `cmd.exe`/PowerShell quote-stripping issues.
+   - Enforce external subtitle track purging via `mp.commandv('sub-remove', id)` to prevent memory accumulation in mpv's `track-list`.
    - Enforce rigorous temp file lifecycle management on `end-file`, `shutdown`, and session language switches to prevent orphaned files in `%TEMP%`.
+   - Filter auto-generated and auto-translated lists down to **Arabic (`ar`)** and **English (`en`)** by default, with an expandable `"More languages..."` entry for full access.
 
 ---
 
 ## 2. Detailed Technical Architecture
 
-### 2.1 Toolbar Monograms & ASS Typography (`scripts/player-toolbar.lua`)
+### 2.1 Toolbar Monograms & Dynamic ASS Typography (`scripts/player-toolbar.lua`)
 
 #### Button Bounding Box & Sizing Metrics
 - At `controls_size=32`, each button box is exactly 32×32px.
-- uosc computes default font size as `round(32 * 0.7) = 22px`.
-- For standard icon glyphs (e.g. `headphones`, `graphic_eq`, `settings`), `MaterialIconsRound-Regular` glyphs are centered at em/2.
+- uosc computes default icon size as `round(32 * 0.7) = 22px`.
+- For standard icon glyphs (e.g. `headphones`, `graphic_eq`, `repeat_one`), `MaterialIconsRound-Regular` glyphs are centered at em/2.
 - For uppercase text monograms (`AR`, `EN`, `4K`, `HD`), capital letters occupy ~70% of the em square above the baseline with 0% descenders. Vertical centering with `\an5` leaves characters sitting ~1–2px lower than icon glyph centers.
-- **ASS Styling & Font Stack**:
-  - Text monograms are styled with the clean system UI font: `{\fnSegoe UI\b1\fs15\fscx95\fscy95}` or uosc's configured UI font.
-  - Optical baseline compensation: apply a 1px upward offset (`{\pos(x, y - 1)}` or explicit ASS tags) so that the visual optical center of `AR` or `HD` aligns perfectly with surrounding vector icons.
-  - Character bounding box verification: 2 uppercase characters at `\fs15` occupy ~18–20px width, leaving 6–7px of breathing room on each side within the 32px box.
+
+#### Dynamic Font Scaling & Baseline Compensation
+To prevent misalignment across different window sizes, display scaling factors, and uosc's `ui_scale`:
+- Font size is calculated dynamically as a proportional factor of the control box height:
+  ```lua
+  local font_size = math.max(10, math.floor(box_height * 0.47)) -- 15px at 32px height
+  ```
+- Optical vertical compensation is applied proportionally:
+  ```lua
+  local offset_y = -math.max(1, math.floor(box_height * 0.03)) -- -1px upward at 32px height
+  ```
+- The resulting text is formatted with ASS typography tags:
+  ```lua
+  local monogram_ass = string.format('{\\fnSegoe UI\\b1\\fs%d\\fscx95\\fscy95}%s', font_size, text)
+  ```
+- Character bounding box verification: 2 uppercase characters at `\fs15` occupy ~18–20px width, leaving 6–7px of breathing room on each side within the 32px box with zero clipping.
 
 #### Audio Button (`button:audio-tracks`)
 - **Display Logic**:
@@ -66,11 +81,15 @@ This specification refines MPV/uosc toolbar aesthetics, alignment, and subtitle 
 - **Filter Graph**: Toggles `dynaudnorm=f=500:g=15:p=0.95:m=10,alimiter=limit=0.9:level=false` with label `mpv_config_stable_volume`.
 - **Live Stream Safety**: Toggle applies filter reconfiguration using `mp.set_property_native('af', ...)` without dropping audio frames or causing playback stalls.
 
+#### File Loop Button (`loop-file`)
+- **Visual Display**: Preconfigured uosc shorthand expanding to `cycle:repeat_one:loop-file:no/inf!?Loop file`.
+- **Behavior**: Toggles `loop-file` between `no` and `inf`. Shows Material icon `repeat_one` with active highlight styling when repeat is enabled.
+
 ---
 
-### 2.2 ISO-639 Language Normalization (`stream_policy.lua`)
+### 2.2 ISO-639 Language Normalization & Title Fallback (`stream_policy.lua`)
 
-To ensure text monograms never exceed 2 characters, `stream_policy.lua` provides a normalization mapping:
+To ensure text monograms never exceed 2 characters and detect language even when metadata tags are blank:
 
 ```lua
 local iso_3_to_2 = {
@@ -88,6 +107,26 @@ local iso_3_to_2 = {
     tel = 'TE', mar = 'MR',
 }
 
+local title_language_patterns = {
+    {pattern = 'ara', monogram = 'AR'},
+    {pattern = 'arabic', monogram = 'AR'},
+    {pattern = 'eng', monogram = 'EN'},
+    {pattern = 'english', monogram = 'EN'},
+    {pattern = 'jap', monogram = 'JA'},
+    {pattern = 'japanese', monogram = 'JA'},
+    {pattern = 'spa', monogram = 'ES'},
+    {pattern = 'spanish', monogram = 'ES'},
+    {pattern = 'fra', monogram = 'FR'},
+    {pattern = 'french', monogram = 'FR'},
+    {pattern = 'ger', monogram = 'DE'},
+    {pattern = 'deu', monogram = 'DE'},
+    {pattern = 'german', monogram = 'DE'},
+    {pattern = 'ita', monogram = 'IT'},
+    {pattern = 'italian', monogram = 'IT'},
+    {pattern = 'rus', monogram = 'RU'},
+    {pattern = 'russian', monogram = 'RU'},
+}
+
 function M.monogram(lang_code, title)
     if type(lang_code) == 'string' and #lang_code > 0 then
         local clean = lang_code:lower():gsub('_', '-'):gsub('%-orig$', ''):match('^[a-z]+')
@@ -96,7 +135,15 @@ function M.monogram(lang_code, title)
             if #clean >= 2 then return clean:sub(1, 2):upper() end
         end
     end
-    -- Fallback to title substring lookup
+    -- Fallback: regex search on track title when lang is missing/und
+    if type(title) == 'string' and #title > 0 then
+        local lower = title:lower()
+        for _, item in ipairs(title_language_patterns) do
+            if lower:find(item.pattern, 1, true) then
+                return item.monogram
+            end
+        end
+    end
     return nil
 end
 ```
@@ -107,10 +154,11 @@ end
 
 - **Controls String**:
   ```ini
-  controls=menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,space,fullscreen
+  controls=menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen
   ```
   - All ad-hoc `gap` entries removed.
   - Symmetrical spacing between all buttons governed by `controls_spacing`.
+  - Dedicated `loop-file` button positioned right after `button:stable-volume`.
   - `space` anchors `fullscreen` cleanly to the right edge.
 - **Sizing Parameters**:
   - `controls_size=32`: Sharp vector rendering at 96 DPI (1080p 27").
@@ -119,45 +167,71 @@ end
 
 ---
 
-### 2.4 High-Performance Subtitle Fetching & Lifecycle (`ytdl-sub-menu.lua`)
+### 2.4 High-Performance Subtitle Fetching & Track Management (`ytdl-sub-menu.lua`)
 
-#### The Problem with Fresh `yt-dlp` Invocations
-Running `yt-dlp --skip-download ... <url>` initiates a full remote metadata extraction pass, incurring a 2–6 second delay and redundant HTTP handshakes. Conversely, passing YouTube `timedtext` URLs directly to mpv's `sub-add` fails with `HTTP 429 Too Many Requests` because mpv lacks YouTube's browser session headers and cookies.
+#### 1. Enforcing WebVTT Format (`fmt=vtt`)
+YouTube's caption API ignores HTTP `Accept` headers. If the URL query string lacks `fmt=vtt`, the server returns raw XML (`srv3`) or JSON (`json3`), breaking mpv's parser.
+Before downloading, normalize the URL:
+```lua
+local function ensure_vtt_url(raw_url)
+    local sub_url = raw_url:gsub('fmt=[%a%d]+', 'fmt=vtt')
+    if not sub_url:find('fmt=vtt') then
+        sub_url = sub_url .. (sub_url:find('%?') and '&' or '?') .. 'fmt=vtt'
+    end
+    return sub_url
+end
+```
 
-#### The Lightweight `curl` Fetch Strategy
-1. **Header & Session Extraction**:
-   - Extract `User-Agent`: `mp.get_property('file-local-options/user-agent')` or yt-dlp extracted user-agent.
-   - Extract headers: `mp.get_property_native('file-local-options/http-header-fields')` and headers from `user-data/mpv/ytdl/json-subprocess-result`.
-   - Extract cookies: pass session cookies or cookie files if present in `options/ytdl-raw-options`.
-2. **Lightweight Async HTTP GET**:
-   - Use Windows-native `curl.exe` (found at `C:\Windows\System32\curl.exe`):
-     ```pwsh
-     curl.exe -s -L --compressed --max-time 15 -H "User-Agent: <ua>" -H "Accept: text/vtt,*/*" "<timedtext_url>" -o "<temp_sub_file>"
-     ```
-   - Performance: ~150–300ms total execution time (over 10× faster than a full yt-dlp pass).
-   - Direct to disk: Downloads directly to a designated temporary `.vtt` file.
-3. **Temp File Lifecycle & Cleanup**:
-   - File naming: `%TEMP%/mpv_sub_<pid>_<epoch>.vtt`.
-   - Single active tracker: `local current_temp_file = nil`.
-   - On language switch: Unlink/delete previous temp file before or immediately after loading new track.
-   - On exit: Register `end-file` and `shutdown` events in mpv to delete any lingering temp files:
-     ```lua
-     local function cleanup_temp_file()
-         if current_temp_file and utils.file_info(current_temp_file) then
-             os.remove(current_temp_file)
-             current_temp_file = nil
-         end
-     end
-     mp.register_event('end-file', cleanup_temp_file)
-     mp.register_event('shutdown', cleanup_temp_file)
-     ```
-4. **Concurrency & Race Condition Guard**:
-   - If user clicks multiple subtitle tracks rapidly:
-     - Previous async command is immediately aborted via `mp.abort_async_command(job.id)`.
-     - `epoch` is incremented.
-     - Outdated responses are discarded, preventing stale subtitle files from loading.
+#### 2. Robust Windows Subprocess Execution (`curl.exe`)
+To eliminate shell quoting, escape bugs, and code injection vulnerabilities on Windows, invoke `C:\Windows\System32\curl.exe` directly via `mp.command_native_async` using a structured argument array:
+```lua
+local function fetch_subtitle_async(sub_url, temp_path, callback)
+    local user_agent = mp.get_property('file-local-options/user-agent') or 'Mozilla/5.0'
+    local args = {
+        'C:\\Windows\\System32\\curl.exe',
+        '-s', '-L', '--compressed',
+        '--max-time', '15',
+        '-H', 'User-Agent: ' .. user_agent,
+    }
+    local headers = mp.get_property_native('file-local-options/http-header-fields')
+    if type(headers) == 'table' then
+        for _, h in ipairs(headers) do
+            if type(h) == 'string' and not h:lower():match('^user%-agent:') then
+                args[#args + 1], args[#args + 2] = '-H', h
+            end
+        end
+    end
+    args[#args + 1] = ensure_vtt_url(sub_url)
+    args[#args + 2], args[#args + 3] = '-o', temp_path
 
-#### Subtitle Filtering: Arabic & English with "More languages..." Fallback
+    mp.command_native_async({
+        name = 'subprocess',
+        playback_only = true,
+        capture_stdout = false,
+        capture_stderr = true,
+        args = args,
+    }, callback)
+end
+```
+- Total fetch latency: ~150–300ms (over 10× faster than a full yt-dlp pass).
+- Zero HTTP 429 rate-limiting errors.
+
+#### 3. External Subtitle Track Cleanup (`sub-remove`)
+When switching subtitles, mpv accumulates previous external tracks in memory unless explicitly removed.
+- Track the active external subtitle ID: `local last_external_sub_id = nil`.
+- After `sub-add <path> select` completes successfully:
+  1. Scan `track-list` for the newly added track ID.
+  2. If `last_external_sub_id` is set and differs from the new ID, call `mp.commandv('sub-remove', tostring(last_external_sub_id))`.
+  3. Update `last_external_sub_id = new_track_id`.
+- Reset `last_external_sub_id = nil` on `start-file` and `end-file`.
+
+#### 4. Temp File Lifecycle & Concurrency Guard
+- Temp file naming: `%TEMP%/mpv_sub_<pid>_<epoch>.vtt`.
+- When user switches languages: previous temp file is immediately unlinked.
+- On file termination: `end-file` and `shutdown` handlers ensure all session temp files are removed.
+- Concurrency guard: Clicking a new language while an async curl process is in flight aborts the running process via `mp.abort_async_command(job.id)` and advances `epoch` to discard stale downloads.
+
+#### 5. Subtitle Filtering: Arabic & English with "More languages..." Fallback
 - In `stream_policy.captions()`:
   - **Creator Subtitles (`manual`)**: Always retained in full.
   - **Auto-Generated & Auto-Translated (`automatic`, `translated`)**:
@@ -170,7 +244,7 @@ Running `yt-dlp --skip-download ... <url>` initiates a full remote metadata extr
 ## 3. Migration & Upgrader Integration (`tools/apply_youtube_gui.py`)
 
 - **Configuration Sync**:
-  - `NEW_CONTROLS`: `menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,space,fullscreen`
+  - `NEW_CONTROLS`: `menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen`
   - `DEFAULTS`: `controls_size=32`, `controls_spacing=10`.
   - `REQUIRED_SCRIPTS`: Copies updated `player-toolbar.lua`, `ytdl-sub-menu.lua`, `stream_policy.lua` into `%APPDATA%\mpv\scripts\`.
   - Upgrader validates existing `uosc.conf`, creates timestamped atomic backup, and updates cleanly.
@@ -183,13 +257,18 @@ Running `yt-dlp --skip-download ... <url>` initiates a full remote metadata extr
 1. **Lua Unit Tests** (`python tests/run_lua_tests.py`):
    - `test_stream_policy.lua`:
      - Test 3-letter to 2-letter ISO normalization (`ara` $\to$ `AR`, `eng` $\to$ `EN`, `jpn` $\to$ `JA`).
+     - Test track `title` fallback parsing (`[ENG] Dual-Audio` $\to$ `EN`, `Arabic Dub` $\to$ `AR`).
      - Test widescreen resolution check: 1920x800 returns `HD`, 3840x1600 returns `4K`, 640x360 returns `SD`.
      - Test auto-translated caption filtering: primary list has `ar` and `en`, remainder placed under `"More languages..."`.
    - `test_player_toolbar.lua`:
      - Test toolbar button publishing: audio monogram is max 2 chars, badge is nil.
      - Test stable volume uses `graphic_eq` icon.
+     - Test font sizing and optical offset scale dynamically with button height.
+   - `test_caption_menu.lua`:
+     - Test `ensure_vtt_url` enforces `fmt=vtt`.
+     - Test track removal (`sub-remove`) logic on successive language selections.
 2. **Python Unit Tests** (`python -m unittest discover -s tests -v`):
-   - `test_youtube_gui_upgrade.py`: Test migration to gap-free `controls` layout and `controls_spacing=10`.
+   - `test_youtube_gui_upgrade.py`: Test migration to gap-free `controls` layout with `loop-file` and `controls_spacing=10`.
    - `test_config.py` & `test_audit_patches.py`: Verify config assertions pass without regressions.
 
 ### Manual Live Verification
@@ -199,8 +278,10 @@ Running `yt-dlp --skip-download ... <url>` initiates a full remote metadata extr
    - Audio button displays sharp, centered `AR` or `EN` monogram (no corner badge).
    - Quality button displays sharp, centered `HD` or `4K` monogram (no corner badge).
    - Stable volume displays `graphic_eq` bars.
-   - Spacing between buttons is uniform (10px).
+   - Loop button displays `repeat_one` and highlights when clicked.
+   - Spacing between all buttons is uniform (10px).
 4. Verify subtitle menu:
    - Subtitle list shows clean Arabic and English options, plus `"More languages..."`.
-   - Selecting Arabic or English downloads in <300ms without 429 error.
-   - Closing video deletes temp file from `%TEMP%`.
+   - Selecting Arabic or English downloads in <300ms without 429 error, and creates valid WebVTT tracks.
+   - Toggling between Arabic and English removes the prior external track from `track-list`.
+   - Closing video deletes all temp files from `%TEMP%`.
