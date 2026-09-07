@@ -15,6 +15,8 @@ local o = {
     all_formats = true,
     force_all_formats = true,
     thumbnails = "none",
+    best_audio_per_language = true,
+    youtube_subs_on_demand = true,
     ytdl_path = "",
 }
 
@@ -29,6 +31,18 @@ options.read_options(o, nil, function()
     ytdl.blacklisted = {} -- reparse o.exclude next time
     ytdl.searched = false
 end)
+
+-- Optional pure helper. Partial/manual installs keep normal playback working.
+local stream_policy
+local policy_path = mp.find_config_file("scripts/modules/stream_policy.lua")
+if policy_path then
+    local ok, policy = pcall(dofile, policy_path)
+    if ok and type(policy) == "table" then
+        stream_policy = policy
+    else
+        msg.warn("Stream policy unavailable; keeping all upstream formats")
+    end
+end
 
 local chapter_list = {}
 local metadata = {}
@@ -474,13 +488,19 @@ local function formats_to_edl(json, formats, use_all_formats)
         muxed_needed = false,
     }
 
+    local audio_defaults = {}
+    if use_all_formats and o.best_audio_per_language and stream_policy
+       and not option_was_set("ytdl-format")
+       and not tonumber(mp.get_property("aid", "auto")) then
+        formats, audio_defaults = stream_policy.best_audio_formats(json, formats)
+    end
     local default_formats = {}
     local requested_formats = json["requested_formats"] or json["requested_downloads"]
     if use_all_formats and requested_formats then
         for _, track in ipairs(requested_formats) do
             local id = track["format_id"]
             if id then
-                default_formats[id] = true
+                default_formats[audio_defaults[id] or id] = true
             end
         end
     end
@@ -912,7 +932,10 @@ local function run_ytdl_hook(url)
     end
 
     local format = mp.get_property("options/ytdl-format")
-    local raw_options = mp.get_property_native("options/ytdl-raw-options")
+    local raw_options = mp.get_property_native("options/ytdl-raw-options") or {}
+    local lazy_subs = o.youtube_subs_on_demand and stream_policy
+        and stream_policy.lazy_subtitles(url, raw_options)
+        and not tonumber(mp.get_property("sid", "auto"))
     local allsubs = true
     local proxy = nil
     local use_playlist = false
@@ -948,11 +971,15 @@ local function run_ytdl_hook(url)
         end
     end
 
-    if allsubs == true then
-        table.insert(command, "--sub-langs")
-        table.insert(command, "all")
+    -- -J already contains caption metadata. Leave captions off the startup
+    -- path unless the viewer explicitly requested them in raw options.
+    if not lazy_subs then
+        if allsubs == true then
+            table.insert(command, "--sub-langs")
+            table.insert(command, "all")
+        end
+        table.insert(command, "--write-srt")
     end
-    table.insert(command, "--write-srt")
 
     if not use_playlist then
         table.insert(command, "--no-playlist")
@@ -1035,6 +1062,9 @@ local function run_ytdl_hook(url)
         return
     end
 
+    mp.set_property("user-data/mpv/ytdl/source-url", url)
+    mp.set_property_bool("user-data/mpv/ytdl/is-youtube",
+        stream_policy ~= nil and stream_policy.youtube_url(url) ~= nil)
     mp.set_property_native("user-data/mpv/ytdl/json-subprocess-result", result)
 
     local json = result.stdout
@@ -1265,4 +1295,6 @@ end)
 
 mp.add_hook("on_after_end_file", 50, function ()
     mp.del_property("user-data/mpv/ytdl/json-subprocess-result")
+    mp.del_property("user-data/mpv/ytdl/source-url")
+    mp.del_property("user-data/mpv/ytdl/is-youtube")
 end)
