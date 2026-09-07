@@ -40,11 +40,14 @@ local function publish(filters, force)
     local _, active = inspect(filters)
     if not force and last_active == active then return end
     last_active = active
-    mp.commandv('script-message-to', 'uosc', 'set-button', 'stable-volume', utils.format_json({
-        icon = 'compress', active = active, badge = active and 'ON' or '',
+    local data = utils.format_json({
+        icon = 'compress', active = active, badge = active and 'ON' or nil,
         tooltip = 'Stable volume: ' .. (active and 'On' or 'Off'),
         command = {'script-message-to', script, 'toggle-stable-volume'},
-    }))
+    })
+    -- Capture only the JSON value, not a codec's secondary status/error return.
+    -- uosc may not exist yet; its startup broadcast republishes the button.
+    if data then pcall(mp.commandv, 'script-message-to', 'uosc', 'set-button', 'stable-volume', data) end
 end
 local function toggle()
     local filters = mp.get_property_native('af', {})

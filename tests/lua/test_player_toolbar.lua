@@ -7,8 +7,8 @@ local normalizer = 'dynaudnorm=f=500:g=15:p=0.95:m=10'
 local limiter = 'alimiter=limit=0.9:level=false'
 local graph = normalizer..','..limiter
 local function filter(g,l,enabled) return {name='lavfi',label=l,enabled=enabled,params={graph=g}} end
-local function harness(filters)
-    local h={filters=filters or {},messages={},writes=0,sends=0}
+local function harness(filters, no_ui)
+    local h={filters=filters or {},messages={},writes=0,sends=0,ui_ready=not no_ui}
     mp={get_script_name=function() return 'player_toolbar' end,
         get_property_native=function(k,d) eq(k,'af'); return h.filters end,
         set_property_native=function(k,value)
@@ -22,12 +22,14 @@ local function harness(filters)
         add_periodic_timer=function() error('Toolbar must not poll') end,
         add_timeout=function() error('Toolbar must not start a timer') end,
         commandv=function(...)
+            h.arg_count=select('#',...);eq(h.arg_count,5)
+            if not h.ui_ready then error('uosc has not started yet') end
             local c={...};eq(c[1],'script-message-to');eq(c[2],'uosc');eq(c[3],'set-button');eq(c[4],'stable-volume')
             h.button=c[5];h.sends=h.sends+1
         end,
         osd_message=function(text) h.osd=text end}
     package.loaded['mp.utils']=nil;package.loaded['mp.msg']=nil
-    package.preload['mp.utils']=function() return {format_json=function(value) return value end} end
+    package.preload['mp.utils']=function() return {format_json=function(value) return value,nil end} end
     package.preload['mp.msg']=function() return {warn=function() end} end
     dofile('scripts/player-toolbar.lua')
     function h:click()
@@ -38,7 +40,7 @@ local function harness(filters)
 end
 test('startup publishes a distinct inactive icon without changing audio',function()
     local h=harness();eq(h.writes,0);eq(h.button.icon,'compress');eq(h.button.active,false)
-    eq(h.button.badge,'');eq(h.button.tooltip,'Stable volume: Off')
+    eq(h.button.badge,nil);eq(h.button.tooltip,'Stable volume: Off')
 end)
 test('the icon command toggles audio without any physical key binding',function()
     local h=harness();h:click();eq(h.writes,1);eq(#h.filters,1);eq(h.filters[1].label,label)
@@ -88,5 +90,15 @@ test('partially disabled legacy preset is replaced without duplicate filters',fu
     local old={filter(normalizer,nil,false),filter(limiter)};local h=harness(old)
     eq(h.button.active,false);h:click();eq(#h.filters,1);eq(h.filters[1].params.graph,graph)
     eq(#old,2);eq(old[1].enabled,false)
+end)
+test('uosc can start later without aborting the toolbar script',function()
+    local h=harness({},true);eq(h.writes,0);eq(h.button,nil)
+    eq(type(h.messages['toggle-stable-volume']),'function')
+    h.ui_ready=true;h.messages['uosc-version']('5.13.0');eq(h.button.icon,'compress')
+    h:click();eq(h.button.active,true)
+end)
+test('JSON secondary returns never become extra command arguments',function()
+    local h=harness();eq(h.arg_count,5);h:click();eq(h.arg_count,5)
+    h:click();eq(h.arg_count,5);eq(h.button.badge,nil)
 end)
 print('Toolbar tests passed: '..total)
