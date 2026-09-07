@@ -21,13 +21,13 @@ local function harness(metadata)
         register_script_message=function(k,fn) h.messages[k]=fn end,
         add_key_binding=function(_,k,fn) h.messages['binding:'..k]=fn end,
         osd_message=function(text) h.osd=text end,
-        commandv=function(...) local c={...}; h.commands[#h.commands+1]=c; if c[3]=='open-menu' then h.menu=c[4] end end,
+        commandv=function(...) local c={...}; h.commands[#h.commands+1]=c; if c[3]=='open-menu' then eq(select('#',...),4); h.menu=c[4] end end,
         command_native_async=function(command,cb) local id=#h.jobs+1; h.jobs[id]={command=command,callback=cb}; return id end,
         abort_async_command=function(id) h.aborted[id]=true end,
         add_timeout=function(_,cb) local t={callback=cb,kill=function(self) self.killed=true end}; h.timers[#h.timers+1]=t; return t end}
     package.loaded['mp.utils']=nil; package.loaded['mp.msg']=nil; package.loaded['mp.options']=nil
     package.preload['mp.utils']=function() return {file_info=function() end,
-        format_json=function(v) return v end, parse_json=function(text) h.parses=h.parses+1; if text=='bad' then return nil end; return h.metadata end} end
+        format_json=function(v) return v,nil end, parse_json=function(text) h.parses=h.parses+1; if text=='bad' then return nil end; return h.metadata end} end
     package.preload['mp.msg']=function() return log end
     package.preload['mp.options']=function() return {read_options=function() end} end
     dofile('scripts/ytdl-sub-menu.lua')
@@ -118,5 +118,10 @@ test('shared downloader path is not JSON-quoted when spawning',function()
     h.props['user-data/mpv/ytdl/path']='/tmp/tools with spaces/yt-dlp'
     h.messages['fetch-sub']('ar')
     eq(h.jobs[1].command.args[1],'/tmp/tools with spaces/yt-dlp')
+end)
+test('the toolbar action opens captions with one JSON argument and no keypress',function()
+    local h=harness(); h:load(); h.messages['binding:open']()
+    eq(h.menu.type,'ytdl_sub_menu'); eq(#h.jobs,0)
+    for _,command in ipairs(h.commands) do assert(command[1]~='keypress') end
 end)
 print('Caption tests passed: '..count)

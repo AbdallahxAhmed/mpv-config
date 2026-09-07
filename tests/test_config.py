@@ -84,8 +84,10 @@ class TestConfig(unittest.TestCase):
         self.assertIn("controls", settings)
         controls_str = settings["controls"]
         controls_items = [item.strip() for item in controls_str.split(",")]
-        self.assertIn("subtitles", controls_items, "controls must contain dedicated subtitles button")
-        self.assertIn("audio", controls_items, "controls must contain dedicated audio button")
+        self.assertIn("command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", controls_items)
+        self.assertIn("command:headphones:script-binding uosc/audio?Audio tracks and dubs", controls_items)
+        self.assertEqual(controls_items[-2:], ["space", "fullscreen"])
+        self.assertNotIn("keypress", controls_str)
 
     def test_active_uosc_controls_has_subtitles_and_audio(self):
         if not self.active_uosc_conf or not os.path.isfile(self.active_uosc_conf):
@@ -94,8 +96,11 @@ class TestConfig(unittest.TestCase):
         self.assertIn("controls", settings)
         controls_str = settings["controls"]
         controls_items = [item.strip() for item in controls_str.split(",")]
-        self.assertIn("subtitles", controls_items)
-        self.assertIn("audio", controls_items)
+        # Existing installations may retain the old shorthand buttons until upgraded.
+        self.assertTrue("subtitles" in controls_items or
+                        "command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions" in controls_items)
+        self.assertTrue("audio" in controls_items or
+                        "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in controls_items)
 
     def test_ytdl_sub_menu_exists_and_syntax_valid(self):
         self.assertTrue(os.path.isfile(self.ytdl_sub_menu), "scripts/ytdl-sub-menu.lua does not exist")

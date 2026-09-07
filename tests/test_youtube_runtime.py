@@ -1,4 +1,4 @@
-"""Native mpv smoke checks. Only localhost VTT and a generated image are used.
+"""Native mpv smoke checks using localhost VTT, a generated image and silent WAV.
 No YouTube service, GPU, audio device, desktop GUI or user configuration is used.
 """
 import collections
@@ -13,9 +13,24 @@ import tempfile
 import threading
 import time
 import unittest
+import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 VTT = b'WEBVTT\n\n00:00:00.000 --> 00:00:19.000\nA test caption.\n'
+
+# This is a message receiver, not the real uosc renderer. It validates native
+# JSON transport and the exact command arrays invoked by menu/button clicks.
+UOSC_RECEIVER = """local utils = require 'mp.utils'
+mp.register_script_message('open-menu', function(json)
+    local menu = utils.parse_json(json)
+    mp.set_property_native('user-data/gui-test/menu', menu)
+end)
+mp.register_script_message('set-button', function(name, json)
+    local button = utils.parse_json(json)
+    mp.set_property_native('user-data/gui-test/button', button)
+end)
+mp.commandv('script-message', 'uosc-version', 'fixture')
+"""
 
 class CaptionPlayback(unittest.TestCase):
     def setUp(self):
@@ -33,6 +48,8 @@ class CaptionPlayback(unittest.TestCase):
         shutil.copyfile(ROOT / 'scripts/modules/stream_policy.lua', module)
         # --no-config would also disable find_config_file for this isolated directory.
         (config / 'mpv.conf').write_text('# Isolated native caption test\n')
+        receiver = self.root / 'uosc.lua'
+        receiver.write_text(UOSC_RECEIVER)
         self.image = self.root / 'clip.ppm'
         self.image.write_bytes(b'P6\n16 16\n255\n' + b'\0' * 768)
         self.hits = collections.Counter()
@@ -63,7 +80,9 @@ class CaptionPlayback(unittest.TestCase):
         ipc = self.root / 'ipc'
         self.process = subprocess.Popen([
             binary, '--config-dir=' + str(config), '--load-scripts=no',
-            '--script=' + str(ROOT / 'scripts/ytdl-sub-menu.lua'), '--ytdl=no',
+            '--script=' + str(receiver),
+            '--script=' + str(ROOT / 'scripts/ytdl-sub-menu.lua'),
+            '--script=' + str(ROOT / 'scripts/player-toolbar.lua'), '--ytdl=no',
             '--vo=null', '--ao=null', '--force-window=no', '--idle=yes', '--keep-open=yes',
             '--image-display-duration=20', '--input-ipc-server=' + str(ipc),
             '--log-file=' + str(self.root / 'mpv.log')],
@@ -87,7 +106,7 @@ class CaptionPlayback(unittest.TestCase):
         if path.exists():
             lines = path.read_text(errors='replace').splitlines()
             relevant = [line for line in lines if any(word in line for word in
-                        ('ytdl_sub_menu', 'ytdl-sub-menu', 'stream_policy', 'Lua error'))]
+                        ('ytdl_sub_menu', 'ytdl-sub-menu', 'stream_policy', 'player_toolbar', 'Lua error'))]
             print('MPV caption-script log:\n' + '\n'.join(relevant)[-12000:])
 
     def stop_player(self):
@@ -157,6 +176,55 @@ class CaptionPlayback(unittest.TestCase):
         time.sleep(2)
         self.assertEqual(self.subtitles(), [], 'Old captions leaked into the new file')
         self.assertEqual(self.hits['/slow.vtt'], 1)
+
+    def test_mouse_caption_menu(self):
+        self.prepare_captions('/caption.vtt')
+        self.command('script-binding', 'ytdl_sub_menu/open')
+        self.wait(lambda: isinstance(self.get('user-data/gui-test/menu'), dict))
+        menu = self.get('user-data/gui-test/menu')
+        self.assertEqual(menu['type'], 'ytdl_sub_menu')
+        self.assertEqual(sum(self.hits.values()), 0)
+        generated = next(item for item in menu['items'] if item['title'] == 'Auto-generated')
+        self.command(*generated['items'][0]['value'])
+        self.wait(lambda: any(t.get('selected') for t in self.subtitles())
+                  and self.get('sub-visibility') is True)
+        self.assertEqual(self.hits['/caption.vtt'], 1)
+        self.command(*menu['items'][0]['value'])
+        self.wait(lambda: not any(t.get('selected') for t in self.subtitles()))
+        self.assertEqual(self.get('path'), str(self.image))
+
+    def test_stable_volume_preserves_filters(self):
+        audio = self.root / 'audio.wav'
+        with wave.open(str(audio), 'wb') as out:
+            out.setnchannels(2)
+            out.setsampwidth(2)
+            out.setframerate(48000)
+            out.writeframes(b'\0' * (48000 * 4 * 30))
+        self.command('loadfile', str(audio))
+        self.wait(lambda: self.get('audio-params') is not None)
+        custom = {'name': 'lavfi', 'label': 'user_filter', 'params': {'graph': 'volume=0.5'}}
+        self.command('set_property', 'af', [custom])
+        before = self.get('af')
+        label = 'mpv_config_stable_volume'
+        self.wait(lambda: isinstance(self.get('user-data/gui-test/button'), dict))
+        self.assertEqual(self.get('user-data/gui-test/button')['icon'], 'compress')
+        self.command(*self.get('user-data/gui-test/button')['command'])
+        self.wait(lambda: any(f.get('label') == label for f in self.get('af') or []))
+        self.assertEqual([f for f in self.get('af') if f.get('label') != label], before)
+        self.wait(lambda: self.get('user-data/gui-test/button').get('active') is True)
+        self.assertEqual(self.get('user-data/gui-test/button')['badge'], 'ON')
+        self.command(*self.get('user-data/gui-test/button')['command'])
+        self.wait(lambda: self.get('af') == before)
+        self.wait(lambda: self.get('user-data/gui-test/button').get('active') is False)
+        self.assertNotIn('badge', self.get('user-data/gui-test/button'))
+        legacy = before + [
+            {'name': 'lavfi', 'params': {'graph': 'dynaudnorm=f=500:g=15:p=0.95:m=10'}},
+            {'name': 'lavfi', 'params': {'graph': 'alimiter=limit=0.9:level=false'}},
+        ]
+        self.command('set_property', 'af', legacy)
+        self.command(*self.get('user-data/gui-test/button')['command'])
+        self.wait(lambda: self.get('af') == before)
+        self.assertEqual(self.get('path'), str(audio))
 
 if __name__ == '__main__':
     unittest.main()

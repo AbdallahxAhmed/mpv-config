@@ -19,6 +19,10 @@ class GuiUpgrade(unittest.TestCase):
         self.raw = ('# Personal note\ncontrols=' + gui.OLD_CONTROLS + '\ncontrols_size=32\n'
                     'controls_spacing=2\nlanguages=slang,en\nrefine=\n').encode()
         self.path.write_bytes(self.raw)
+        for name in gui.REQUIRED_SCRIPTS:
+            script = self.root / name
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text('-- Presence fixture; never executed by the updater.\n')
 
     def test_preview_has_no_writes(self):
         changes, backup = gui.upgrade(self.root)
@@ -89,6 +93,34 @@ class GuiUpgrade(unittest.TestCase):
         text = (ROOT / 'config/script-opts/uosc.conf').read_text(encoding='utf-8')
         controls = [line.partition('=')[2] for line in text.splitlines() if line.startswith('controls=')]
         self.assertEqual(controls, [gui.NEW_CONTROLS])
+
+    def test_previous_youtube_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.PREVIOUS_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
+    def test_missing_scripts_block_apply_without_writes(self):
+        (self.root / 'scripts/player-toolbar.lua').unlink()
+        before = set(self.path.parent.iterdir())
+        self.assertIn('controls', gui.upgrade(self.root)[0])
+        with self.assertRaisesRegex(ValueError, 'Update GUI scripts'):
+            gui.upgrade(self.root, apply=True)
+        self.assertEqual(self.path.read_bytes(), self.raw)
+        self.assertEqual(set(self.path.parent.iterdir()), before)
+
+    def test_toolbar_is_mouse_first_and_fullscreen_is_rightmost(self):
+        items = gui.NEW_CONTROLS.split(',')
+        self.assertEqual(items[-2:], ['space', 'fullscreen'])
+        self.assertEqual(items.count('space'), 1)
+        self.assertEqual(items.count('fullscreen'), 1)
+        self.assertIn('command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions', items)
+        self.assertIn('command:headphones:script-binding uosc/audio?Audio tracks and dubs', items)
+        self.assertIn('button:stable-volume', items)
+        self.assertNotIn('keypress', gui.NEW_CONTROLS)
+        self.assertNotIn('#audio', gui.NEW_CONTROLS)
 
 if __name__ == '__main__':
     unittest.main()

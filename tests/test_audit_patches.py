@@ -333,10 +333,16 @@ class TestAuditPatches(unittest.TestCase):
         with open(uosc_conf, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn(
-            "controls=menu,gap,subtitles,audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen",
-            content,
-        )
+        controls = [line.split("=", 1)[1] for line in content.splitlines()
+                    if line.startswith("controls=")]
+        self.assertEqual(len(controls), 1)
+        items = controls[0].split(",")
+        self.assertEqual(items[0], "menu")
+        self.assertEqual(items[-2:], ["space", "fullscreen"])
+        self.assertIn("command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", items)
+        self.assertIn("command:headphones:script-binding uosc/audio?Audio tracks and dubs", items)
+        self.assertIn("button:stable-volume", items)
+        self.assertNotIn("keypress", controls[0])
 
     def test_input_conf_arabic_twin_bindings(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -391,7 +397,8 @@ class TestAuditPatches(unittest.TestCase):
 
         with open(sp, "r", encoding="utf-8") as f:
             sp_content = f.read()
-        self.assertIn('mp.add_hook("on_load", 10', sp_content)
+        # URL normalization must run before the vendored extractor at priority 10.
+        self.assertIn('mp.add_hook("on_load", 5', sp_content)
         self.assertIn("watch%?v=", sp_content)
         self.assertIn("start_loading_indicator", sp_content)
 

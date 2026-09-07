@@ -2,20 +2,18 @@ local total=0
 local function eq(a,b) assert(a==b,tostring(a)..' ~= '..tostring(b)) end
 local function test(name,fn) fn(); total=total+1; print('ok paste: '..name) end
 local function harness(clip, existing)
-    local h={props={['clipboard/text']=clip},bindings={},events={},loads={}}
+    local h={props={['clipboard/text']=clip},bindings={},events={},loads={},osd_messages={}}
     local function get(k,d) local v=h.props[k]; if v==nil then return d end; return v end
     mp={msg={info=function() end,warn=function() end},get_time=function() return 0 end,
         get_property=get,get_property_native=get,get_property_bool=get,get_property_number=get,
         set_property=function(k,v) h.props[k]=v end,
         commandv=function(...) local c={...}; if c[1]=='loadfile' then h.loads[#h.loads+1]=c end end,
-        osd_message=function(text) h.osd=text end,
+        osd_message=function(text) h.osd=text; h.osd_messages[#h.osd_messages+1]=text end,
         add_hook=function(_,priority,fn) h.hook={priority=priority,fn=fn} end,
         register_event=function(k,fn) h.events[k]=fn end,
         add_key_binding=function(_,k,fn) h.bindings[k]=fn end,
-        add_periodic_timer=function(interval,fn)
-            local timer={interval=interval,callback=fn,kill=function(self) self.killed=true end}
-            h.timer=timer; return timer
-        end}
+        add_periodic_timer=function() error('Loading feedback must not poll') end,
+        add_timeout=function() error('Loading feedback must not use timers') end}
     package.loaded['mp.utils']=nil
     package.preload['mp.utils']=function() return {file_info=function(path)
         if existing and existing[path] then return {is_file=true} end
@@ -58,19 +56,19 @@ test('native clipboard string and table fallback work',function()
         eq(h.loads[1][2],'https://youtu.be/abc')
     end
 end)
-test('normalization precedes extractor and spinner is four Hz',function()
+test('normalization precedes extractor without a timer',function()
     local h=harness(nil); eq(h.hook.priority,5)
     h.props['stream-open-filename']='youtu.be/abc'; h.hook.fn()
-    eq(h.props['stream-open-filename'],'https://youtu.be/abc'); eq(h.timer.interval,0.25); eq(#h.loads,0)
+    eq(h.props['stream-open-filename'],'https://youtu.be/abc'); eq(h.timer,nil); eq(h.osd,'Opening link…'); eq(#h.loads,0)
 end)
 test('repeated paste is deduplicated until load completes',function()
     local h=harness('https://youtu.be/abc'); h.bindings['paste-to-open'](); h.bindings['paste-to-open']()
-    eq(#h.loads,1); h.events['file-loaded'](); assert(h.timer.killed)
+    eq(#h.loads,1); h.events['file-loaded'](); eq(h.osd,'')
     h.bindings['paste-to-open'](); eq(#h.loads,2)
 end)
-test('end-file kills spinner and local hook starts none',function()
+test('end-file clears feedback and local hook starts none',function()
     local h=harness('https://youtu.be/abc'); h.bindings['paste-to-open']()
-    h.events['end-file']({reason='error'}); assert(h.timer.killed); assert(h.osd:find('Failed',1,true))
+    h.events['end-file']({reason='error'}); eq(h.timer,nil); assert(h.osd:find("Couldn't open",1,true))
     h=harness(nil); h.props['stream-open-filename']='/media/local.mkv'; h.hook.fn(); eq(h.timer,nil)
 end)
 test('playlist paste appends without disturbing current playback',function()
@@ -78,5 +76,24 @@ test('playlist paste appends without disturbing current playback',function()
     h.bindings['paste-to-playlist'](); eq(h.loads[1][3],'append'); eq(h.timer,nil)
     h=harness('https://youtu.be/abc'); h.props['idle-active']=true
     h.bindings['paste-to-playlist'](); eq(h.loads[1][3],'replace')
+end)
+test('loading message has no counter, raw URL or duplicate updates',function()
+    local h=harness('https://youtu.be/abc?token=private'); h.bindings['paste-to-open']()
+    eq(h.osd,'Opening link…'); eq(#h.osd_messages,1)
+    h.bindings['paste-to-open'](); eq(#h.osd_messages,1); eq(#h.loads,1)
+    h.props['stream-open-filename']='https://youtu.be/abc?token=private'; h.hook.fn()
+    eq(#h.osd_messages,1)
+end)
+test('completion clears the message without a success-time toast',function()
+    local h=harness('https://youtu.be/abc'); h.bindings['paste-to-open']()
+    h.events['file-loaded'](); eq(h.osd,''); eq(#h.osd_messages,2)
+end)
+test('unrelated local file events do not clear other scripts messages',function()
+    local h=harness(nil); h.events['file-loaded'](); h.events['end-file']({reason='error'})
+    eq(#h.osd_messages,0)
+end)
+test('shutdown clears pending status and permits a new request',function()
+    local h=harness('https://youtu.be/abc'); h.bindings['paste-to-open']()
+    h.events.shutdown(); eq(h.osd,''); h.bindings['paste-to-open'](); eq(#h.loads,2)
 end)
 print('Paste tests passed: '..total)

@@ -7,7 +7,12 @@ import tempfile
 import uuid
 
 OLD_CONTROLS = 'menu,gap,subtitles,audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen'
-NEW_CONTROLS = OLD_CONTROLS + ',gap,command:content_paste:script-binding smart_paste/paste-to-open?Paste link (Ctrl+V),<user-data/mpv/ytdl/is-youtube>command:closed_caption:script-binding ytdl_sub_menu/open?YouTube captions (Ctrl+C)'
+PREVIOUS_CONTROLS = OLD_CONTROLS + ',gap,command:content_paste:script-binding smart_paste/paste-to-open?Paste link (Ctrl+V),<user-data/mpv/ytdl/is-youtube>command:closed_caption:script-binding ytdl_sub_menu/open?YouTube captions (Ctrl+C)'
+NEW_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>stream-quality?Video quality,gap,button:stable-volume,space,fullscreen'
+REQUIRED_SCRIPTS = (
+    "scripts/smart-paste.lua", "scripts/ytdl-sub-menu.lua", "scripts/ytdl_hook.lua",
+    "scripts/modules/stream_policy.lua", "scripts/player-toolbar.lua",
+)
 DEFAULTS = {'controls_size': ('32', '44'), 'controls_spacing': ('2', '4'),
             'controls_persistency': ('', 'idle'), 'menu_item_height': ('36', '44'),
             'menu_min_width': ('260', '300'), 'menu_padding': ('4', '6')}
@@ -25,12 +30,13 @@ def plan(raw):
         if len(settings.get(key, [])) > 1:
             raise ValueError('Ambiguous repeated setting: ' + key)
     controls = settings.get('controls', [])
-    if not controls or controls[0][1] not in (OLD_CONTROLS, NEW_CONTROLS):
-        raise ValueError('Custom or missing toolbar; merge the two new buttons manually instead')
+    if not controls or controls[0][1] not in (OLD_CONTROLS, PREVIOUS_CONTROLS, NEW_CONTROLS):
+        raise ValueError('Custom or missing toolbar; use the manual layout instructions instead')
     changes = []
     for key, (old, new) in {'controls': (OLD_CONTROLS, NEW_CONTROLS), **DEFAULTS}.items():
         current = settings.get(key, [])
-        if not current or current[0][1] != old:
+        accepted = (OLD_CONTROLS, PREVIOUS_CONTROLS) if key == "controls" else (old,)
+        if not current or current[0][1] not in accepted:
             continue
         i = current[0][0]
         line = lines[i]
@@ -53,6 +59,10 @@ def upgrade(config_dir, *, apply=False):
     updated, changes = plan(raw)
     if not changes or not apply:
         return changes, None
+    if 'controls' in changes:
+        missing = [name for name in REQUIRED_SCRIPTS if not (path.parent.parent / name).is_file()]
+        if missing:
+            raise ValueError('Update GUI scripts before applying this toolbar: ' + ', '.join(missing))
     mode = stat.S_IMODE(path.stat().st_mode)
     backup = path.with_name(path.name + '.pre-youtube-' + uuid.uuid4().hex + '.bak')
     fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
