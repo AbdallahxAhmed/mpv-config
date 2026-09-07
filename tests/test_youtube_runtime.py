@@ -1,4 +1,4 @@
-"""Native mpv smoke checks. Only localhost VTT and a generated image are used.
+"""Native mpv smoke checks using localhost VTT, a generated image and silent WAV.
 No YouTube service, GPU, audio device, desktop GUI or user configuration is used.
 """
 import collections
@@ -13,6 +13,7 @@ import tempfile
 import threading
 import time
 import unittest
+import wave
 
 ROOT = Path(__file__).resolve().parents[1]
 VTT = b'WEBVTT\n\n00:00:00.000 --> 00:00:19.000\nA test caption.\n'
@@ -63,7 +64,8 @@ class CaptionPlayback(unittest.TestCase):
         ipc = self.root / 'ipc'
         self.process = subprocess.Popen([
             binary, '--config-dir=' + str(config), '--load-scripts=no',
-            '--script=' + str(ROOT / 'scripts/ytdl-sub-menu.lua'), '--ytdl=no',
+            '--script=' + str(ROOT / 'scripts/ytdl-sub-menu.lua'),
+            '--script=' + str(ROOT / 'scripts/player-toolbar.lua'), '--ytdl=no',
             '--vo=null', '--ao=null', '--force-window=no', '--idle=yes', '--keep-open=yes',
             '--image-display-duration=20', '--input-ipc-server=' + str(ipc),
             '--log-file=' + str(self.root / 'mpv.log')],
@@ -87,7 +89,7 @@ class CaptionPlayback(unittest.TestCase):
         if path.exists():
             lines = path.read_text(errors='replace').splitlines()
             relevant = [line for line in lines if any(word in line for word in
-                        ('ytdl_sub_menu', 'ytdl-sub-menu', 'stream_policy', 'Lua error'))]
+                        ('ytdl_sub_menu', 'ytdl-sub-menu', 'stream_policy', 'player_toolbar', 'Lua error'))]
             print('MPV caption-script log:\n' + '\n'.join(relevant)[-12000:])
 
     def stop_player(self):
@@ -157,6 +159,33 @@ class CaptionPlayback(unittest.TestCase):
         time.sleep(2)
         self.assertEqual(self.subtitles(), [], 'Old captions leaked into the new file')
         self.assertEqual(self.hits['/slow.vtt'], 1)
+
+    def test_stable_volume_preserves_filters(self):
+        audio = self.root / 'audio.wav'
+        with wave.open(str(audio), 'wb') as out:
+            out.setnchannels(2)
+            out.setsampwidth(2)
+            out.setframerate(48000)
+            out.writeframes(b'\0' * (48000 * 4 * 30))
+        self.command('loadfile', str(audio))
+        self.wait(lambda: self.get('audio-params') is not None)
+        custom = {'name': 'lavfi', 'label': 'user_filter', 'params': {'graph': 'volume=0.5'}}
+        self.command('set_property', 'af', [custom])
+        before = self.get('af')
+        label = 'mpv_config_stable_volume'
+        self.command('script-message-to', 'player_toolbar', 'toggle-stable-volume')
+        self.wait(lambda: any(f.get('label') == label for f in self.get('af') or []))
+        self.assertEqual([f for f in self.get('af') if f.get('label') != label], before)
+        self.command('script-message-to', 'player_toolbar', 'toggle-stable-volume')
+        self.wait(lambda: self.get('af') == before)
+        legacy = before + [
+            {'name': 'lavfi', 'params': {'graph': 'dynaudnorm=f=500:g=15:p=0.95:m=10'}},
+            {'name': 'lavfi', 'params': {'graph': 'alimiter=limit=0.9:level=false'}},
+        ]
+        self.command('set_property', 'af', legacy)
+        self.command('script-message-to', 'player_toolbar', 'toggle-stable-volume')
+        self.wait(lambda: self.get('af') == before)
+        self.assertEqual(self.get('path'), str(audio))
 
 if __name__ == '__main__':
     unittest.main()

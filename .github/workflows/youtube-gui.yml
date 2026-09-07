@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [stream_policy, caption_menu, ytdl_hook, smart_paste]
+        suite: [stream_policy, caption_menu, ytdl_hook, smart_paste, player_toolbar]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install Lua
@@ -30,14 +30,18 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends luajit
       - name: Parse changed playback scripts
         run: >-
-          luajit -e 'assert(loadfile("scripts/smart-paste.lua")); assert(loadfile("scripts/ytdl-sub-menu.lua")); assert(loadfile("scripts/modules/stream_policy.lua")); assert(loadfile("scripts/ytdl_hook.lua"))'
+          luajit -e 'assert(loadfile("scripts/smart-paste.lua")); assert(loadfile("scripts/player-toolbar.lua")); assert(loadfile("scripts/ytdl-sub-menu.lua")); assert(loadfile("scripts/modules/stream_policy.lua")); assert(loadfile("scripts/ytdl_hook.lua"))'
   upgrade:
-    name: GUI upgrade safety
-    runs-on: ubuntu-latest
+    name: GUI upgrade safety (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - run: python3 -m unittest discover -s tests -p 'test_youtube_gui_upgrade.py' -v
+      - run: python -m unittest discover -s tests -p 'test_youtube_gui_upgrade.py' -v
   native:
     name: Native mpv (${{ matrix.case }})
     runs-on: ubuntu-latest
@@ -45,11 +49,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [load_and_reuse, cancel_on_file_change]
+        case: [load_and_reuse, cancel_on_file_change, stable_volume_preserves_filters]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
-      - name: Test real mpv with localhost captions
+      - name: Test real mpv with local fixtures
         env:
           CASE: ${{ matrix.case }}
           NATIVE_MPV_REQUIRED: '1'

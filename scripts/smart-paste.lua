@@ -3,7 +3,7 @@
 -- Local files are NEVER rewritten into network URLs, even when their own name or
 -- parent directory contains "shorts/", "youtube.com" or "watch?v=".
 -- Intercepts the on_load hook so drag-and-drop & host-relative URLs are normalized
--- Provides continuous OSD visual spinner feedback while yt-dlp resolves the stream
+-- Shows one quiet loading message; no ticking counter, spinner, polling or extra extraction
 
 local utils = require 'mp.utils'
 
@@ -101,55 +101,18 @@ local function get_clipboard_content()
     return nil
 end
 
-local loading_timer = nil
-local loading_start_time = nil
 local current_loading_url = nil
-local spinner_frames = {"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-local spinner_idx = 1
-
-local function start_loading_indicator(url)
-    if current_loading_url == url and loading_timer then
-        return
-    end
-
-    current_loading_url = url
-    loading_start_time = mp.get_time()
-
-    local short = url
-    if #short > 55 then
-        short = short:sub(1, 52) .. "..."
-    end
-
-    if loading_timer then
-        loading_timer:kill()
-        loading_timer = nil
-    end
-
-    spinner_idx = 1
-    local function update_osd()
-        local elapsed = mp.get_time() - (loading_start_time or mp.get_time())
-        local frame = spinner_frames[spinner_idx]
-        spinner_idx = (spinner_idx % #spinner_frames) + 1
-        mp.osd_message(string.format("%s Resolving stream [%.1fs]: %s", frame, elapsed, short), 1)
-    end
-
-    loading_timer = mp.add_periodic_timer(0.25, update_osd)
-    update_osd()
+local function is_network(url)
+    return url:find("^https?://") or url:find("^ytdl://")
 end
-
-local function stop_loading_indicator(show_done)
-    if loading_timer then
-        loading_timer:kill()
-        loading_timer = nil
-    end
-    if show_done and loading_start_time then
-        local elapsed = mp.get_time() - loading_start_time
-        mp.osd_message(string.format("Stream loaded (%.1fs)", elapsed), 2)
-    else
-        mp.osd_message("", 0)
-    end
+local function start_loading_indicator(url)
+    if current_loading_url == url then return end
+    current_loading_url = url
+    mp.osd_message(is_network(url) and "Opening link…" or "Opening file…", 60)
+end
+local function stop_loading_indicator()
+    if current_loading_url then mp.osd_message("", 0) end
     current_loading_url = nil
-    loading_start_time = nil
 end
 
 -- Normalize before the vendored ytdl hook (priority 10), not alongside it.
@@ -160,52 +123,51 @@ mp.add_hook("on_load", 5, function()
 
     local normalized = normalize_url(path)
     if normalized and normalized ~= path then
-        mp.msg.info("smart-paste: rewriting '" .. path .. "' -> '" .. normalized .. "'")
+        mp.msg.info("smart-paste: normalized media location")
         mp.set_property("stream-open-filename", normalized)
         path = normalized
     end
 
-    if path and (path:find("^https?://") or path:find("^ytdl://")) then
+    if is_network(path) then
         start_loading_indicator(path)
+    elseif current_loading_url ~= path then
+        stop_loading_indicator()
     end
 end)
 
 local function paste_to_open()
     local raw = get_clipboard_content()
     if not raw or trim(raw) == "" then
-        mp.osd_message("Clipboard is empty", 2)
+        mp.osd_message("Clipboard is empty. Copy a link first.", 3)
         mp.msg.warn("smart-paste: clipboard is empty")
         return
     end
 
     local url = normalize_url(raw)
     if not url or url == "" then
-        mp.osd_message("Clipboard contains no valid URL or path", 2)
-        mp.msg.warn("smart-paste: invalid clipboard content: " .. tostring(raw))
+        mp.osd_message("Clipboard has no link or file path.", 3)
+        mp.msg.warn("smart-paste: invalid clipboard content")
         return
     end
 
-    if current_loading_url == url and loading_timer then
-        local elapsed = mp.get_time() - (loading_start_time or mp.get_time())
-        mp.osd_message(string.format("Already loading stream [%.1fs]... please wait", elapsed), 2)
-        return
-    end
+    -- Repeated clicks/pastes do not restart the same pending request or its OSD.
+    if current_loading_url == url then return end
 
     start_loading_indicator(url)
-    mp.msg.info("smart-paste: loading " .. url)
+    mp.msg.info("smart-paste: opening clipboard media")
     mp.commandv("loadfile", url, "replace")
 end
 
 local function paste_to_playlist()
     local raw = get_clipboard_content()
     if not raw or trim(raw) == "" then
-        mp.osd_message("Clipboard is empty", 2)
+        mp.osd_message("Clipboard is empty. Copy a link first.", 3)
         return
     end
 
     local url = normalize_url(raw)
     if not url or url == "" then
-        mp.osd_message("Clipboard contains no valid URL or path", 2)
+        mp.osd_message("Clipboard has no link or file path.", 3)
         return
     end
 
@@ -213,27 +175,25 @@ local function paste_to_playlist()
     if is_idle then
         paste_to_open()
     else
-        local short = url
-        if #short > 50 then
-            short = short:sub(1, 47) .. "..."
-        end
-        mp.osd_message("Added to playlist: " .. short, 3)
-        mp.msg.info("smart-paste: appending to playlist " .. url)
+        mp.osd_message("Added to playlist.", 2)
+        mp.msg.info("smart-paste: appended clipboard media")
         mp.commandv("loadfile", url, "append")
     end
 end
 
-mp.register_event("file-loaded", function()
-    stop_loading_indicator(true)
-end)
-
+mp.register_event("file-loaded", stop_loading_indicator)
+mp.register_event("shutdown", stop_loading_indicator)
 mp.register_event("end-file", function(event)
-    stop_loading_indicator(false)
-    if event and event.reason == "error" then
-        mp.osd_message("Failed to open link (unavailable or invalid URL)", 4)
-        mp.msg.warn("smart-paste: failed to load stream")
+    local failed_url = current_loading_url
+    stop_loading_indicator()
+    if failed_url and event and event.reason == "error" then
+        mp.osd_message(is_network(failed_url)
+            and "Couldn't open this link. Check the URL or try again."
+            or "Couldn't open this file.", 4)
+        mp.msg.warn("smart-paste: media could not be opened")
     end
 end)
 
 mp.add_key_binding(nil, "paste-to-open", paste_to_open)
 mp.add_key_binding(nil, "paste-to-playlist", paste_to_playlist)
+
