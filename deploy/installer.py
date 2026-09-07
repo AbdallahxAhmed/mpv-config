@@ -1120,8 +1120,17 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
 
     ui.header("Syncing MPV Dependencies Suite")
     target = target_dir or _get_target_tools_dir(env)
-    os.makedirs(target, exist_ok=True)
     ui.info(f"Target directory: {target}")
+
+    if dry_run:
+        return [
+            {"name": "yt-dlp", "status": "skipped", "detail": "dry-run"},
+            {"name": "ffmpeg-full", "status": "skipped", "detail": "dry-run"},
+            {"name": "alass", "status": "skipped", "detail": "dry-run"},
+            {"name": "ffsubsync", "status": "skipped", "detail": "dry-run"},
+        ]
+
+    os.makedirs(target, exist_ok=True)
 
     if env.os == "windows":
         _add_to_path(target)
@@ -1285,4 +1294,3 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
 
     ui.success("MPV dependencies suite synchronization finished.")
     return results
-

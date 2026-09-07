@@ -365,6 +365,12 @@ PLATFORM_NATIVE_MPV_DEFAULTS = {
         "gpu_context": "",
         "vo": "gpu-next",
     },
+    "fedora": {
+        "gpu_api": "vulkan",
+        "hwdec": "auto-safe",
+        "gpu_context": "",
+        "vo": "gpu-next",
+    },
     "macos": {
         "gpu_api": "auto",
         "hwdec": "videotoolbox",
@@ -390,6 +396,13 @@ PLATFORM_REQUIRED_DEFAULTS = {
         "alass_path": "auto",
     },
     "ubuntu": {
+        "shader_sep": ":",
+        "config_dir": "~/.config/mpv",
+        "ffmpeg_path": "/usr/bin/ffmpeg",
+        "ffsubsync_path": "auto",
+        "alass_path": "auto",
+    },
+    "fedora": {
         "shader_sep": ":",
         "config_dir": "~/.config/mpv",
         "ffmpeg_path": "/usr/bin/ffmpeg",

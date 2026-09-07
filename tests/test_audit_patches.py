@@ -1,6 +1,8 @@
+import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from deploy.deployer import _patch_mpv_conf, ensure_mpv_conf_user
 from deploy.detector import Environment
@@ -452,6 +454,28 @@ class TestAuditPatches(unittest.TestCase):
                 mpv_cmds = [c for c in captured_cmds if "mpv" in c[0]]
                 self.assertTrue(any("--idle=no" in c for c in mpv_cmds))
 
+    def test_verifier_startup_check_disables_scripts(self):
+        """The startup probe must not execute the config's Lua scripts."""
+        from unittest.mock import patch
+        from deploy.verifier import verify
+        from deploy.detector import Environment
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        captured_cmds = []
+
+        def fake_run_check(cmd):
+            captured_cmds.append(cmd)
+            return True
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("deploy.verifier._run_check", side_effect=fake_run_check):
+                verify(tmpdir, env)
+
+        startup_cmds = [c for c in captured_cmds if any("--config-dir=" in a for a in c)]
+        self.assertTrue(startup_cmds, "expected an mpv startup probe command")
+        for cmd in startup_cmds:
+            self.assertIn("--load-scripts=no", cmd)
+
     def test_ensure_windows_shortcuts_enforces_userprofile_working_directory(self):
         from unittest.mock import patch, MagicMock
         from deploy.deployer import ensure_windows_shortcuts
@@ -459,15 +483,22 @@ class TestAuditPatches(unittest.TestCase):
 
         env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
         captured_powershell_cmds = []
+        captured_stdin = []
 
-        def fake_subprocess_run(cmd, capture_output=True, text=True, timeout=15):
+        # The hardened implementation passes a constant script and sends the
+        # variable data as JSON on stdin, so the fake must accept `input=` and
+        # report a successful exit status.
+        def fake_subprocess_run(cmd, input=None, capture_output=True, text=True, timeout=15):
             captured_powershell_cmds.append(cmd)
+            captured_stdin.append(input)
             mock_res = MagicMock()
+            mock_res.returncode = 0
             mock_res.stdout = "SHORTCUT_OK: C:\\dummy\\mpv.lnk\n"
             return mock_res
 
         with patch("subprocess.run", side_effect=fake_subprocess_run), \
-             patch("shutil.which", return_value=r"C:\Program Files\mpv\mpv.exe"):
+             patch("shutil.which", return_value=r"C:\Program Files\mpv\mpv.exe"), \
+             patch("os.path.isfile", return_value=True):
             updated = ensure_windows_shortcuts(env)
             self.assertEqual(len(updated), 1)
             self.assertIn("C:\\dummy\\mpv.lnk", updated)
@@ -481,6 +512,12 @@ class TestAuditPatches(unittest.TestCase):
             self.assertIn("$sc.WorkingDirectory = $userProfile", script_text)
             self.assertNotIn("$sc.WorkingDirectory = ''", script_text)
             self.assertNotIn("$sc.WorkingDirectory = 'C:\\Windows\\System32'", script_text)
+
+            # Command-injection guard: the executable path must travel as JSON
+            # data on stdin and must never be interpolated into the script text.
+            payload = json.loads(captured_stdin[0])
+            self.assertEqual(payload["exe"], r"C:\Program Files\mpv\mpv.exe")
+            self.assertNotIn(r"C:\Program Files\mpv\mpv.exe", script_text)
 
     def test_ensure_mpv_conf_user_strips_self_include(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -551,8 +588,35 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn('type(val) == "string"', content)
         self.assertIn('type(val) == "table"', content)
 
+    def test_sync_dependencies_dry_run_is_read_only(self):
+        from deploy.installer import sync_dependencies
+
+        env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+        with mock.patch("deploy.installer.os.makedirs") as m_makedirs, \
+                mock.patch("deploy.installer._add_to_path") as m_add_path:
+            results = sync_dependencies(env=env, dry_run=True)
+
+            self.assertTrue(all(r["status"] == "skipped" for r in results))
+            m_makedirs.assert_not_called()
+            m_add_path.assert_not_called()
+
+    def test_detect_maps_fedora_platform_key(self):
+        from deploy import detector
+
+        with mock.patch("deploy.detector._detect_os", return_value="linux"), \
+                mock.patch("deploy.detector._detect_distro", return_value="fedora"), \
+                mock.patch("deploy.detector._detect_display", return_value="wayland"), \
+                mock.patch("deploy.detector._detect_gpu", return_value="nvidia"), \
+                mock.patch("deploy.detector._detect_avx2", return_value=False), \
+                mock.patch("deploy.detector._detect_pkg_manager", return_value="dnf"), \
+                mock.patch("deploy.detector._detect_python", return_value=("python3", "pip3")), \
+                mock.patch("deploy.detector._which", return_value=True), \
+                mock.patch("deploy.detector._resolve_config_dir", return_value="/tmp/mpv"), \
+                mock.patch("deploy.detector._check_installed", return_value=False):
+            env = detector.detect()
+
+        self.assertEqual(env.platform_key, "fedora")
+
 
 if __name__ == "__main__":
     unittest.main()
-
-
