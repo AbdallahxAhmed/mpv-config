@@ -2,20 +2,26 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import stat
 import tempfile
 import uuid
 
 OLD_CONTROLS = 'menu,gap,subtitles,audio,<stream>stream-quality,command:graphic_eq:keypress F8?Stable Volume,gap,fullscreen'
 PREVIOUS_CONTROLS = OLD_CONTROLS + ',gap,command:content_paste:script-binding smart_paste/paste-to-open?Paste link (Ctrl+V),<user-data/mpv/ytdl/is-youtube>command:closed_caption:script-binding ytdl_sub_menu/open?YouTube captions (Ctrl+C)'
-NEW_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>stream-quality?Video quality,gap,button:stable-volume,space,fullscreen'
+ICON_FIRST_V1_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>stream-quality?Video quality,gap,button:stable-volume,space,fullscreen'
+ICON_FIRST_V2_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
+ICON_FIRST_V3_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
+ICON_FIRST_V4_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,gap,button:audio-tracks,gap,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
+NEW_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen'
+ACCEPTED_CONTROLS = (OLD_CONTROLS, PREVIOUS_CONTROLS, ICON_FIRST_V1_CONTROLS, ICON_FIRST_V2_CONTROLS, ICON_FIRST_V3_CONTROLS, ICON_FIRST_V4_CONTROLS)
 REQUIRED_SCRIPTS = (
     "scripts/smart-paste.lua", "scripts/ytdl-sub-menu.lua", "scripts/ytdl_hook.lua",
     "scripts/modules/stream_policy.lua", "scripts/player-toolbar.lua",
 )
-DEFAULTS = {'controls_size': ('32', '44'), 'controls_spacing': ('2', '4'),
-            'controls_persistency': ('', 'idle'), 'menu_item_height': ('36', '44'),
-            'menu_min_width': ('260', '300'), 'menu_padding': ('4', '6')}
+DEFAULTS = {'controls_size': (('44',), '32'), 'controls_spacing': (('2', '4', '8'), '10'),
+            'controls_persistency': (('',), 'idle'), 'menu_item_height': (('36',), '44'),
+            'menu_min_width': (('260',), '300'), 'menu_padding': (('4',), '6')}
 
 def plan(raw):
     lines = raw.decode('utf-8').splitlines(keepends=True)
@@ -30,13 +36,13 @@ def plan(raw):
         if len(settings.get(key, [])) > 1:
             raise ValueError('Ambiguous repeated setting: ' + key)
     controls = settings.get('controls', [])
-    if not controls or controls[0][1] not in (OLD_CONTROLS, PREVIOUS_CONTROLS, NEW_CONTROLS):
+    if not controls or controls[0][1] not in (*ACCEPTED_CONTROLS, NEW_CONTROLS):
         raise ValueError('Custom or missing toolbar; use the manual layout instructions instead')
     changes = []
     for key, (old, new) in {'controls': (OLD_CONTROLS, NEW_CONTROLS), **DEFAULTS}.items():
         current = settings.get(key, [])
-        accepted = (OLD_CONTROLS, PREVIOUS_CONTROLS) if key == "controls" else (old,)
-        if not current or current[0][1] not in accepted:
+        accepted = ACCEPTED_CONTROLS if key == "controls" else old if isinstance(old, tuple) else (old,)
+        if not current or current[0][1] not in accepted or current[0][1] == new:
             continue
         i = current[0][0]
         line = lines[i]
@@ -103,6 +109,20 @@ def main(argv=None):
     else:
         print('Preview only: ' + ', '.join(changes))
         print('No files changed. Close mpv and add --apply to install these changes.')
+
+    if args.apply:
+        cfg = Path(args.config_dir).expanduser().absolute()
+        repo_root = Path(__file__).resolve().parents[1]
+        synced = []
+        for script_rel in REQUIRED_SCRIPTS:
+            src = repo_root / script_rel
+            dst = cfg / script_rel
+            if src.is_file():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+                synced.append(str(script_rel))
+        if synced:
+            print('Synced scripts: ' + ', '.join(synced))
 
 if __name__ == '__main__':
     main()

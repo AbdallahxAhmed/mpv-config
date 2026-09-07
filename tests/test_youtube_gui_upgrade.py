@@ -102,6 +102,38 @@ class GuiUpgrade(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), raw)
         self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
 
+    def test_icon_first_v1_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.ICON_FIRST_V1_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
+    def test_icon_first_v2_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.ICON_FIRST_V2_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
+    def test_icon_first_v3_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.ICON_FIRST_V3_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
+    def test_icon_first_v4_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.ICON_FIRST_V4_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
     def test_missing_scripts_block_apply_without_writes(self):
         (self.root / 'scripts/player-toolbar.lua').unlink()
         before = set(self.path.parent.iterdir())
@@ -117,8 +149,10 @@ class GuiUpgrade(unittest.TestCase):
         self.assertEqual(items.count('space'), 1)
         self.assertEqual(items.count('fullscreen'), 1)
         self.assertIn('command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions', items)
-        self.assertIn('command:headphones:script-binding uosc/audio?Audio tracks and dubs', items)
+        self.assertIn('button:audio-tracks', items)
         self.assertIn('button:stable-volume', items)
+        self.assertIn('loop-file', items)
+        self.assertIn('<stream>button:stream-quality', items)
         self.assertNotIn('keypress', gui.NEW_CONTROLS)
         self.assertNotIn('#audio', gui.NEW_CONTROLS)
 

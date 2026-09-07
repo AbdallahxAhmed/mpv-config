@@ -35,11 +35,23 @@ local function cancel_job()
         if old.id then mp.abort_async_command(old.id) end
     end
 end
+local current_temp_file = nil
+local last_external_sub_id = nil
+
+local function cleanup_temp_file()
+    if current_temp_file and utils.file_info(current_temp_file) then
+        os.remove(current_temp_file)
+        current_temp_file = nil
+    end
+end
+
 local function reset()
     epoch, revision = epoch + 1, revision + 1
     ready, attempted = false, false
     captions, choices = nil, {}
     cancel_job()
+    cleanup_temp_file()
+    last_external_sub_id = nil
 end
 mp.register_event('start-file', reset)
 mp.register_event('end-file', reset)
@@ -97,10 +109,31 @@ local function select_loaded(id, generation)
     end
     mp.osd_message('That subtitle track is no longer available.', 3)
 end
+local function ensure_vtt_url(raw_url)
+    if type(raw_url) ~= 'string' then return raw_url end
+    local sub_url = raw_url:gsub('fmt=[%a%d]+', 'fmt=vtt')
+    if not sub_url:find('fmt=vtt') then
+        sub_url = sub_url .. (sub_url:find('%?') and '&' or '?') .. 'fmt=vtt'
+    end
+    return sub_url
+end
+
+local function get_temp_sub_path()
+    local temp_dir = (os.getenv('TEMP') or os.getenv('TMP') or 'C:/Windows/Temp'):gsub('\\', '/')
+    local pid = tostring(mp.get_property_native('pid') or 0)
+    return string.format('%s/mpv_sub_%s_%d.vtt', temp_dir, pid, os.time())
+end
+
+local function find_curl()
+    local sys_curl = 'C:\\Windows\\System32\\curl.exe'
+    if utils.file_info(sys_curl) then return sys_curl end
+    return 'curl'
+end
+
 select_caption = function(entry)
     if not current_url() or not entry or not policy.http_url(entry.url) then return end
     for _, track in ipairs(mp.get_property_native('track-list', {})) do
-        if track.type == 'sub' and track['external-filename'] == entry.url then
+        if track.type == 'sub' and (track['external-filename'] == entry.url or (current_temp_file and track['external-filename'] == current_temp_file)) then
             select_loaded(track.id, epoch)
             return
         end
@@ -108,14 +141,63 @@ select_caption = function(entry)
     if job and job.label == entry.url then return end
     local title = entry.name .. ' - ' .. kind_names[entry.kind]
     mp.osd_message('Loading ' .. title .. '...', 3)
-    start_async({'sub-add', entry.url, 'select', title, entry.lang}, entry.url, function(success)
-        if success then
-            mp.set_property_bool('sub-visibility', true)
-            mp.osd_message('Captions on: ' .. title, 3)
-        else
-            mp.osd_message('Could not load captions. Refresh the list and retry.', 4)
-            msg.warn('Caption load failed; URL may have expired or access was denied')
+
+    local target_url = ensure_vtt_url(entry.url)
+    local temp_path = get_temp_sub_path()
+
+    local user_agent = mp.get_property('file-local-options/user-agent') or 'Mozilla/5.0'
+    local args = {
+        find_curl(),
+        '-s', '-L', '--compressed',
+        '--max-time', '15',
+        '-H', 'User-Agent: ' .. user_agent,
+    }
+    local headers = mp.get_property_native('file-local-options/http-header-fields')
+    if type(headers) == 'table' then
+        for _, h in ipairs(headers) do
+            if type(h) == 'string' and not h:lower():match('^user%-agent:') then
+                args[#args + 1], args[#args + 2] = '-H', h
+            end
         end
+    end
+    args[#args + 1] = target_url
+    args[#args + 2], args[#args + 3] = '-o', temp_path
+
+    start_async({
+        name = 'subprocess',
+        playback_only = true,
+        capture_stdout = false,
+        capture_stderr = true,
+        args = args,
+    }, entry.url, function(success, result)
+        if not success or (type(result) == 'table' and result.status ~= 0) then
+            if utils.file_info(temp_path) then os.remove(temp_path) end
+            mp.osd_message('Could not load captions. Refresh the list and retry.', 4)
+            msg.warn('Caption download via curl failed')
+            return
+        end
+
+        local prev_temp = current_temp_file
+        current_temp_file = temp_path
+        if prev_temp and prev_temp ~= temp_path and utils.file_info(prev_temp) then
+            os.remove(prev_temp)
+        end
+
+        local sid_observer
+        sid_observer = function(name, new_sid)
+            if type(new_sid) == 'number' and new_sid ~= last_external_sub_id then
+                if last_external_sub_id then
+                    mp.commandv('sub-remove', tostring(last_external_sub_id))
+                end
+                last_external_sub_id = new_sid
+                mp.unobserve_property(sid_observer)
+            end
+        end
+        mp.observe_property('sid', 'native', sid_observer)
+
+        mp.commandv('sub-add', temp_path, 'select', title, entry.lang)
+        mp.set_property_bool('sub-visibility', true)
+        mp.osd_message('Captions on: ' .. title, 3)
     end)
 end
 local function find_ytdl()
@@ -176,17 +258,35 @@ open_menu = function()
     revision = revision + 1
     choices = {}
     local groups = {manual = {}, automatic = {}, translated = {}}
+    local more_translated = {}
     for i, entry in ipairs(cached_captions()) do
         local token = epoch .. ':' .. revision .. ':' .. i
         choices[token] = entry
-        local group = groups[entry.kind]
-        group[#group + 1] = {title = entry.name, icon = entry.kind == 'translated' and 'translate' or 'subtitles',
+        local item = {title = entry.name, icon = entry.kind == 'translated' and 'translate' or 'subtitles',
             hint = entry.lang:upper() .. ' - ' .. kind_names[entry.kind], value = message('select-caption', token)}
+        if entry.kind == 'translated' and entry.is_primary == false then
+            more_translated[#more_translated + 1] = item
+        else
+            local group = groups[entry.kind]
+            if group then group[#group + 1] = item end
+        end
     end
     for _, kind in ipairs({'manual', 'automatic', 'translated'}) do
-        if #groups[kind] > 0 then
-            items[#items + 1] = {title = kind_names[kind], hint = tostring(#groups[kind]),
-                icon = kind == 'translated' and 'translate' or 'subtitles', items = groups[kind]}
+        local group = groups[kind]
+        if group and #group > 0 then
+            local submenu_items = {}
+            for _, itm in ipairs(group) do submenu_items[#submenu_items + 1] = itm end
+            if kind == 'translated' and #more_translated > 0 then
+                submenu_items[#submenu_items + 1] = {
+                    title = 'More languages...', hint = tostring(#more_translated),
+                    icon = 'translate', items = more_translated,
+                }
+            end
+            items[#items + 1] = {title = kind_names[kind], hint = tostring(#group),
+                icon = kind == 'translated' and 'translate' or 'subtitles', items = submenu_items}
+        elseif kind == 'translated' and #more_translated > 0 then
+            items[#items + 1] = {title = kind_names[kind], hint = tostring(#more_translated),
+                icon = 'translate', items = more_translated}
         end
     end
     if not next(choices) then

@@ -85,7 +85,10 @@ class TestConfig(unittest.TestCase):
         controls_str = settings["controls"]
         controls_items = [item.strip() for item in controls_str.split(",")]
         self.assertIn("command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", controls_items)
-        self.assertIn("command:headphones:script-binding uosc/audio?Audio tracks and dubs", controls_items)
+        self.assertTrue(
+            "button:audio-tracks" in controls_items or
+            "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in controls_items
+        )
         self.assertEqual(controls_items[-2:], ["space", "fullscreen"])
         self.assertNotIn("keypress", controls_str)
 
@@ -100,7 +103,8 @@ class TestConfig(unittest.TestCase):
         self.assertTrue("subtitles" in controls_items or
                         "command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions" in controls_items)
         self.assertTrue("audio" in controls_items or
-                        "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in controls_items)
+                        "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in controls_items or
+                        "button:audio-tracks" in controls_items)
 
     def test_ytdl_sub_menu_exists_and_syntax_valid(self):
         self.assertTrue(os.path.isfile(self.ytdl_sub_menu), "scripts/ytdl-sub-menu.lua does not exist")

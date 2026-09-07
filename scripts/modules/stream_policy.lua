@@ -23,7 +23,73 @@ function M.youtube_url(value)
     end
     return nil
 end
-local aliases = {ara = 'ar', eng = 'en', jpn = 'ja', jap = 'ja'}
+local iso_3_to_2 = {
+    ara = 'AR', eng = 'EN', jpn = 'JA', jap = 'JA', spa = 'ES',
+    fra = 'FR', fre = 'FR', deu = 'DE', ger = 'DE',
+    ita = 'IT', por = 'PT', rus = 'RU', zho = 'ZH',
+    chi = 'ZH', kor = 'KO', hin = 'HI', tur = 'TR',
+    ind = 'ID', pol = 'PL', ukr = 'UK', nld = 'NL',
+    dut = 'NL', swe = 'SV', vie = 'VI', tha = 'TH',
+    fas = 'FA', per = 'FA', heb = 'HE', ell = 'EL',
+    gre = 'EL', ces = 'CS', cze = 'CS', ron = 'RO',
+    rum = 'RO', hun = 'HU', dan = 'DA', fin = 'FI',
+    nor = 'NO', slk = 'SK', slo = 'SK', msa = 'MS',
+    may = 'MS', ben = 'BN', urd = 'UR', tam = 'TA',
+    tel = 'TE', mar = 'MR',
+}
+local aliases = {}
+for k, v in pairs(iso_3_to_2) do
+    aliases[k] = v:lower()
+end
+
+local title_language_patterns = {
+    {pattern = 'ara', monogram = 'AR'},
+    {pattern = 'arabic', monogram = 'AR'},
+    {pattern = 'eng', monogram = 'EN'},
+    {pattern = 'english', monogram = 'EN'},
+    {pattern = 'jap', monogram = 'JA'},
+    {pattern = 'japanese', monogram = 'JA'},
+    {pattern = 'spa', monogram = 'ES'},
+    {pattern = 'spanish', monogram = 'ES'},
+    {pattern = 'fra', monogram = 'FR'},
+    {pattern = 'french', monogram = 'FR'},
+    {pattern = 'ger', monogram = 'DE'},
+    {pattern = 'deu', monogram = 'DE'},
+    {pattern = 'german', monogram = 'DE'},
+    {pattern = 'ita', monogram = 'IT'},
+    {pattern = 'italian', monogram = 'IT'},
+    {pattern = 'rus', monogram = 'RU'},
+    {pattern = 'russian', monogram = 'RU'},
+}
+
+function M.monogram(lang_code, title)
+    if type(lang_code) == 'string' and #lang_code > 0 then
+        local clean = lang_code:lower():gsub('_', '-'):gsub('%-orig$', ''):match('^[a-z]+')
+        if clean and clean ~= 'und' then
+            if iso_3_to_2[clean] then return iso_3_to_2[clean] end
+            if #clean >= 2 then return clean:sub(1, 2):upper() end
+        end
+    end
+    if type(title) == 'string' and #title > 0 then
+        local lower = title:lower()
+        for _, item in ipairs(title_language_patterns) do
+            if lower:find(item.pattern, 1, true) then
+                return item.monogram
+            end
+        end
+    end
+    return nil
+end
+
+function M.quality_monogram(w, h)
+    local width = tonumber(w) or 0
+    local height = tonumber(h) or 0
+    if width <= 0 and height <= 0 then return nil end
+    if width >= 3840 or height >= 2160 then return '4K' end
+    if width >= 1280 or height >= 720 then return 'HD' end
+    return 'SD'
+end
+
 function M.language(value)
     if type(value) ~= 'string' then return '' end
     local lang = value:lower():gsub('_', '-'):gsub('%-orig$', '')
@@ -45,26 +111,31 @@ function M.language_rank(lang, preferences)
     end
     return 10000
 end
--- Preserve roles, dialects, DRC and distinct named dubs; strip only known
--- rendition-quality words, not arbitrary text describing the actual audio.
+-- Preserve roles, dialects, DRC and distinct named dubs.
+-- Deduplicate multi-language variants and prune low-priority null-codec duplicates.
+local function audio_role(track)
+    local note = tostring(track.format_note or ''):lower()
+    if note:find('descriptive', 1, true) or note:find('desc', 1, true) then return 'descriptive' end
+    if note:find('commentary', 1, true) then return 'commentary' end
+    if note:find('drc', 1, true) then return 'drc' end
+    if note:find('dub', 1, true) then return 'dubbed' end
+    return 'main'
+end
 local function audio_group(track)
     local lang = M.language(track.language or track.lang)
     if lang == '' or lang == 'und' then return nil end
-    local note = tostring(track.format_note or ''):lower()
-    for _, quality in ipairs({'ultralow', 'low', 'medium', 'high', 'tiny'}) do
-        note = note:gsub('%f[%a]' .. quality .. '%f[%A]', '')
-    end
-    note = note:gsub('%s+', ' '):gsub('^[%s,]+', ''):gsub('[%s,]+$', '')
-    return table.concat({lang, tostring(track.audio_track_id or ''),
-        tostring(track.language_preference or ''), note}, '\0')
+    local role = audio_role(track)
+    return table.concat({lang, role}, '\0')
 end
 local function audio_only(track)
     return type(track) == 'table' and track.vcodec == 'none'
-        and type(track.acodec) == 'string' and track.acodec ~= 'none'
         and not track.has_drm and M.http_url(track.url) ~= nil
 end
 function M.audio_bitrate(track, duration)
     if not audio_only(track) then return nil end
+    if not track.acodec or track.acodec == 'none' then
+        return 0.1
+    end
     local rate = positive(track.abr) or positive(track.tbr)
     local size = positive(track.filesize) or positive(track.filesize_approx)
     if not rate and size and positive(duration) then rate = size * 8 / duration / 1000 end
@@ -86,6 +157,16 @@ function M.best_audio_formats(json, formats)
     end
     if not has_video then return formats, remap end
     local winners, groups = {}, {}
+    local real_audio = {}
+    for _, f in ipairs(formats) do
+        local lang = M.language(f.language or f.lang)
+        if lang ~= '' and lang ~= 'und' and f.vcodec == 'none' and f.acodec and f.acodec ~= 'none' then
+            local rate = M.audio_bitrate(f, json.duration)
+            if not real_audio[lang] or (rate and rate > (real_audio[lang].rate or 0)) then
+                real_audio[lang] = {track = f, rate = rate or 0}
+            end
+        end
+    end
     for i, f in ipairs(formats) do
         local rate = M.audio_bitrate(f, json.duration)
         local key = rate and audio_group(f)
@@ -99,9 +180,17 @@ function M.best_audio_formats(json, formats)
     end
     local filtered = {}
     for i, f in ipairs(formats) do
+        local lang = M.language(f.language or f.lang)
+        local is_null_dup = (not f.acodec or f.acodec == 'none') and real_audio[lang] ~= nil
         local best = groups[i] and winners[groups[i]]
-        if not best or best.index == i then filtered[#filtered + 1] = f end
-        if best and f.format_id and best.track.format_id then remap[f.format_id] = best.track.format_id end
+        if not is_null_dup and (not best or best.index == i) then
+            filtered[#filtered + 1] = f
+        end
+        if is_null_dup and real_audio[lang] and f.format_id and real_audio[lang].track.format_id then
+            remap[f.format_id] = real_audio[lang].track.format_id
+        elseif best and f.format_id and best.track.format_id then
+            remap[f.format_id] = best.track.format_id
+        end
     end
     return filtered, remap
 end
@@ -118,6 +207,7 @@ local subtitle_formats = {vtt = 1, srt = 2, ass = 3, ttml = 4}
 function M.captions(json, preferences)
     local result = {}
     if type(json) ~= 'table' then return result end
+    local seen_auto = {}
     for _, group in ipairs({'subtitles', 'automatic_captions'}) do
         for lang, entries in pairs(type(json[group]) == 'table' and json[group] or {}) do
             local best, score
@@ -132,9 +222,27 @@ function M.captions(json, preferences)
             if best then
                 local translated = group == 'automatic_captions' and best.url:find('[?&]tlang=') ~= nil
                 local kind = group == 'subtitles' and 'manual' or (translated and 'translated' or 'automatic')
-                result[#result + 1] = {url = best.url, lang = M.language(lang), key = lang,
-                    name = type(best.name) == 'string' and best.name or lang:upper(),
-                    kind = kind, ext = best.ext, rank = M.language_rank(lang, preferences)}
+                local norm_lang = M.language(lang)
+                local skip = false
+                if kind == 'automatic' then
+                    if seen_auto[norm_lang] then
+                        skip = true
+                    else
+                        seen_auto[norm_lang] = true
+                    end
+                end
+                if not skip then
+                    local name = type(best.name) == 'string' and best.name or lang:upper()
+                    if kind == 'automatic' then
+                        name = name:gsub('%s*%(Original%)', '')
+                    end
+                    local is_primary = (norm_lang == 'ar' or norm_lang == 'en'
+                        or norm_lang:match('^ar%-') ~= nil or norm_lang:match('^en%-') ~= nil)
+                    result[#result + 1] = {url = best.url, lang = norm_lang, key = lang,
+                        name = name,
+                        kind = kind, ext = best.ext, rank = M.language_rank(lang, preferences),
+                        is_primary = is_primary}
+                end
             end
         end
     end

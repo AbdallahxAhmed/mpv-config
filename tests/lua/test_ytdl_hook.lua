@@ -21,7 +21,7 @@ local function run(config)
     local function get(k,d) local v=h.props[k]; if v==nil then return d end; return v end
     local function set(k,v) h.props[k]=v end
     local log=setmetatable({}, {__index=function() return function() end end})
-    mp={get_property=get,get_property_native=get,get_property_bool=get,
+    mp={log=function() end,get_property=get,get_property_native=get,get_property_bool=get,
         set_property=set,set_property_native=set,set_property_bool=set,set_property_number=set,
         del_property=function(k) h.props[k]=nil end,
         find_config_file=function(name)
@@ -60,6 +60,7 @@ test('one extractor call, fewer audio streams, video and default language intact
     assert(not h.edl:find('https://media.example/en-low',1,true))
     assert(h.edl:find('w=1920,h=1080,fps=30',1,true))
     assert(h.props['file-local-options/aid']~='no')
+    assert(not h.edl:find('audio only',1,true))
     local _,defaults=h.edl:gsub('flags=default',''); eq(defaults,2)
     assert(#h.edl < #run({all_audio=true}).edl)
 end)

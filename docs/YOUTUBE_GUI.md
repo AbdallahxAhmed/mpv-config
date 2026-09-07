@@ -14,7 +14,7 @@ Menu · Paste  |  CC · Headphones · Quality  |  Stable Volume          Fullscr
 | Clipboard | Open the link or file path currently copied to the clipboard. |
 | CC | Open subtitles and captions. On YouTube, choose creator, auto-generated or auto-translated captions. For local media, use the normal subtitle menu. |
 | Headphones | Open audio tracks and choose the available dub/language. This does not toggle Stable Volume. |
-| Quality | Choose stream video quality; shown only for streams. Changing video quality may reload the stream, unlike caption selection. |
+| Quality | Dynamic resolution badge (e.g. 1080p, 720p, 4K). Click to open the actual available qualities for the current video with a selection indicator. |
 | Compress / inward arrows | Toggle Stable Volume. The active styling, **ON** badge and hover text reflect the actual preset state. No badge is shown while Off. |
 | Fullscreen | Enter or leave fullscreen, at the far-right edge of the toolbar. |
 
@@ -119,7 +119,7 @@ Restart mpv after applying. Confirm that headphones and the compress icon are di
 If you maintain a custom layout, back up `uosc.conf` and merge the following entries into its **single** `controls=` line. Replace the old subtitle/audio/Stable Volume entries rather than appending duplicates; move fullscreen to the end after `space`. A complete reference layout is:
 
 ```ini
-controls=menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>stream-quality?Video quality,gap,button:stable-volume,space,fullscreen
+controls=menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,gap,button:audio-tracks,gap,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen
 ```
 
 Retain your other custom controls and settings as needed. Do not paste a second `controls=` line. New installations receive this default automatically; existing installations require the explicit activation above.

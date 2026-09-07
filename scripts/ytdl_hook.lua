@@ -473,6 +473,49 @@ local function tags_to_edl(json)
     return "!global_tags," .. table.concat(tags, ",")
 end
 
+local clean_lang_names = {
+    ar = "Arabic", ja = "Japanese", en = "English", es = "Spanish",
+    fr = "French", de = "German", it = "Italian", pt = "Portuguese",
+    ru = "Russian", zh = "Chinese", ko = "Korean", hi = "Hindi",
+    tr = "Turkish", id = "Indonesian", pl = "Polish", uk = "Ukrainian",
+    nl = "Dutch", sv = "Swedish", vi = "Vietnamese", th = "Thai",
+    fa = "Persian", he = "Hebrew", el = "Greek", cs = "Czech",
+    ro = "Romanian", hu = "Hungarian", da = "Danish", fi = "Finnish",
+    no = "Norwegian", sk = "Slovak", ms = "Malay", bn = "Bengali",
+    ur = "Urdu", ta = "Tamil", te = "Telugu", mr = "Marathi",
+}
+local function clean_audio_title(track)
+    local raw_lang = track.language or track.lang
+    local lang_code = raw_lang and tostring(raw_lang):lower():gsub("_", "-"):gsub("%-orig$", "")
+    local base_code = lang_code and lang_code:match("^[a-z]+")
+    local lang_name = (base_code and clean_lang_names[base_code]) or (raw_lang and tostring(raw_lang):upper())
+
+    local note = tostring(track.format_note or ""):lower()
+    local role = nil
+    if note:find("descriptive", 1, true) or note:find("desc", 1, true) then
+        role = "Descriptive"
+    elseif note:find("commentary", 1, true) then
+        role = "Commentary"
+    elseif note:find("original", 1, true) then
+        role = "Original"
+    elseif note:find("dub", 1, true) then
+        role = "Dubbed"
+    end
+
+    if lang_name and role then
+        return lang_name .. " (" .. role .. ")"
+    elseif lang_name then
+        return lang_name
+    elseif track.format_note and #track.format_note > 0 then
+        local clean = track.format_note:gsub("%f[%a][Mm]edium%f[%A]", "")
+                                       :gsub("%f[%a][Ll]ow%f[%A]", "")
+                                       :gsub("%f[%a][Hh]igh%f[%A]", "")
+                                       :gsub("%s+", " "):gsub("^[%s,]+", ""):gsub("[%s,]+$", "")
+        if #clean > 0 then return clean end
+    end
+    return track.format or track.ext or "Audio"
+end
+
 -- Convert a format list from youtube-dl to an EDL URL, or plain URL.
 --  json: full json blob by youtube-dl
 --  formats: format list by youtube-dl
@@ -609,17 +652,8 @@ local function formats_to_edl(json, formats, use_all_formats)
                         title = title .. " "
                     end
                     title = title .. "muxed-" .. index
-                elseif sub.media_type == "audio" and (track.language or track.format_note) then
-                    local desc_parts = {}
-                    if track.format_note and #track.format_note > 0 then
-                        table.insert(desc_parts, track.format_note)
-                    end
-                    if track.language and #track.language > 0 and (not track.format_note or not track.format_note:lower():find(track.language:lower(), 1, true)) then
-                        table.insert(desc_parts, "[" .. track.language:upper() .. "]")
-                    end
-                    if #desc_parts > 0 then
-                        title = table.concat(desc_parts, " ") .. " (" .. (track.format or track.ext or "audio") .. ")"
-                    end
+                elseif sub.media_type == "audio" then
+                    title = clean_audio_title(track)
                 end
                 local flags = {}
                 if is_default then

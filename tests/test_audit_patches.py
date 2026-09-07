@@ -340,7 +340,10 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(items[0], "menu")
         self.assertEqual(items[-2:], ["space", "fullscreen"])
         self.assertIn("command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", items)
-        self.assertIn("command:headphones:script-binding uosc/audio?Audio tracks and dubs", items)
+        self.assertTrue(
+            "button:audio-tracks" in items or
+            "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in items
+        )
         self.assertIn("button:stable-volume", items)
         self.assertNotIn("keypress", controls[0])
 

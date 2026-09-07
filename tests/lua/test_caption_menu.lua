@@ -13,7 +13,7 @@ local function harness(metadata)
     h.metadata = metadata or data
     local function get(k, default) local v=h.props[k]; if v == nil then return default end; return v end
     local log = setmetatable({}, {__index=function() return function() end end})
-    mp = {msg=log, get_script_name=function() return 'ytdl_sub_menu' end,
+    mp = {log=function() end, msg=log, get_script_name=function() return 'ytdl_sub_menu' end,
         find_config_file=function(name) return name end, get_opt=function() end,
         get_property=get, get_property_native=get, get_property_bool=get,
         set_property=function(k,v) h.props[k]=v end, set_property_bool=function(k,v) h.props[k]=v end,
@@ -23,6 +23,8 @@ local function harness(metadata)
         osd_message=function(text) h.osd=text end,
         commandv=function(...) local c={...}; h.commands[#h.commands+1]=c; if c[3]=='open-menu' then eq(select('#',...),4); h.menu=c[4] end end,
         command_native_async=function(command,cb) local id=#h.jobs+1; h.jobs[id]={command=command,callback=cb}; return id end,
+        observe_property=function(name,type,fn) h.observers=h.observers or {}; h.observers[name]=fn end,
+        unobserve_property=function(fn) end,
         abort_async_command=function(id) h.aborted[id]=true end,
         add_timeout=function(_,cb) local t={callback=cb,kill=function(self) self.killed=true end}; h.timers[#h.timers+1]=t; return t end}
     package.loaded['mp.utils']=nil; package.loaded['mp.msg']=nil; package.loaded['mp.options']=nil
@@ -53,12 +55,19 @@ test('separate creator generated and translated menus',function()
     assert(h:caption('Creator captions')); assert(h:caption('Auto-generated')); assert(h:caption('Auto-translated'))
     eq(#h.jobs,0)
 end)
-test('one cancellable async sub-add, no extractor and no reload',function()
+test('one cancellable async curl fetch and sub-add, no extractor and no reload',function()
     local h=harness(); h:load(); local item=h:caption('Auto-generated'); h:activate(item)
     eq(#h.jobs,1); local c=h.jobs[1].command
-    eq(c[1],'sub-add'); eq(c[2],'https://captions.example/ar.vtt'); eq(c[3],'select'); eq(c[5],'ar')
+    eq(c.name,'subprocess')
+    assert(c.args[1]:find('curl'))
+    assert(c.args[#c.args]:find('%.vtt$'))
     h:activate(item); eq(#h.jobs,1)
-    h.jobs[1].callback(true,{}); eq(h.props['sub-visibility'],true); assert(h.timers[1].killed)
+    h.jobs[1].callback(true,{status=0}); eq(h.props['sub-visibility'],true); assert(h.timers[1].killed)
+    local sub_add_cmd = h.commands[#h.commands]
+    eq(sub_add_cmd[1],'sub-add')
+    assert(sub_add_cmd[2]:find('%.vtt$'))
+    eq(sub_add_cmd[3],'select')
+    eq(sub_add_cmd[5],'ar')
     for _,v in ipairs(h.commands) do assert(v[1]~='loadfile' and v[1]~='run') end
 end)
 test('re-selecting a loaded caption does not download it again',function()
@@ -111,7 +120,8 @@ test('shared source URL is read as a native node value',function()
     local h=harness(); h:load(); h:quote_user_data_strings()
     h.props.path='/media/local-fixture.ppm'
     h.props['user-data/mpv/ytdl/source-url']='https://youtu.be/fixture'
-    h.messages['fetch-sub']('ar'); eq(#h.jobs,1); eq(h.jobs[1].command[1],'sub-add')
+    h.messages['fetch-sub']('ar'); eq(#h.jobs,1); eq(h.jobs[1].command.name,'subprocess')
+    assert(h.jobs[1].command.args[1]:find('curl'))
 end)
 test('shared downloader path is not JSON-quoted when spawning',function()
     local h=harness({}); h:load(); h:quote_user_data_strings()
@@ -123,5 +133,18 @@ test('the toolbar action opens captions with one JSON argument and no keypress',
     local h=harness(); h:load(); h.messages['binding:open']()
     eq(h.menu.type,'ytdl_sub_menu'); eq(#h.jobs,0)
     for _,command in ipairs(h.commands) do assert(command[1]~='keypress') end
+end)
+test('changing external subtitle removes prior external track from memory',function()
+    local h=harness(); h:load(); local item=h:caption('Auto-generated'); h:activate(item)
+    h.jobs[1].callback(true,{status=0})
+    if h.observers and h.observers['sid'] then h.observers['sid']('sid', 3) end
+    local item2=h:caption('Auto-translated'); h:activate(item2)
+    h.jobs[2].callback(true,{status=0})
+    if h.observers and h.observers['sid'] then h.observers['sid']('sid', 4) end
+    local found_remove = false
+    for _, c in ipairs(h.commands) do
+        if c[1] == 'sub-remove' and c[2] == '3' then found_remove = true end
+    end
+    assert(found_remove)
 end)
 print('Caption tests passed: '..count)

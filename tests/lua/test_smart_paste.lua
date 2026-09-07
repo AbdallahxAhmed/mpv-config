@@ -4,7 +4,7 @@ local function test(name,fn) fn(); total=total+1; print('ok paste: '..name) end
 local function harness(clip, existing)
     local h={props={['clipboard/text']=clip},bindings={},events={},loads={},osd_messages={}}
     local function get(k,d) local v=h.props[k]; if v==nil then return d end; return v end
-    mp={msg={info=function() end,warn=function() end},get_time=function() return 0 end,
+    mp={log=function() end,msg={info=function() end,warn=function() end},get_time=function() return 0 end,
         get_property=get,get_property_native=get,get_property_bool=get,get_property_number=get,
         set_property=function(k,v) h.props[k]=v end,
         commandv=function(...) local c={...}; if c[1]=='loadfile' then h.loads[#h.loads+1]=c end end,
