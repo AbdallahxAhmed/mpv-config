@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [load_and_reuse, cancel_on_file_change, stable_volume_preserves_filters]
+        case: [load_and_reuse, cancel_on_file_change, mouse_caption_menu, stable_volume_preserves_filters]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv

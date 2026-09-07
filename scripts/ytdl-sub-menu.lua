@@ -201,8 +201,10 @@ open_menu = function()
     end
     items[#items + 1] = {title = 'Load a local subtitle file', icon = 'folder_open',
         value = {'script-binding', 'uosc/load-subtitles'}}
-    mp.commandv('script-message-to', 'uosc', 'open-menu', utils.format_json({
-        type = 'ytdl_sub_menu', title = 'Subtitles / YouTube captions', items = items}))
+    -- Keep a JSON codec's secondary status/error return out of command arguments.
+    local menu_json = utils.format_json({
+        type = 'ytdl_sub_menu', title = 'Subtitles / YouTube captions', items = items})
+    mp.commandv('script-message-to', 'uosc', 'open-menu', menu_json)
 end
 mp.add_key_binding(nil, 'open', open_menu)
 mp.register_script_message('open', open_menu)
