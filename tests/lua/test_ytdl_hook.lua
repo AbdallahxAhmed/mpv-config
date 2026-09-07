@@ -24,7 +24,11 @@ local function run(config)
     mp={get_property=get,get_property_native=get,get_property_bool=get,
         set_property=set,set_property_native=set,set_property_bool=set,set_property_number=set,
         del_property=function(k) h.props[k]=nil end,
-        find_config_file=function(name) if name=='scripts/modules/stream_policy.lua' and not config.no_helper then return name end end,
+        find_config_file=function(name)
+            if name=='scripts/modules/stream_policy.lua' and not config.no_helper then return name end
+            -- One nil result, not zero return values in table.insert arguments.
+            return nil
+        end,
         command_native=function(c)
             if c[1]=='expand-path' then return '/config/yt-dlp.exe' end
             assert(c._name=='subprocess'); h.calls[#h.calls+1]=c.args

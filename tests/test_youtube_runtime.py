@@ -66,6 +66,7 @@ class CaptionPlayback(unittest.TestCase):
             '--image-display-duration=20', '--input-ipc-server=' + str(ipc),
             '--log-file=' + str(self.root / 'mpv.log')],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.dump_script_log)
         self.addCleanup(self.stop_player)
         self.wait(lambda: ipc.exists())
         self.connection = socket.socket(socket.AF_UNIX)
@@ -78,6 +79,14 @@ class CaptionPlayback(unittest.TestCase):
         self.command('loadfile', str(self.image))
         self.wait(lambda: self.get('time-pos') is not None)
         self.command('set_property', 'sub-visibility', False)
+
+    def dump_script_log(self):
+        path = self.root / 'mpv.log'
+        if path.exists():
+            lines = path.read_text(errors='replace').splitlines()
+            relevant = [line for line in lines if any(word in line for word in
+                        ('ytdl_sub_menu', 'ytdl-sub-menu', 'stream_policy', 'Lua error'))]
+            print('MPV caption-script log:\n' + '\n'.join(relevant)[-12000:])
 
     def stop_player(self):
         if self.process.poll() is None:
