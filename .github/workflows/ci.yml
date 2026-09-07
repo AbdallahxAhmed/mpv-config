@@ -114,6 +114,58 @@ jobs:
         env:
           TESTS: ${{ matrix.tests }}
 
+  # Diagnostic: the dry-run read-only assertion is the only red one left, and
+  # it checks three guarantees at once. Each is probed separately here so the
+  # violated guarantee is named by the job title. Both side-effecting calls are
+  # patched out in every probe, so these jobs stay read-only.
+  dry-run-guarantee:
+    name: Dry run (${{ matrix.guarantee }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - guarantee: no-makedirs
+            probe: |
+              import unittest.mock as m
+              import deploy.installer as installer
+              from deploy.detector import Environment
+              env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+              with m.patch("deploy.installer.os.makedirs") as makedirs, \
+                   m.patch("deploy.installer._add_to_path"):
+                  installer.sync_dependencies(env=env, dry_run=True)
+              raise SystemExit("os.makedirs was called during a dry run" if makedirs.called else 0)
+          - guarantee: no-path-edit
+            probe: |
+              import unittest.mock as m
+              import deploy.installer as installer
+              from deploy.detector import Environment
+              env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+              with m.patch("deploy.installer.os.makedirs"), \
+                   m.patch("deploy.installer._add_to_path") as add_to_path:
+                  installer.sync_dependencies(env=env, dry_run=True)
+              raise SystemExit("_add_to_path was called during a dry run" if add_to_path.called else 0)
+          - guarantee: all-skipped
+            probe: |
+              import unittest.mock as m
+              import deploy.installer as installer
+              from deploy.detector import Environment
+              env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
+              with m.patch("deploy.installer.os.makedirs"), \
+                   m.patch("deploy.installer._add_to_path"):
+                  results = installer.sync_dependencies(env=env, dry_run=True)
+              bad = sorted({"%s=%s" % (r.get("name"), r.get("status")) for r in results if r.get("status") != "skipped"})
+              raise SystemExit("not skipped: " + ", ".join(bad) if bad else 0)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - name: Probe the guarantee
+        run: python -c "$PROBE"
+        env:
+          PROBE: ${{ matrix.probe }}
+
   lua:
     name: Lua syntax
     runs-on: ubuntu-latest
