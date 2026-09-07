@@ -23,7 +23,8 @@ local open_menu, select_caption, refresh
 local kind_names = {manual = 'Creator captions', automatic = 'Auto-generated', translated = 'Auto-translated'}
 local function current_url()
     if not ready then return nil end
-    return policy.youtube_url(mp.get_property('user-data/mpv/ytdl/source-url', ''))
+    -- user-data is node-valued; its string presentation may be JSON-quoted.
+    return policy.youtube_url(mp.get_property_native('user-data/mpv/ytdl/source-url', ''))
         or policy.youtube_url(mp.get_property('path', ''))
 end
 local function cancel_job()
@@ -118,8 +119,8 @@ select_caption = function(entry)
     end)
 end
 local function find_ytdl()
-    local resolved = mp.get_property('user-data/mpv/ytdl/path', '')
-    if resolved ~= '' then return resolved end
+    local resolved = mp.get_property_native('user-data/mpv/ytdl/path', '')
+    if type(resolved) == 'string' and resolved ~= '' then return resolved end
     local configured = mp.get_opt('ytdl_hook-ytdl_path') or mp.get_opt('ytdl_path')
     if configured and utils.file_info(configured) then return configured end
     for _, candidate in ipairs({'C:/Program Files/mpv/yt-dlp/yt-dlp.exe', 'C:/Program Files/mpv/yt-dlp.exe'}) do

@@ -35,6 +35,13 @@ local function harness(metadata)
     function h:open() self.messages.open(); return self.menu end
     function h:activate(item) local v=item.value; assert(type(v)=='table'); self.messages[v[3]](table.unpack(v,4)) end
     function h:caption(kind) local m=self:open(); for _,v in ipairs(m.items) do if v.title==kind then return v.items[1] end end; error('missing '..kind) end
+    function h:quote_user_data_strings()
+        mp.get_property=function(k,default)
+            local value=get(k,default)
+            if k:match('^user%-data/') and type(value)=='string' then return '"'..value..'"' end
+            return value
+        end
+    end
     return h
 end
 test('zero startup requests and no metadata parse until menu opens',function()
@@ -99,5 +106,17 @@ test('malicious titles never become command text',function()
     h:load(); local v=h:caption('Creator captions').value
     eq(v[1],'script-message-to'); eq(v[3],'select-caption'); assert(v[4]:match('^%d+:%d+:%d+$'))
     h.messages['fetch-sub']('en;run bad'); eq(#h.jobs,0)
+end)
+test('shared source URL is read as a native node value',function()
+    local h=harness(); h:load(); h:quote_user_data_strings()
+    h.props.path='/media/local-fixture.ppm'
+    h.props['user-data/mpv/ytdl/source-url']='https://youtu.be/fixture'
+    h.messages['fetch-sub']('ar'); eq(#h.jobs,1); eq(h.jobs[1].command[1],'sub-add')
+end)
+test('shared downloader path is not JSON-quoted when spawning',function()
+    local h=harness({}); h:load(); h:quote_user_data_strings()
+    h.props['user-data/mpv/ytdl/path']='/tmp/tools with spaces/yt-dlp'
+    h.messages['fetch-sub']('ar')
+    eq(h.jobs[1].command.args[1],'/tmp/tools with spaces/yt-dlp')
 end)
 print('Caption tests passed: '..count)
