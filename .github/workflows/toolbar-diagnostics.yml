@@ -1,0 +1,60 @@
+name: Temporary toolbar diagnostics
+on:
+  push:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      state: ${{ steps.probe.outputs.state }}
+      error: ${{ steps.probe.outputs.error }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mpv
+      - id: probe
+        env:
+          NATIVE_MPV_REQUIRED: '1'
+        run: |
+          python3 - <<'PY'
+          import contextlib, importlib.util, inspect, io, json, os, unittest
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location('native_probe', 'tests/test_youtube_runtime.py')
+          mod = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(mod)
+          original = mod.CaptionPlayback.wait
+          def wait(self, predicate, timeout=8):
+              try:
+                  return original(self, predicate, timeout)
+              except AssertionError:
+                  print('PROBE_WAIT: ' + inspect.getsource(predicate).strip())
+                  if hasattr(self, 'request_id'):
+                      print('PROBE_AF: ' + json.dumps(self.get('af')))
+                  raise
+          mod.CaptionPlayback.wait = wait
+          buffer = io.StringIO()
+          with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+              result = unittest.TextTestRunner(verbosity=2).run(unittest.TestSuite([
+                  mod.CaptionPlayback('test_stable_volume_preserves_filters')]))
+          text = buffer.getvalue()
+          print(text)
+          lines = text.splitlines()
+          state = ' | '.join(x for x in lines if x.startswith(('PROBE_WAIT:', 'PROBE_AF:')))
+          errors = ' | '.join(x for x in lines if x.startswith(('AssertionError:', 'TypeError:', 'ValueError:')) or ('player_toolbar]' in x and ('[w]' in x or '[e]' in x)))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('state=' + ('PASS' if result.wasSuccessful() else state or 'No wait failure')[:500] + '\n')
+              out.write('error=' + (errors or 'See native test log')[:500] + '\n')
+          PY
+  state:
+    needs: probe
+    name: 'Volume state: ${{ needs.probe.outputs.state }}'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Read-only diagnostic summary; the native test remains the gate.'
+  error:
+    needs: probe
+    name: 'Volume error: ${{ needs.probe.outputs.error }}'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Read-only diagnostic summary; the native test remains the gate.'
