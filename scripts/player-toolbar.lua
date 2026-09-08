@@ -341,22 +341,29 @@ end
 local last_download_key
 local is_downloading = false
 local download_badge = nil
+local download_progress = nil
+local download_tooltip = nil
 local download_timer = nil
 
 local function publish_download(force)
     local active = is_downloading
     local badge = download_badge
-    local key = tostring(active) .. ':' .. tostring(badge)
+    local prog = download_progress
+    local tooltip = download_tooltip or (active and 'Downloading in background...' or 'Download video')
+    local key = tostring(active) .. ':' .. tostring(badge) .. ':' .. tostring(prog) .. ':' .. tostring(tooltip)
     if not force and last_download_key == key then return end
     last_download_key = key
-    local tooltip = active and 'Downloading in background...' or 'Download video'
-    local data = utils.format_json({
+    local data_tbl = {
         icon = 'file_download',
         active = active,
         badge = badge,
         tooltip = tooltip,
         command = {'script-message-to', script, 'start-download'},
-    })
+    }
+    if prog ~= nil then
+        data_tbl.progress = prog
+    end
+    local data = utils.format_json(data_tbl)
     if data then pcall(mp.commandv, 'script-message-to', 'uosc', 'set-button', 'download-video', data) end
 end
 
@@ -372,6 +379,25 @@ local function extract_clean_error(res, err)
         end
     end
     return 'Download failed. Check terminal or logs.'
+end
+
+local function find_tool(name)
+    local candidates = {}
+    if mp.find_config_file then
+        local p = mp.find_config_file('tools/' .. name)
+        if p and p ~= '' then table.insert(candidates, p) end
+    end
+    local appdata = (os.getenv('APPDATA') or ''):gsub('\\', '/')
+    if appdata ~= '' then table.insert(candidates, appdata .. '/mpv/tools/' .. name) end
+    local userprofile = (os.getenv('USERPROFILE') or ''):gsub('\\', '/')
+    if userprofile ~= '' then table.insert(candidates, userprofile .. '/Desktop/mpv-config/tools/' .. name) end
+    table.insert(candidates, 'tools/' .. name)
+
+    for _, path in ipairs(candidates) do
+        local fi = utils and utils.file_info and utils.file_info(path)
+        if fi then return path end
+    end
+    return nil
 end
 
 local function start_download(is_audio_only)
@@ -467,22 +493,58 @@ local function start_download(is_audio_only)
 
     local referer = mp.get_property('referrer')
     local user_agent = mp.get_property('user-agent')
+    local cookies = mp.get_property('cookies') or mp.get_property('cookies-file')
     local extra_opts = {
         referer = (referer and referer ~= '') and referer or nil,
         user_agent = (user_agent and user_agent ~= '') and user_agent or nil,
+        cookies = (cookies and cookies ~= '') and cookies or nil,
     }
 
     local ytdl_format = mp.get_property('ytdl-format')
-    local make_args = function(target_url)
+    local worker_script = find_tool and find_tool('download_worker.py')
+    local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+    local default_dir = policy and policy.default_download_dir and policy.default_download_dir()
+        or (home:gsub('\\', '/') .. '/Downloads')
+    local template = default_dir .. '/%(title)s [%(id)s].%(ext)s'
+
+    local make_args = function(target_url, state_file)
+        if worker_script and state_file then
+            local w_args = {
+                'python',
+                worker_script,
+                '--state-file', state_file,
+                '--output', template,
+                '--fragments', '6',
+            }
+            if is_audio_only then table.insert(w_args, '--audio-only') end
+            if ytdl_format and ytdl_format ~= '' then
+                table.insert(w_args, '--format')
+                table.insert(w_args, ytdl_format)
+            end
+            if extra_opts.user_agent then
+                table.insert(w_args, '--user-agent')
+                table.insert(w_args, extra_opts.user_agent)
+            end
+            if extra_opts.referer then
+                table.insert(w_args, '--referer')
+                table.insert(w_args, extra_opts.referer)
+            end
+            if extra_opts.cookies then
+                table.insert(w_args, '--cookies')
+                table.insert(w_args, extra_opts.cookies)
+            end
+            table.insert(w_args, '--url')
+            table.insert(w_args, target_url)
+            table.insert(w_args, target_url) -- Keep positional at end for compatibility
+            return w_args
+        end
+
         local args = nil
         if policy and policy.download_args then
             args = policy.download_args(target_url, nil, is_audio_only, ytdl_format, extra_opts)
         end
         if not args then
-            local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
-            local dir = home:gsub('\\', '/') .. '/Downloads'
-            local template = dir .. '/%(title)s [%(id)s].%(ext)s'
-            args = {'yt-dlp', '--no-playlist', '--continue', '--no-overwrites', '--windows-filenames', '--no-mtime', '--concurrent-fragments', '4'}
+            args = {'yt-dlp', '--no-playlist', '--continue', '--no-overwrites', '--windows-filenames', '--no-mtime', '--concurrent-fragments', '6'}
             if is_audio_only then
                 table.insert(args, '-x')
                 table.insert(args, '--audio-format')
@@ -509,6 +571,8 @@ local function start_download(is_audio_only)
     local target_desc = is_audio_only and 'Audio (MP3)' or 'Video'
     is_downloading = true
     download_badge = 'DL'
+    download_progress = 0.0
+    download_tooltip = string.format('Starting %s download: %s', target_desc, media_title)
     publish_download(true)
     mp.osd_message(string.format('Starting %s download: %s', target_desc, media_title), 3)
 
@@ -517,8 +581,56 @@ local function start_download(is_audio_only)
         download_timer = nil
     end
 
+    local download_poll_timer = nil
+    local session_id = tostring(os.time()) .. '_' .. tostring(math.random(1000, 9999))
+    local temp_dir = os.getenv('TEMP') or os.getenv('TMP') or '.'
+    local state_file = temp_dir:gsub('\\', '/') .. '/mpv_dl_state_' .. session_id .. '.json'
+
+    local function cleanup_download()
+        if download_poll_timer then
+            pcall(function() download_poll_timer:kill() end)
+            download_poll_timer = nil
+        end
+        pcall(function() os.remove(state_file) end)
+        pcall(function() os.remove(state_file .. '.tmp') end)
+    end
+
     local function run_subprocess(target_url, allow_retry)
-        local cmd_args = make_args(target_url)
+        local cmd_args = make_args(target_url, state_file)
+
+        if worker_script and mp.add_periodic_timer then
+            download_poll_timer = mp.add_periodic_timer(0.25, function()
+                local content = nil
+                pcall(function()
+                    if utils and utils.read_file then
+                        content = utils.read_file(state_file)
+                    else
+                        local f = io.open(state_file, 'r')
+                        if f then
+                            content = f:read('*a')
+                            f:close()
+                        end
+                    end
+                end)
+                if content and content ~= '' then
+                    local ok, data = pcall(function()
+                        return utils.parse_json(content)
+                    end)
+                    if ok and type(data) == 'table' then
+                        if data.percent_int ~= nil then
+                            download_badge = tostring(data.percent_int) .. '%'
+                            download_progress = (data.percent or 0) / 100
+                        end
+                        if data.speed and data.eta then
+                            download_tooltip = string.format('Downloading: %s%% (%s • ETA %s • %s threads)',
+                                tostring(data.percent_int or 0), tostring(data.speed), tostring(data.eta), tostring(data.threads or 16))
+                        end
+                        publish_download(true)
+                    end
+                end
+            end)
+        end
+
         mp.command_native_async({
             name = 'subprocess',
             playback_only = false,
@@ -526,16 +638,21 @@ local function start_download(is_audio_only)
             capture_stderr = true,
             args = cmd_args,
         }, function(success, res, err)
+            cleanup_download()
             local code = res and res.status or -1
             if success and code == 0 then
                 is_downloading = false
                 download_badge = 'OK'
+                download_progress = 1.0
+                download_tooltip = 'Download complete: Saved to Downloads folder'
                 mp.osd_message(string.format('Download complete: %s\nSaved to Downloads folder', media_title), 5)
                 publish_download(true)
                 if mp.add_timeout then
                     pcall(function()
                         download_timer = mp.add_timeout(4, function()
                             download_badge = nil
+                            download_progress = nil
+                            download_tooltip = nil
                             publish_download(true)
                         end)
                     end)
@@ -546,6 +663,8 @@ local function start_download(is_audio_only)
             else
                 is_downloading = false
                 download_badge = 'ERR'
+                download_progress = nil
+                download_tooltip = nil
                 local err_line = extract_clean_error(res, err)
                 if msg and msg.warn then msg.warn('Download failed: ' .. tostring(res and (res.stderr or res.stdout) or err)) end
                 mp.osd_message(err_line, 5)
@@ -567,6 +686,8 @@ local function start_download(is_audio_only)
     else
         is_downloading = false
         download_badge = 'ERR'
+        download_progress = nil
+        download_tooltip = nil
         publish_download(true)
         mp.osd_message('Subprocess execution unavailable in this mpv build.', 3)
     end

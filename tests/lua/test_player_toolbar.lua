@@ -1,6 +1,6 @@
 -- Real Lua at the mpv boundary: click commands, state, and filter ownership.
 local total = 0
-local function eq(a,b) assert(a == b, tostring(a)..' ~= '..tostring(b)) end
+local function eq(a,b) if a ~= b then error(debug.traceback('ASSERTION FAILED: '..tostring(a)..' ~= '..tostring(b), 2)) end end
 local function test(name,fn) fn(); total=total+1; print('ok toolbar: '..name) end
 local label = 'mpv_config_stable_volume'
 local normalizer = 'dynaudnorm=f=500:g=15:p=0.95:m=10'
@@ -23,7 +23,13 @@ local function harness(filters, no_ui)
         register_script_message=function(name,fn) h.messages[name]=fn end,
         register_event=function(name,fn) h.events=h.events or {}; h.events[name]=fn end,
         add_key_binding=function() error('Mouse controls must not require a keyboard binding') end,
-        add_periodic_timer=function() error('Toolbar must not poll') end,
+        add_periodic_timer=function(sec, fn)
+            h.periodic_timers=h.periodic_timers or {}
+            local t={sec=sec, fn=fn, dead=false}
+            t.kill=function() t.dead=true end
+            table.insert(h.periodic_timers, t)
+            return t
+        end,
         add_timeout=function(sec,fn)
             h.timeouts=h.timeouts or {}
             local t={sec=sec,fn=fn,dead=false}
@@ -58,8 +64,9 @@ local function harness(filters, no_ui)
     package.loaded['mp.utils']=nil;package.loaded['mp.msg']=nil
     package.preload['mp.utils']=function() return {
         format_json=function(value) return value,nil end,
-        parse_json=function(str) return h.parsed_json or {} end,
+        parse_json=function(str) return (h.parse_json_fn and h.parse_json_fn(str)) or h.parsed_json or {} end,
         file_info=function(path) return h.file_info or {size=1048576} end,
+        read_file=function(path) return h.file_content or '' end,
     } end
     package.preload['mp.msg']=function() return {info=function() end, warn=function() end, error=function() end, debug=function() end} end
     dofile('scripts/player-toolbar.lua')
@@ -227,7 +234,11 @@ test('download button publishes idle state and runs background subprocess on cli
     eq(h.buttons['download-video'].badge,'DL')
     assert(h.osd:find('Starting Video download: Mock YouTube Video',1,true))
     assert(captured_args~=nil)
-    eq(captured_args[1],'yt-dlp')
+    if captured_args[1] == 'python' then
+        assert(captured_args[2]:find('download_worker.py', 1, true) ~= nil)
+    else
+        eq(captured_args[1], 'yt-dlp')
+    end
 
     -- Second click while downloading warns user
     h.messages['start-download']()
@@ -304,6 +315,38 @@ test('download button retries with secondary stream URL on primary failure and f
     calls[2].cb(false, {status=1, stderr='ERROR: [generic] HTTP Error 404: Not Found'}, nil)
     eq(h.buttons['download-video'].badge, 'ERR')
     assert(h.osd:find('Download error: HTTP Error 404: Not Found', 1, true) ~= nil)
+end)
+test('download button polls status file and updates progress badge and tooltip', function()
+    local h=harness()
+    h.props['user-data/mpv/ytdl/source-url'] = 'https://site.com/video/123'
+    h.props['media-title'] = 'Progress Test Video'
+
+    local async_cb
+    h.async_handler = function(tbl, cb)
+        async_cb = cb
+    end
+
+    h.file_content = '{"status": "downloading", "percent": 45.2, "percent_int": 45, "speed": "12.5MiB/s", "eta": "00:08", "threads": 16}'
+    h.parse_json_fn = function(str)
+        return {status="downloading", percent=45.2, percent_int=45, speed="12.5MiB/s", eta="00:08", threads=16}
+    end
+
+    h.messages['start-download']()
+    eq(#(h.periodic_timers or {}), 1)
+
+    -- Trigger periodic poll
+    h.periodic_timers[1].fn()
+    eq(h.buttons['download-video'].badge, '45%')
+    assert(math.abs((h.buttons['download-video'].progress or 0) - 0.452) < 0.001)
+    assert(h.buttons['download-video'].tooltip:find('45%%') ~= nil)
+    assert(h.buttons['download-video'].tooltip:find('12.5MiB/s') ~= nil)
+
+    -- Trigger completion
+    async_cb(true, {status=0}, nil)
+    eq(h.buttons['download-video'].badge, 'OK')
+    eq(h.buttons['download-video'].progress, 1.0)
+    assert(h.buttons['download-video'].tooltip:find('complete') ~= nil)
+    eq(h.periodic_timers[1].dead, true)
 end)
 print('Toolbar tests passed: '..total)
 

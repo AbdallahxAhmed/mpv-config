@@ -240,7 +240,8 @@ def run_worker(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Headless multi-threaded download worker for MPV")
-    parser.add_argument("--url", required=True, help="Target stream/video URL")
+    parser.add_argument("--url", default=None, help="Target stream/video URL")
+    parser.add_argument("url_pos", nargs="?", default=None, help="Positional stream URL")
     parser.add_argument("--output", required=True, help="Output filename template")
     parser.add_argument("--state-file", required=True, help="Path to write JSON progress updates")
     parser.add_argument("--format", default=None, help="yt-dlp format selector")
@@ -251,6 +252,11 @@ def main():
     parser.add_argument("--fragments", type=int, default=6, help="Concurrent fragments for HLS/DASH (default: 6)")
 
     args = parser.parse_args()
+    if not args.url and args.url_pos:
+        args.url = args.url_pos
+    if not args.url:
+        sys.stderr.write("Error: target URL is required.\n")
+        return 1
     return run_worker(args)
 
 if __name__ == "__main__":
