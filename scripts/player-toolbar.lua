@@ -338,15 +338,160 @@ local function open_audio_menu()
     if menu_json then pcall(mp.commandv, 'script-message-to', 'uosc', 'open-menu', menu_json) end
 end
 
+local last_download_key
+local is_downloading = false
+local download_badge = nil
+local download_timer = nil
+
+local function publish_download(force)
+    local active = is_downloading
+    local badge = download_badge
+    local key = tostring(active) .. ':' .. tostring(badge)
+    if not force and last_download_key == key then return end
+    last_download_key = key
+    local tooltip = active and 'Downloading in background...' or 'Download video'
+    local data = utils.format_json({
+        icon = 'file_download',
+        active = active,
+        badge = badge,
+        tooltip = tooltip,
+        command = {'script-message-to', script, 'start-download'},
+    })
+    if data then pcall(mp.commandv, 'script-message-to', 'uosc', 'set-button', 'download-video', data) end
+end
+
+local function start_download(is_audio_only)
+    if is_downloading then
+        mp.osd_message('Download already in progress in background...', 3)
+        return
+    end
+
+    local url = mp.get_property_native('user-data/mpv/ytdl/source-url')
+    if not url or url == '' then url = mp.get_property('path') end
+    if type(url) == 'string' then
+        url = url:gsub('^["\']', ''):gsub('["\']$', '')
+    end
+    if type(url) == 'string' and url:find('^edl://') then
+        local inner = url:match('%%[0-9]+%%(https?://[^,;]+)') or url:match('(https?://[^,;%s]+)')
+        if inner then url = inner end
+    end
+    if not url or (not url:find('^https?://') and not url:find('^ytdl://')) then
+        mp.osd_message('Download only works for online streams/URLs.', 3)
+        return
+    end
+    if url:find('^ytdl://') then
+        url = url:sub(8)
+    end
+
+    local ytdl_format = mp.get_property('ytdl-format')
+    local args = nil
+    if policy and policy.download_args then
+        args = policy.download_args(url, nil, is_audio_only, ytdl_format)
+    end
+    if not args then
+        local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+        local dir = home:gsub('\\', '/') .. '/Downloads'
+        local template = dir .. '/%(title)s [%(id)s].%(ext)s'
+        args = {'yt-dlp', '--no-playlist', '--continue', '--no-overwrites', '--windows-filenames', '--concurrent-fragments', '4'}
+        if is_audio_only then
+            table.insert(args, '-x')
+            table.insert(args, '--audio-format')
+            table.insert(args, 'mp3')
+            table.insert(args, '--audio-quality')
+            table.insert(args, '0')
+        else
+            local fmt = ytdl_format
+            if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
+                fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
+            end
+            table.insert(args, '-f')
+            table.insert(args, fmt)
+            table.insert(args, '--merge-output-format')
+            table.insert(args, 'mp4')
+        end
+        table.insert(args, '-o')
+        table.insert(args, template)
+        table.insert(args, url)
+    end
+
+    local media_title = mp.get_property('media-title') or 'stream'
+    local target_desc = is_audio_only and 'Audio (MP3)' or 'Video'
+
+    is_downloading = true
+    download_badge = 'DL'
+    publish_download(true)
+    mp.osd_message(string.format('Starting %s download: %s', target_desc, media_title), 3)
+
+    if download_timer then
+        pcall(function() download_timer:kill() end)
+        download_timer = nil
+    end
+
+    if mp.command_native_async then
+        mp.command_native_async({
+            name = 'subprocess',
+            playback_only = false,
+            capture_stdout = true,
+            capture_stderr = true,
+            args = args,
+        }, function(success, res, err)
+            is_downloading = false
+            local code = res and res.status or -1
+            if success and code == 0 then
+                download_badge = 'OK'
+                mp.osd_message(string.format('Download complete: %s\nSaved to Downloads folder', media_title), 5)
+            else
+                download_badge = 'ERR'
+                local err_msg = res and (res.stderr or res.stdout) or tostring(err)
+                msg.warn('yt-dlp download failed: ' .. tostring(err_msg))
+                mp.osd_message('Download failed. Check terminal or logs.', 4)
+            end
+            publish_download(true)
+
+            if mp.add_timeout then
+                pcall(function()
+                    download_timer = mp.add_timeout(4, function()
+                        download_badge = nil
+                        publish_download(true)
+                    end)
+                end)
+            end
+        end)
+    else
+        is_downloading = false
+        download_badge = 'ERR'
+        publish_download(true)
+        mp.osd_message('Subprocess execution unavailable in this mpv build.', 3)
+    end
+end
+
+local function open_download_folder()
+    local dir = policy and policy.default_download_dir and policy.default_download_dir()
+        or (os.getenv('USERPROFILE') or os.getenv('HOME') or '.'):gsub('\\', '/') .. '/Downloads'
+    local win_dir = dir:gsub('/', '\\')
+    if mp.command_native_async then
+        mp.command_native_async({
+            name = 'subprocess',
+            playback_only = false,
+            args = {'explorer', win_dir},
+        })
+    end
+end
+
 mp.register_script_message('open-audio-menu', open_audio_menu)
 mp.register_script_message('open-quality-menu', open_quality_menu)
 mp.register_script_message('set-quality', set_quality)
+mp.register_script_message('start-download', function() start_download(false) end)
+mp.register_script_message('download-video', function() start_download(false) end)
+mp.register_script_message('download-audio', function() start_download(true) end)
+mp.register_script_message('open-download-folder', open_download_folder)
 
 -- uosc broadcasts on startup; also publish now if uosc started first.
 mp.register_script_message('uosc-version', function()
     publish(nil, true)
     publish_quality(true)
     publish_audio(true)
+    publish_download(true)
 end)
 mp.observe_property('af', 'native', function(_, filters) publish(filters, false) end)
 mp.observe_property('height', 'number', function() publish_quality(false) end)
@@ -359,7 +504,15 @@ mp.observe_property('aid', 'string', function() publish_audio(false) end)
 mp.register_event('file-loaded', function()
     publish_quality(true)
     publish_audio(true)
+    publish_download(true)
+end)
+mp.register_event('end-file', function()
+    if not is_downloading then
+        download_badge = nil
+    end
+    publish_download(true)
 end)
 publish(nil, true)
 publish_quality(true)
 publish_audio(true)
+publish_download(true)

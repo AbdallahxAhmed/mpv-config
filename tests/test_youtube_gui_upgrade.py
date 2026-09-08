@@ -134,6 +134,14 @@ class GuiUpgrade(unittest.TestCase):
         self.assertEqual(backup.read_bytes(), raw)
         self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
 
+    def test_icon_first_v5_toolbar_is_upgraded(self):
+        raw = self.raw.replace(gui.OLD_CONTROLS.encode(), gui.ICON_FIRST_V5_CONTROLS.encode())
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn('controls', changes)
+        self.assertEqual(backup.read_bytes(), raw)
+        self.assertIn(gui.NEW_CONTROLS.encode(), self.path.read_bytes())
+
     def test_missing_scripts_block_apply_without_writes(self):
         (self.root / 'scripts/player-toolbar.lua').unlink()
         before = set(self.path.parent.iterdir())
@@ -153,6 +161,7 @@ class GuiUpgrade(unittest.TestCase):
         self.assertIn('button:stable-volume', items)
         self.assertIn('loop-file', items)
         self.assertIn('<stream>button:stream-quality', items)
+        self.assertIn('<stream>button:download-video', items)
         self.assertNotIn('keypress', gui.NEW_CONTROLS)
         self.assertNotIn('#audio', gui.NEW_CONTROLS)
 

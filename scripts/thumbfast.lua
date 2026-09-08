@@ -48,7 +48,7 @@ local options = {
     hwdec = false,
 
     -- Windows only: use native Windows API to write to pipe (requires LuaJIT)
-    direct_io = false,
+    direct_io = true,
 
     -- Custom path to the mpv executable
     mpv_path = "mpv"
@@ -225,6 +225,7 @@ local using_storyboards = false
 local thumbnail_delta = nil
 local thumb_count_per_storyboard = 1
 local storyboard_thumbnails = {}
+local frame_cache = {}
 
 local dirty = false
 
@@ -526,6 +527,10 @@ local function remove_thumbnail_files()
     end
     os.remove(options.thumbnail)
     os.remove(options.thumbnail..".bgra")
+    for b, cfile in pairs(frame_cache) do
+        os.remove(cfile..".bgra")
+    end
+    frame_cache = {}
 end
 
 local function remove_storyboard_files()
@@ -548,6 +553,11 @@ local function spawn(time)
     local path = properties["path"]
     if path == nil then return end
 
+    local is_net = properties["demuxer-via-network"] or (type(path) == "string" and path:find("^https?://") ~= nil)
+    local demux_bytes = is_net and "2MiB" or "128KiB"
+    local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
+    local spawn_path = (is_net and properties["stream-open-filename"] and properties["stream-open-filename"] ~= "" and properties["stream-open-filename"]) or path
+
     if options.quit_after_inactivity > 0 then
         if show_thumbnail or activity_timer:is_enabled() then
             activity_timer:kill()
@@ -569,8 +579,8 @@ local function spawn(time)
         mpv_path, "--no-config", "--msg-level=all=no", "--idle", "--pause", "--keep-open=always", "--really-quiet", "--no-terminal",
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
         "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
-        "--start="..time, allow_fast_seek and "--hr-seek=no" or "--hr-seek=yes",
-        "--ytdl-format=worst", "--demuxer-readahead-secs=0", "--demuxer-max-bytes=128KiB",
+        "--start="..time, seek_mode,
+        "--ytdl-format=worst", "--demuxer-readahead-secs=0", "--demuxer-max-bytes="..demux_bytes,
         "--http-header-fields="..(properties["http-header-fields"] or ""), -- does this actually work well with SVP?
         "--cookies="..(properties["cookies"] or "no"),
         "--cookies-file="..(properties["cookies-file"] or ""),
@@ -580,6 +590,10 @@ local function spawn(time)
         "--video-rotate="..last_rotate,
         "--ovc=rawvideo", "--of=image2", "--ofopts=update=1", "--o="..thumbnail_path
     }
+
+    if is_net then
+        table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=2")
+    end
 
     if not pre_0_30_0 then
         table.insert(args, "--sws-allow-zimg=no")
@@ -614,7 +628,7 @@ local function spawn(time)
     end
 
     table.insert(args, "--")
-    table.insert(args, path)
+    table.insert(args, spawn_path)
 
     spawned = true
     spawn_waiting = true
@@ -672,7 +686,7 @@ local function run(command)
         if hPipe ~= winapi.INVALID_HANDLE_VALUE then
             local buf = command .. "\n"
             winapi.C.SetNamedPipeHandleState(hPipe, winapi.PIPE_NOWAIT, nil, nil)
-            winapi.C.WriteFile(hPipe, buf, #buf + 1, winapi._lpNumberOfBytesWritten, nil)
+            winapi.C.WriteFile(hPipe, buf, #buf, winapi._lpNumberOfBytesWritten, nil)
             winapi.C.CloseHandle(hPipe)
         end
 
@@ -697,7 +711,7 @@ local function run(command)
         file = io.open(options.socket, "r+")
     end
     if file then
-        file_bytes = file:seek("end")
+        file_bytes = file:seek("end") or 0
         file:write(command_n)
         file:flush()
     end
@@ -754,10 +768,34 @@ local function move_file(from, to)
     os.rename(from, to)
 end
 
+local seek_in_flight = false
+local current_seek_target = nil
+local last_seek_sent_time = 0
+local pending_seek_target = nil
+
+local function do_raw_seek(target_time, fast)
+    if not target_time then return end
+    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+    local use_fast = fast or is_net or allow_fast_seek
+    run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
+    seek_in_flight = true
+    current_seek_target = target_time
+    last_seek_sent_time = mp.get_time()
+    pending_seek_target = nil
+end
+
 local function seek(fast)
-    if last_seek_time then
-        run("async seek " .. last_seek_time .. (fast and " absolute+keyframes" or " absolute+exact"))
+    if not last_seek_time then return end
+    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+    if is_net then
+        local now = mp.get_time()
+        -- Watchdog timeout: if previous seek was in flight for > 2.5s without completing, reset seek_in_flight so we never freeze
+        if seek_in_flight and (now - last_seek_sent_time) < 2.5 then
+            pending_seek_target = last_seek_time
+            return
+        end
     end
+    do_raw_seek(last_seek_time, fast)
 end
 
 local seek_period = 3/60
@@ -771,7 +809,10 @@ seek_timer = mp.add_periodic_timer(seek_period, function()
         if seek_period_counter == 2 then
             if allow_fast_seek then
                 seek_timer:kill()
-                seek()
+                local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+                if not is_net then
+                    seek()
+                end
             end
         else seek_period_counter = seek_period_counter + 1 end
     end
@@ -804,6 +845,38 @@ local function check_new_thumb()
         move_file(tmp, thumbnail_path..".bgra")
 
         real_w, real_h = w, h
+        seek_in_flight = false
+        local finished_target = current_seek_target or last_seek_time
+        current_seek_target = nil
+
+        -- Cache decoded frame for instant retrieval on replay/hovering
+        if finished_target and not using_storyboards and thumbnail_path then
+            local b = math.floor(finished_target / 10)
+            if not frame_cache[b] then
+                local cfile = options.thumbnail .. "_c" .. b
+                local inf = io.open(thumbnail_path..".bgra", "rb")
+                if inf then
+                    local data = inf:read("*a")
+                    inf:close()
+                    if data and #data > 0 then
+                        local outf = io.open(cfile..".bgra", "wb")
+                        if outf then
+                            outf:write(data)
+                            outf:close()
+                            frame_cache[b] = cfile
+                        end
+                    end
+                end
+            end
+        end
+
+        -- If user moved cursor while previous seek was in flight, dispatch next seek immediately
+        if pending_seek_target then
+            local next_target = pending_seek_target
+            pending_seek_target = nil
+            do_raw_seek(next_target, true)
+        end
+
         if real_w and (real_w ~= last_real_w or real_h ~= last_real_h) then
             last_real_w, last_real_h = real_w, real_h
             info(real_w, real_h)
@@ -834,6 +907,9 @@ local function clear()
         activity_timer:resume()
     end
     last_seek_time = nil
+    seek_in_flight = false
+    current_seek_target = nil
+    pending_seek_target = nil
     show_thumbnail = false
     last_x = nil
     last_y = nil
@@ -868,7 +944,12 @@ local function thumb(time, r_x, r_y, script)
     if time == nil then return end
 
     if not using_storyboards then
-        thumbnail_path = options.thumbnail
+        local b = math.floor(time / 10)
+        if frame_cache[b] then
+            thumbnail_path = frame_cache[b]
+        else
+            thumbnail_path = options.thumbnail
+        end
     end
 
     if r_x == "" or r_y == "" then
@@ -888,7 +969,7 @@ local function thumb(time, r_x, r_y, script)
     end
 
     script_name = script
-    if last_x ~= x or last_y ~= y or not show_thumbnail or (using_storyboards and thumbnail_delta and time ~= last_seek_time) then
+    if last_x ~= x or last_y ~= y or not show_thumbnail or (using_storyboards and thumbnail_delta and time ~= last_seek_time) or (not using_storyboards and frame_cache[math.floor(time / 10)]) then
         show_thumbnail = true
         last_x, last_y = x, y
         draw(real_w, real_h, script)
@@ -904,6 +985,10 @@ local function thumb(time, r_x, r_y, script)
     if time == last_seek_time then return end
     last_seek_time = time
     if using_storyboards then return end
+
+    -- If we already have a cached frame for this 10-second window, don't issue a redundant network seek!
+    if frame_cache[math.floor(time / 10)] then return end
+
     if not spawned then spawn(time) end
     request_seek()
     if not file_timer:is_enabled() then file_timer:resume() end
@@ -1515,6 +1600,11 @@ local function file_load()
     last_real_w, last_real_h = nil, nil
     last_tone_mapping = nil
     last_seek_time = nil
+    last_decoded_time = nil
+    seek_in_flight = false
+    pending_seek_target = nil
+    current_seek_target = nil
+    frame_cache = {}
     if info_timer then
         info_timer:kill()
         info_timer = nil
@@ -1533,6 +1623,7 @@ local function file_load()
     if options.spawn_first then -- TODO: skip if matches storyboard stuff
         spawn(mp.get_property_number("time-pos", 0))
         first_file = true
+        file_timer:resume()
     end
 end
 

@@ -310,4 +310,44 @@ function M.preferred_caption(captions, lang)
     end
     return best
 end
+
+function M.default_download_dir()
+    local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+    return home:gsub('\\', '/') .. '/Downloads'
+end
+
+function M.download_args(url, output_dir, is_audio_only, ytdl_format)
+    if type(url) ~= 'string' or url == '' then return nil end
+    local dir = (output_dir or M.default_download_dir()):gsub('\\', '/')
+    local template = dir .. '/%(title)s [%(id)s].%(ext)s'
+    local args = {
+        'yt-dlp',
+        '--no-playlist',
+        '--continue',
+        '--no-overwrites',
+        '--windows-filenames',
+        '--concurrent-fragments', '4',
+    }
+    if is_audio_only then
+        table.insert(args, '-x')
+        table.insert(args, '--audio-format')
+        table.insert(args, 'mp3')
+        table.insert(args, '--audio-quality')
+        table.insert(args, '0')
+    else
+        local fmt = ytdl_format
+        if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
+            fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
+        end
+        table.insert(args, '-f')
+        table.insert(args, fmt)
+        table.insert(args, '--merge-output-format')
+        table.insert(args, 'mp4')
+    end
+    table.insert(args, '-o')
+    table.insert(args, template)
+    table.insert(args, url)
+    return args
+end
+
 return M

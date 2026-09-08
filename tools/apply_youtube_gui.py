@@ -13,8 +13,9 @@ ICON_FIRST_V1_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/
 ICON_FIRST_V2_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,command:headphones:script-binding uosc/audio?Audio tracks and dubs,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
 ICON_FIRST_V3_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
 ICON_FIRST_V4_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,gap,button:audio-tracks,gap,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen'
-NEW_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen'
-ACCEPTED_CONTROLS = (OLD_CONTROLS, PREVIOUS_CONTROLS, ICON_FIRST_V1_CONTROLS, ICON_FIRST_V2_CONTROLS, ICON_FIRST_V3_CONTROLS, ICON_FIRST_V4_CONTROLS)
+ICON_FIRST_V5_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen'
+NEW_CONTROLS = 'menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,<stream>button:download-video,button:stable-volume,loop-file,space,fullscreen'
+ACCEPTED_CONTROLS = (OLD_CONTROLS, PREVIOUS_CONTROLS, ICON_FIRST_V1_CONTROLS, ICON_FIRST_V2_CONTROLS, ICON_FIRST_V3_CONTROLS, ICON_FIRST_V4_CONTROLS, ICON_FIRST_V5_CONTROLS)
 REQUIRED_SCRIPTS = (
     "scripts/smart-paste.lua", "scripts/ytdl-sub-menu.lua", "scripts/ytdl_hook.lua",
     "scripts/modules/stream_policy.lua", "scripts/player-toolbar.lua",

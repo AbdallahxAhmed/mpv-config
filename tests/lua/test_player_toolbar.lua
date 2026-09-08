@@ -24,7 +24,18 @@ local function harness(filters, no_ui)
         register_event=function(name,fn) h.events=h.events or {}; h.events[name]=fn end,
         add_key_binding=function() error('Mouse controls must not require a keyboard binding') end,
         add_periodic_timer=function() error('Toolbar must not poll') end,
-        add_timeout=function() error('Toolbar must not start a timer') end,
+        add_timeout=function(sec,fn)
+            h.timeouts=h.timeouts or {}
+            local t={sec=sec,fn=fn,dead=false}
+            t.kill=function() t.dead=true end
+            table.insert(h.timeouts,t)
+            return t
+        end,
+        command_native_async=function(tbl,cb)
+            h.async_commands=h.async_commands or {}
+            table.insert(h.async_commands,{table=tbl,callback=cb})
+            if h.async_handler then h.async_handler(tbl,cb) end
+        end,
         command=function(...) h.last_command={...} end,
         commandv=function(...)
             h.arg_count=select('#',...)
@@ -99,7 +110,7 @@ test('unchanged state does not trigger redundant toolbar redraws',function()
 end)
 test('uosc startup or restart receives the current button state',function()
     local h=harness();local before=h.sends;h.messages['uosc-version']('5.13.0')
-    eq(h.sends,before+3);h:click();h.messages['uosc-version']('5.13.0');eq(h.button.active,true)
+    eq(h.sends,before+4);h:click();h.messages['uosc-version']('5.13.0');eq(h.button.active,true)
 end)
 test('partially disabled legacy preset is replaced without duplicate filters',function()
     local old={filter(normalizer,nil,false),filter(limiter)};local h=harness(old)
@@ -182,5 +193,61 @@ end)
 test('JSON secondary returns never become extra command arguments',function()
     local h=harness();eq(h.arg_count,5);h:click();eq(h.arg_count,5)
     h:click();eq(h.arg_count,5);eq(h.button.badge,nil)
+end)
+test('download button publishes idle state and runs background subprocess on click',function()
+    local h=harness()
+    local btn=h.buttons['download-video']
+    assert(btn~=nil)
+    eq(btn.icon,'file_download')
+    eq(btn.active,false)
+    eq(btn.badge,nil)
+    eq(btn.tooltip,'Download video')
+    eq(#(h.timeouts or {}),0)
+
+    -- Missing online stream URL
+    h.messages['start-download']()
+    assert(h.osd:find('Download only works for online streams/URLs',1,true))
+
+    -- Set active stream path
+    h.props['path']='https://www.youtube.com/watch?v=mock'
+    h.props['media-title']='Mock YouTube Video'
+    local captured_args,captured_cb
+    h.async_handler=function(tbl,cb)
+        captured_args=tbl.args
+        captured_cb=cb
+    end
+
+    h.messages['start-download']()
+    eq(h.buttons['download-video'].active,true)
+    eq(h.buttons['download-video'].badge,'DL')
+    assert(h.osd:find('Starting Video download: Mock YouTube Video',1,true))
+    assert(captured_args~=nil)
+    eq(captured_args[1],'yt-dlp')
+
+    -- Second click while downloading warns user
+    h.messages['start-download']()
+    assert(h.osd:find('already in progress',1,true))
+
+    -- Complete download successfully
+    captured_cb(true,{status=0},nil)
+    eq(h.buttons['download-video'].active,false)
+    eq(h.buttons['download-video'].badge,'OK')
+    assert(h.osd:find('Download complete: Mock YouTube Video',1,true))
+    eq(#(h.timeouts or {}),1)
+    -- Trigger timeout to clear OK badge
+    h.timeouts[1].fn()
+    eq(h.buttons['download-video'].badge,nil)
+end)
+test('download button extracts URL when source-url has JSON quotes or edl stream path',function()
+    local h=harness()
+    h.props['user-data/mpv/ytdl/source-url'] = '"https://txxx.com/videos/17007267/mock/"'
+    h.props['media-title'] = 'Non-YouTube Video'
+    local captured_args
+    h.async_handler = function(tbl, cb)
+        captured_args = tbl.args
+    end
+    h.messages['start-download']()
+    assert(captured_args ~= nil)
+    eq(captured_args[#captured_args], 'https://txxx.com/videos/17007267/mock/')
 end)
 print('Toolbar tests passed: '..total)

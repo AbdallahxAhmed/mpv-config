@@ -120,7 +120,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("hwdec=yes", content)
         self.assertIn("max_height=200", content)
         self.assertIn("max_width=200", content)
-        self.assertIn("spawn_first=no", content)
+        self.assertIn("spawn_first=yes", content)
 
     def test_migrate_input_conf_updates_f8_and_preserves_custom(self):
         from setup import _migrate_input_conf
