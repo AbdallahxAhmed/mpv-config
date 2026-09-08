@@ -316,7 +316,46 @@ function M.default_download_dir()
     return home:gsub('\\', '/') .. '/Downloads'
 end
 
-function M.download_args(url, output_dir, is_audio_only, ytdl_format)
+function M.clean_stream_url(raw)
+    if type(raw) ~= 'string' or raw == '' then return nil end
+    local s = raw:gsub('^%s+', ''):gsub('%s+$', '')
+    while (#s >= 2 and (s:sub(1,1) == '"' or s:sub(1,1) == "'")) do
+        s = s:sub(2, -2):gsub('^%s+', ''):gsub('%s+$', '')
+    end
+    if s:find('^ytdl://') then
+        s = s:sub(8):gsub('^%s+', ''):gsub('%s+$', '')
+    end
+    if s:find('^edl://') then
+        local inner = s:match('%%[0-9]+%%([^,;%s]+)') or s:match('(https?://[^,;%s]+)')
+        if inner and inner:find('^https?://') then
+            s = inner
+        end
+    end
+    if s:find('^https?://') then
+        return s
+    end
+    return nil
+end
+
+function M.resolve_stream_urls(source_url, path, stream_open)
+    local clean_source = M.clean_stream_url(source_url)
+    local clean_path = M.clean_stream_url(path)
+    local clean_open = M.clean_stream_url(stream_open)
+
+    local primary = clean_source or clean_path or clean_open
+    local secondary = nil
+    if clean_source and clean_path and clean_source ~= clean_path then
+        secondary = clean_path
+    elseif clean_source and clean_open and clean_source ~= clean_open then
+        secondary = clean_open
+    elseif clean_path and clean_open and clean_path ~= clean_open then
+        secondary = clean_open
+    end
+
+    return primary, secondary
+end
+
+function M.download_args(url, output_dir, is_audio_only, ytdl_format, extra_opts)
     if type(url) ~= 'string' or url == '' then return nil end
     local dir = (output_dir or M.default_download_dir()):gsub('\\', '/')
     local template = dir .. '/%(title)s [%(id)s].%(ext)s'
@@ -326,6 +365,7 @@ function M.download_args(url, output_dir, is_audio_only, ytdl_format)
         '--continue',
         '--no-overwrites',
         '--windows-filenames',
+        '--no-mtime',
         '--concurrent-fragments', '4',
     }
     if is_audio_only then
@@ -343,6 +383,16 @@ function M.download_args(url, output_dir, is_audio_only, ytdl_format)
         table.insert(args, fmt)
         table.insert(args, '--merge-output-format')
         table.insert(args, 'mp4')
+    end
+    if type(extra_opts) == 'table' then
+        if extra_opts.referer and extra_opts.referer ~= '' then
+            table.insert(args, '--referer')
+            table.insert(args, extra_opts.referer)
+        end
+        if extra_opts.user_agent and extra_opts.user_agent ~= '' and not extra_opts.user_agent:find('^mpv') and not extra_opts.user_agent:find('^libmpv') then
+            table.insert(args, '--user-agent')
+            table.insert(args, extra_opts.user_agent)
+        end
     end
     table.insert(args, '-o')
     table.insert(args, template)

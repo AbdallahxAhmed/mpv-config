@@ -360,27 +360,54 @@ local function publish_download(force)
     if data then pcall(mp.commandv, 'script-message-to', 'uosc', 'set-button', 'download-video', data) end
 end
 
+local function extract_clean_error(res, err)
+    local raw = (res and (res.stderr or res.stdout)) or tostring(err or '')
+    if type(raw) ~= 'string' or raw == '' then return 'Download failed.' end
+    for line in raw:gmatch('[^\r\n]+') do
+        local err_msg = line:match('ERROR:%s*(.+)')
+        if err_msg then
+            err_msg = err_msg:gsub('^%[.-%]%s*', '')
+            if #err_msg > 65 then err_msg = err_msg:sub(1, 62) .. '...' end
+            return 'Download error: ' .. err_msg
+        end
+    end
+    return 'Download failed. Check terminal or logs.'
+end
+
 local function start_download(is_audio_only)
     if is_downloading then
         mp.osd_message('Download already in progress in background...', 3)
         return
     end
 
-    local url = mp.get_property_native('user-data/mpv/ytdl/source-url')
-    if not url or url == '' then url = mp.get_property('path') end
-    if type(url) == 'string' then
-        url = url:gsub('^["\']', ''):gsub('["\']$', '')
+    local source_url = mp.get_property_native('user-data/mpv/ytdl/source-url')
+    local path = mp.get_property('path')
+    local stream_open = mp.get_property('stream-open-filename')
+
+    local primary_url, secondary_url = nil, nil
+    if policy and policy.resolve_stream_urls then
+        primary_url, secondary_url = policy.resolve_stream_urls(source_url, path, stream_open)
+    else
+        local clean = function(raw)
+            if type(raw) ~= 'string' or raw == '' then return nil end
+            local s = raw:gsub('^%s+', ''):gsub('%s+$', '')
+            while (#s >= 2 and (s:sub(1,1) == '"' or s:sub(1,1) == "'")) do
+                s = s:sub(2, -2):gsub('^%s+', ''):gsub('%s+$', '')
+            end
+            if s:find('^ytdl://') then s = s:sub(8):gsub('^%s+', ''):gsub('%s+$', '') end
+            if s:find('^edl://') then
+                local inner = s:match('%%[0-9]+%%(https?://[^,;%s]+)') or s:match('(https?://[^,;%s]+)')
+                if inner then s = inner end
+            end
+            if s:find('^https?://') then return s end
+            return nil
+        end
+        primary_url = clean(source_url) or clean(path) or clean(stream_open)
     end
-    if type(url) == 'string' and url:find('^edl://') then
-        local inner = url:match('%%[0-9]+%%(https?://[^,;]+)') or url:match('(https?://[^,;%s]+)')
-        if inner then url = inner end
-    end
-    if not url or (not url:find('^https?://') and not url:find('^ytdl://')) then
+
+    if not primary_url then
         mp.osd_message('Download only works for online streams/URLs.', 3)
         return
-    end
-    if url:find('^ytdl://') then
-        url = url:sub(8)
     end
 
     local media_title = mp.get_property('media-title') or 'stream'
@@ -438,39 +465,48 @@ local function start_download(is_audio_only)
         end
     end
 
+    local referer = mp.get_property('referrer')
+    local user_agent = mp.get_property('user-agent')
+    local extra_opts = {
+        referer = (referer and referer ~= '') and referer or nil,
+        user_agent = (user_agent and user_agent ~= '') and user_agent or nil,
+    }
+
     local ytdl_format = mp.get_property('ytdl-format')
-    local args = nil
-    if policy and policy.download_args then
-        args = policy.download_args(url, nil, is_audio_only, ytdl_format)
-    end
-    if not args then
-        local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
-        local dir = home:gsub('\\', '/') .. '/Downloads'
-        local template = dir .. '/%(title)s [%(id)s].%(ext)s'
-        args = {'yt-dlp', '--no-playlist', '--continue', '--no-overwrites', '--windows-filenames', '--concurrent-fragments', '4'}
-        if is_audio_only then
-            table.insert(args, '-x')
-            table.insert(args, '--audio-format')
-            table.insert(args, 'mp3')
-            table.insert(args, '--audio-quality')
-            table.insert(args, '0')
-        else
-            local fmt = ytdl_format
-            if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
-                fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
-            end
-            table.insert(args, '-f')
-            table.insert(args, fmt)
-            table.insert(args, '--merge-output-format')
-            table.insert(args, 'mp4')
+    local make_args = function(target_url)
+        local args = nil
+        if policy and policy.download_args then
+            args = policy.download_args(target_url, nil, is_audio_only, ytdl_format, extra_opts)
         end
-        table.insert(args, '-o')
-        table.insert(args, template)
-        table.insert(args, url)
+        if not args then
+            local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+            local dir = home:gsub('\\', '/') .. '/Downloads'
+            local template = dir .. '/%(title)s [%(id)s].%(ext)s'
+            args = {'yt-dlp', '--no-playlist', '--continue', '--no-overwrites', '--windows-filenames', '--no-mtime', '--concurrent-fragments', '4'}
+            if is_audio_only then
+                table.insert(args, '-x')
+                table.insert(args, '--audio-format')
+                table.insert(args, 'mp3')
+                table.insert(args, '--audio-quality')
+                table.insert(args, '0')
+            else
+                local fmt = ytdl_format
+                if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
+                    fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
+                end
+                table.insert(args, '-f')
+                table.insert(args, fmt)
+                table.insert(args, '--merge-output-format')
+                table.insert(args, 'mp4')
+            end
+            table.insert(args, '-o')
+            table.insert(args, template)
+            table.insert(args, target_url)
+        end
+        return args
     end
 
     local target_desc = is_audio_only and 'Audio (MP3)' or 'Video'
-
     is_downloading = true
     download_badge = 'DL'
     publish_download(true)
@@ -481,36 +517,53 @@ local function start_download(is_audio_only)
         download_timer = nil
     end
 
-    if mp.command_native_async then
+    local function run_subprocess(target_url, allow_retry)
+        local cmd_args = make_args(target_url)
         mp.command_native_async({
             name = 'subprocess',
             playback_only = false,
             capture_stdout = true,
             capture_stderr = true,
-            args = args,
+            args = cmd_args,
         }, function(success, res, err)
-            is_downloading = false
             local code = res and res.status or -1
             if success and code == 0 then
+                is_downloading = false
                 download_badge = 'OK'
                 mp.osd_message(string.format('Download complete: %s\nSaved to Downloads folder', media_title), 5)
-            else
-                download_badge = 'ERR'
-                local err_msg = res and (res.stderr or res.stdout) or tostring(err)
-                msg.warn('yt-dlp download failed: ' .. tostring(err_msg))
-                mp.osd_message('Download failed. Check terminal or logs.', 4)
-            end
-            publish_download(true)
-
-            if mp.add_timeout then
-                pcall(function()
-                    download_timer = mp.add_timeout(4, function()
-                        download_badge = nil
-                        publish_download(true)
+                publish_download(true)
+                if mp.add_timeout then
+                    pcall(function()
+                        download_timer = mp.add_timeout(4, function()
+                            download_badge = nil
+                            publish_download(true)
+                        end)
                     end)
-                end)
+                end
+            elseif allow_retry and secondary_url and secondary_url ~= target_url then
+                if msg and msg.info then msg.info('Primary download failed, retrying with secondary stream URL: ' .. secondary_url) end
+                run_subprocess(secondary_url, false)
+            else
+                is_downloading = false
+                download_badge = 'ERR'
+                local err_line = extract_clean_error(res, err)
+                if msg and msg.warn then msg.warn('Download failed: ' .. tostring(res and (res.stderr or res.stdout) or err)) end
+                mp.osd_message(err_line, 5)
+                publish_download(true)
+                if mp.add_timeout then
+                    pcall(function()
+                        download_timer = mp.add_timeout(4, function()
+                            download_badge = nil
+                            publish_download(true)
+                        end)
+                    end)
+                end
             end
         end)
+    end
+
+    if mp.command_native_async then
+        run_subprocess(primary_url, true)
     else
         is_downloading = false
         download_badge = 'ERR'

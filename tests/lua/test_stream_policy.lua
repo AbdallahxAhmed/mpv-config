@@ -211,4 +211,34 @@ test('resolve download target path sanitizes title and preserves directory', fun
     local path3 = p.resolve_download_target_path('video', 'D:/Downloads', 'mp4', function(p) return mock_files[p] == true end)
     eq(path3, 'D:/Downloads/video (2).mp4')
 end)
+test('clean stream url normalizes quotes whitespace and edl protocols', function()
+    eq(p.clean_stream_url('""https://txxx.com/videos/17007267/""'), 'https://txxx.com/videos/17007267/')
+    eq(p.clean_stream_url('  \'https://vimeo.com/12345\'  '), 'https://vimeo.com/12345')
+    eq(p.clean_stream_url('ytdl://https://youtu.be/abc'), 'https://youtu.be/abc')
+    local edl = 'edl://!new_stream;%44%https://site.com/get_file/video.mp4?ti=123,length=120'
+    eq(p.clean_stream_url(edl), 'https://site.com/get_file/video.mp4?ti=123')
+    eq(p.clean_stream_url('C:\\movies\\local.mp4'), nil)
+    eq(p.clean_stream_url(nil), nil)
+end)
+test('resolve stream urls returns primary extractor URL and secondary direct stream', function()
+    local source = '""https://txxx.com/videos/17007267/""'
+    local edl = 'edl://!new_stream;%44%https://site.com/get_file/video.mp4?ti=123,length=120'
+    local pri, sec = p.resolve_stream_urls(source, edl, nil)
+    eq(pri, 'https://txxx.com/videos/17007267/')
+    eq(sec, 'https://site.com/get_file/video.mp4?ti=123')
+
+    local pri2, sec2 = p.resolve_stream_urls(nil, 'https://youtu.be/123', nil)
+    eq(pri2, 'https://youtu.be/123')
+    eq(sec2, nil)
+end)
+test('download args supports no-mtime referer and custom user-agent', function()
+    local args = p.download_args('https://site.com/video', 'D:/Downloads', false, nil, {
+        referer = 'https://site.com/',
+        user_agent = 'Mozilla/5.0 CustomAgent/1.0',
+    })
+    local full = table.concat(args, ' ')
+    assert(full:find('--no-mtime', 1, true) ~= nil)
+    assert(full:find('--referer https://site.com/', 1, true) ~= nil)
+    assert(full:find('--user-agent Mozilla/5.0 CustomAgent/1.0', 1, true) ~= nil)
+end)
 print('Policy tests passed: '..n)

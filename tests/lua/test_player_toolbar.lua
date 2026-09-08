@@ -276,5 +276,32 @@ test('download button dumps cache directly when video is completely buffered', f
     h.timeouts[1].fn()
     eq(h.buttons['download-video'].badge, nil)
 end)
+test('download button retries with secondary stream URL on primary failure and formats error', function()
+    local h=harness()
+    h.props['user-data/mpv/ytdl/source-url'] = '""https://site.com/watch/123""'
+    h.props['path'] = 'edl://!new_stream;%32%https://cdn.site.com/direct.mp4,length=100'
+    h.props['media-title'] = 'Test Stream'
+
+    local calls = {}
+    h.async_handler = function(tbl, cb)
+        table.insert(calls, {args=tbl.args, cb=cb})
+    end
+
+    h.messages['start-download']()
+    eq(#calls, 1)
+    eq(calls[1].args[#calls[1].args], 'https://site.com/watch/123')
+
+    -- Simulate primary failure with yt-dlp error
+    calls[1].cb(false, {status=1, stderr='ERROR: [site] HTTP Error 403: Forbidden'}, nil)
+
+    -- Should automatically retry with secondary URL!
+    eq(#calls, 2)
+    eq(calls[2].args[#calls[2].args], 'https://cdn.site.com/direct.mp4')
+
+    -- Simulate secondary failure with error message
+    calls[2].cb(false, {status=1, stderr='ERROR: [generic] HTTP Error 404: Not Found'}, nil)
+    eq(h.buttons['download-video'].badge, 'ERR')
+    assert(h.osd:find('Download error: HTTP Error 404: Not Found', 1, true) ~= nil)
+end)
 print('Toolbar tests passed: '..total)
 
