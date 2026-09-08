@@ -154,7 +154,7 @@ class GuiUpgrade(unittest.TestCase):
     def test_toolbar_is_mouse_first_and_fullscreen_is_rightmost(self):
         items = gui.NEW_CONTROLS.split(',')
         self.assertEqual(items[-2:], ['space', 'fullscreen'])
-        self.assertEqual(items.count('space'), 1)
+        self.assertEqual(items.count('space'), 3)
         self.assertEqual(items.count('fullscreen'), 1)
         self.assertIn('command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions', items)
         self.assertIn('button:audio-tracks', items)

@@ -48,7 +48,7 @@ local options = {
     hwdec = false,
 
     -- Windows only: use native Windows API to write to pipe (requires LuaJIT)
-    direct_io = true,
+    direct_io = false,
 
     -- Custom path to the mpv executable
     mpv_path = "mpv"
@@ -225,7 +225,6 @@ local using_storyboards = false
 local thumbnail_delta = nil
 local thumb_count_per_storyboard = 1
 local storyboard_thumbnails = {}
-local frame_cache = {}
 
 local dirty = false
 
@@ -527,10 +526,6 @@ local function remove_thumbnail_files()
     end
     os.remove(options.thumbnail)
     os.remove(options.thumbnail..".bgra")
-    for b, cfile in pairs(frame_cache) do
-        os.remove(cfile..".bgra")
-    end
-    frame_cache = {}
 end
 
 local function remove_storyboard_files()
@@ -554,7 +549,7 @@ local function spawn(time)
     if path == nil then return end
 
     local is_net = properties["demuxer-via-network"] or (type(path) == "string" and path:find("^https?://") ~= nil)
-    local demux_bytes = is_net and "2MiB" or "128KiB"
+    local demux_bytes = is_net and "2MiB" or "32MiB"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
     local spawn_path = (is_net and properties["stream-open-filename"] and properties["stream-open-filename"] ~= "" and properties["stream-open-filename"]) or path
 
@@ -786,14 +781,11 @@ end
 
 local function seek(fast)
     if not last_seek_time then return end
-    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
-    if is_net then
-        local now = mp.get_time()
-        -- Watchdog timeout: if previous seek was in flight for > 2.5s without completing, reset seek_in_flight so we never freeze
-        if seek_in_flight and (now - last_seek_sent_time) < 2.5 then
-            pending_seek_target = last_seek_time
-            return
-        end
+    local now = mp.get_time()
+    -- Universal watchdog timeout: if previous seek was in flight for > 1.5s without completing, reset seek_in_flight so scrubbing never freezes
+    if seek_in_flight and (now - last_seek_sent_time) < 1.5 then
+        pending_seek_target = last_seek_time
+        return
     end
     do_raw_seek(last_seek_time, fast)
 end
@@ -834,7 +826,7 @@ local function check_new_thumb()
     -- validity but before actually moving the file, so move to a temporary
     -- location before validity check to make sure everything stays consistant
     -- and valid thumbnails don't get overwritten by invalid ones
-    if not thumbnail_path then return end
+    if not thumbnail_path then thumbnail_path = options.thumbnail end
     local tmp = thumbnail_path..".tmp"
     move_file(thumbnail_path, tmp)
     local finfo = mp.utils.file_info(tmp)
@@ -846,29 +838,7 @@ local function check_new_thumb()
 
         real_w, real_h = w, h
         seek_in_flight = false
-        local finished_target = current_seek_target or last_seek_time
         current_seek_target = nil
-
-        -- Cache decoded frame for instant retrieval on replay/hovering
-        if finished_target and not using_storyboards and thumbnail_path then
-            local b = math.floor(finished_target / 10)
-            if not frame_cache[b] then
-                local cfile = options.thumbnail .. "_c" .. b
-                local inf = io.open(thumbnail_path..".bgra", "rb")
-                if inf then
-                    local data = inf:read("*a")
-                    inf:close()
-                    if data and #data > 0 then
-                        local outf = io.open(cfile..".bgra", "wb")
-                        if outf then
-                            outf:write(data)
-                            outf:close()
-                            frame_cache[b] = cfile
-                        end
-                    end
-                end
-            end
-        end
 
         -- If user moved cursor while previous seek was in flight, dispatch next seek immediately
         if pending_seek_target then
@@ -913,7 +883,6 @@ local function clear()
     show_thumbnail = false
     last_x = nil
     last_y = nil
-    thumbnail_path = nil
     if script_name then return end
     if pre_0_30_0 then
         mp.command_native({"overlay-remove", options.overlay_id})
@@ -944,12 +913,7 @@ local function thumb(time, r_x, r_y, script)
     if time == nil then return end
 
     if not using_storyboards then
-        local b = math.floor(time / 10)
-        if frame_cache[b] then
-            thumbnail_path = frame_cache[b]
-        else
-            thumbnail_path = options.thumbnail
-        end
+        thumbnail_path = options.thumbnail
     end
 
     if r_x == "" or r_y == "" then
@@ -969,7 +933,7 @@ local function thumb(time, r_x, r_y, script)
     end
 
     script_name = script
-    if last_x ~= x or last_y ~= y or not show_thumbnail or (using_storyboards and thumbnail_delta and time ~= last_seek_time) or (not using_storyboards and frame_cache[math.floor(time / 10)]) then
+    if last_x ~= x or last_y ~= y or not show_thumbnail or (using_storyboards and thumbnail_delta and time ~= last_seek_time) then
         show_thumbnail = true
         last_x, last_y = x, y
         draw(real_w, real_h, script)
@@ -985,9 +949,6 @@ local function thumb(time, r_x, r_y, script)
     if time == last_seek_time then return end
     last_seek_time = time
     if using_storyboards then return end
-
-    -- If we already have a cached frame for this 10-second window, don't issue a redundant network seek!
-    if frame_cache[math.floor(time / 10)] then return end
 
     if not spawned then spawn(time) end
     request_seek()
@@ -1604,14 +1565,13 @@ local function file_load()
     seek_in_flight = false
     pending_seek_target = nil
     current_seek_target = nil
-    frame_cache = {}
     if info_timer then
         info_timer:kill()
         info_timer = nil
     end
     using_storyboards = false
     thumbnail_delta = nil
-    thumbnail_path = nil
+    thumbnail_path = options.thumbnail
 
     cancel_queued_processes()
 
