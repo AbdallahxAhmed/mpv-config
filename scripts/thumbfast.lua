@@ -582,7 +582,7 @@ local function spawn(time)
         "--vd-lavc-skiploopfilter=all", "--vd-lavc-software-fallback=1", "--vd-lavc-fast", "--vd-lavc-threads=2", "--hwdec="..(options.hwdec and "auto" or "no"),
         "--vf="..vf_string(filters_all, true),
         "--sws-scaler=fast-bilinear",
-        "--video-rotate="..last_rotate,
+        "--video-rotate="..(last_rotate or properties["video-rotate"] or 0),
         "--ovc=rawvideo", "--of=image2", "--ofopts=update=1", "--o="..thumbnail_path
     }
 
@@ -691,11 +691,6 @@ local function run(command)
     local command_n = command.."\n"
 
     if os_name == "windows" then
-        if file and file_bytes + #command_n >= 4096 then
-            file:close()
-            file = nil
-            file_bytes = 0
-        end
         if not file then
             file = io.open("\\\\.\\pipe\\"..options.socket, "r+b")
         end
@@ -706,9 +701,15 @@ local function run(command)
         file = io.open(options.socket, "r+")
     end
     if file then
-        file_bytes = file:seek("end") or 0
-        file:write(command_n)
-        file:flush()
+        local ok = pcall(function()
+            file:write(command_n)
+            file:flush()
+        end)
+        if not ok then
+            pcall(function() file:close() end)
+            file = nil
+            file_bytes = 0
+        end
     end
 end
 
@@ -781,11 +782,14 @@ end
 
 local function seek(fast)
     if not last_seek_time then return end
-    local now = mp.get_time()
-    -- Universal watchdog timeout: if previous seek was in flight for > 1.5s without completing, reset seek_in_flight so scrubbing never freezes
-    if seek_in_flight and (now - last_seek_sent_time) < 1.5 then
-        pending_seek_target = last_seek_time
-        return
+    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+    if is_net then
+        local now = mp.get_time()
+        -- Network streams: debounce requests to prevent overwhelming the network connection
+        if seek_in_flight and (now - last_seek_sent_time) < 2.0 then
+            pending_seek_target = last_seek_time
+            return
+        end
     end
     do_raw_seek(last_seek_time, fast)
 end
@@ -1554,11 +1558,21 @@ function setup_storyboards()
     end
 end
 
+local file_seq = 0
+local base_socket = options.socket
+local base_thumbnail = options.thumbnail
+
 local function file_load()
     clear()
     spawned = false
     real_w, real_h = nil, nil
     last_real_w, last_real_h = nil, nil
+    last_effective_w, last_effective_h = nil, nil
+    last_vf_reset, last_crop = nil, nil
+    last_rotate = properties["video-rotate"] or 0
+    last_par = ""
+    last_has_vid = 0
+    force_disabled = false
     last_tone_mapping = nil
     last_seek_time = nil
     last_decoded_time = nil
@@ -1571,16 +1585,32 @@ local function file_load()
     end
     using_storyboards = false
     thumbnail_delta = nil
+
+    if file then
+        pcall(function() file:close() end)
+        file = nil
+        file_bytes = 0
+    end
+
+    file_seq = file_seq + 1
+    options.socket = base_socket .. "_" .. file_seq
+    options.thumbnail = base_thumbnail .. "_" .. file_seq
     thumbnail_path = options.thumbnail
+
+    if options.direct_io and os_name == "windows" and winapi then
+        winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+    end
 
     cancel_queued_processes()
 
     calc_dimensions()
-    info(effective_w, effective_h)
+    if effective_w and effective_h then
+        info(effective_w, effective_h)
+    end
     if disabled then return end
 
     spawned = false
-    if options.spawn_first then -- TODO: skip if matches storyboard stuff
+    if options.spawn_first and effective_w and effective_h then
         spawn(mp.get_property_number("time-pos", 0))
         first_file = true
         file_timer:resume()
