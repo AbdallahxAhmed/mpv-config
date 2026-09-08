@@ -268,6 +268,14 @@ SYSTEM_DEPS = {
         "verify":  ["python", "--version"],
         "verify_alt": ["python3", "--version"],
     },
+    "aria2": {
+        "windows": {"method": "winget", "id": "aria2.aria2"},
+        "arch":    {"method": "pacman", "pkg": "aria2"},
+        "ubuntu":  {"method": "apt",    "pkg": "aria2"},
+        "fedora":  {"method": "dnf",    "pkg": "aria2"},
+        "macos":   {"method": "brew",   "pkg": "aria2"},
+        "verify":  ["aria2c", "--version"],
+    },
     "ffsubsync": {
         "arch":    {"method": "aur", "pkg": "python-ffsubsync", "fallback_pkg": "ffsubsync"},
         "ubuntu":  {"method": "uv_tool", "pkg": "ffsubsync", "uv_python": "3.11", "uv_no_fallback": True},
