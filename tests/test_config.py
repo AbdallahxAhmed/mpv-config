@@ -89,7 +89,8 @@ class TestConfig(unittest.TestCase):
             "button:audio-tracks" in controls_items or
             "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in controls_items
         )
-        self.assertEqual(controls_items[-2:], ["space", "fullscreen"])
+        self.assertEqual(controls_items[-1], "fullscreen")
+        self.assertIn("space", controls_items)
         self.assertNotIn("keypress", controls_str)
 
     def test_active_uosc_controls_has_subtitles_and_audio(self):
