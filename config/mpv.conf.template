@@ -8,7 +8,7 @@
 osc                       = no
 osd-bar                   = no
 border                    = {{BORDER}}
-osd-font                  = "Segoe UI Variable Display"
+osd-font                  = "Segoe UI"
 osd-font-size             = 32
 osd-bold                  = no
 osd-border-size           = 1.2
