@@ -18,7 +18,7 @@ ACCEPTED_CONTROLS = (OLD_CONTROLS, PREVIOUS_CONTROLS, ICON_FIRST_V1_CONTROLS, IC
 REQUIRED_SCRIPTS = (
     "scripts/smart-paste.lua", "scripts/ytdl-sub-menu.lua", "scripts/ytdl_hook.lua",
     "scripts/modules/stream_policy.lua", "scripts/player-toolbar.lua",
-    "scripts/vtt_translate.py",
+    "tools/vtt_translate.py",
 )
 DEFAULTS = {'controls_size': (('44',), '32'), 'controls_spacing': (('2', '4', '8'), '10'),
             'controls_persistency': (('',), 'idle'), 'menu_item_height': (('36',), '44'),
@@ -122,6 +122,9 @@ def main(argv=None):
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
                 synced.append(str(script_rel))
+        legacy_script = cfg / "scripts" / "vtt_translate.py"
+        if legacy_script.is_file():
+            legacy_script.unlink()
         if synced:
             print('Synced scripts: ' + ', '.join(synced))
 

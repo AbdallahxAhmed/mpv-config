@@ -130,9 +130,11 @@ local function open_quality_menu()
         for _, f in ipairs(formats) do
             if type(f) == 'table' and f.vcodec and f.vcodec ~= 'none' and f.height and f.height > 0 then
                 local h = f.height
+                local w = f.width or 0
                 local fps = f.fps and math.floor(f.fps + 0.5) or nil
+                local note = f.format_note
                 if not heights_map[h] or (fps and fps > (heights_map[h].fps or 0)) then
-                    heights_map[h] = {height = h, fps = fps}
+                    heights_map[h] = {height = h, width = w, fps = fps, format_note = note}
                 end
             end
         end
@@ -153,16 +155,19 @@ local function open_quality_menu()
     local items = {}
     for _, info in ipairs(sorted_heights) do
         local h = info.height
-        local label = (h >= 2160 and '4K (' .. h .. 'p)' or (h .. 'p'))
-        if info.fps and info.fps > 30 then
-            label = label .. tostring(info.fps)
+        local label = policy and policy.quality_label and policy.quality_label(info.width, h, info.fps, info.format_note)
+        if not label then
+            label = (h >= 2160 and '4K (' .. h .. 'p)' or (h .. 'p'))
+            if info.fps and info.fps > 30 then
+                label = label .. tostring(info.fps)
+            end
         end
         local is_current = (current_h > 0 and math.abs(current_h - h) <= 15)
         items[#items + 1] = {
             title = label,
             hint = is_current and 'Current' or nil,
             active = is_current,
-            value = {'script-message-to', script, 'set-quality', tostring(h)},
+            value = {'script-message-to', script, 'set-quality', tostring(h), label},
         }
     end
 
@@ -173,7 +178,7 @@ local function open_quality_menu()
     })
     if menu_json then pcall(mp.commandv, 'script-message-to', 'uosc', 'open-menu', menu_json) end
 end
-local function set_quality(target_h)
+local function set_quality(target_h, target_label)
     local h = tonumber(target_h)
     if not h then return end
     local format = 'bestvideo[height<=?' .. h .. ']+bestaudio/best[height<=?' .. h .. ']'
@@ -188,7 +193,7 @@ local function set_quality(target_h)
         end
         mp.register_event('file-loaded', on_reload)
     end
-    mp.osd_message('Quality: ' .. (h >= 2160 and '4K' or (h .. 'p')), 2)
+    mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
 end
 
 local clean_lang_names = {

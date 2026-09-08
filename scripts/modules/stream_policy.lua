@@ -90,6 +90,51 @@ function M.quality_monogram(w, h)
     return 'SD'
 end
 
+function M.quality_label(w, h, fps, format_note)
+    local width = tonumber(w) or 0
+    local height = tonumber(h) or 0
+    local note = tostring(format_note or ''):lower()
+
+    local tier = nil
+    local note_p = note:match('^(%d+)p')
+    if note_p then
+        local np = tonumber(note_p)
+        if np >= 2160 then
+            tier = '4K (' .. note_p .. 'p)'
+        else
+            tier = note_p .. 'p'
+        end
+    end
+
+    if not tier then
+        if height >= 2100 or width >= 3800 then
+            tier = '4K' .. (height > 0 and height ~= 2160 and (' (' .. height .. 'p)') or '')
+        elseif height >= 1400 or width >= 2500 then
+            tier = '1440p'
+        elseif height >= 1000 or width >= 1900 then
+            tier = '1080p'
+        elseif height >= 700 or width >= 1250 then
+            tier = '720p'
+        elseif height >= 460 or width >= 840 then
+            tier = '480p'
+        elseif height >= 340 or width >= 600 then
+            tier = '360p'
+        elseif height >= 220 or width >= 400 then
+            tier = '240p'
+        elseif height > 0 or width > 0 then
+            tier = '144p'
+        else
+            tier = 'Auto'
+        end
+    end
+
+    local rate = tonumber(fps) and math.floor(tonumber(fps) + 0.5) or nil
+    if rate and rate > 30 then
+        tier = tier .. tostring(rate)
+    end
+    return tier
+end
+
 function M.language(value)
     if type(value) ~= 'string' then return '' end
     local lang = value:lower():gsub('_', '-'):gsub('%-orig$', '')
@@ -214,7 +259,8 @@ function M.captions(json, preferences)
             if type(lang) == 'string' and type(entries) == 'table' and lang ~= 'live_chat' then
                 for _, entry in ipairs(entries) do
                     if type(entry) == 'table' and subtitle_formats[entry.ext] and M.http_url(entry.url) then
-                        local candidate = subtitle_formats[entry.ext]
+                        local is_m3u8 = entry.url:find('manifest%.googlevideo%.com') or entry.url:find('m3u8')
+                        local candidate = subtitle_formats[entry.ext] + (is_m3u8 and 100 or 0)
                         if not score or candidate < score then best, score = entry, candidate end
                     end
                 end

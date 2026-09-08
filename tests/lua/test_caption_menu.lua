@@ -147,4 +147,11 @@ test('changing external subtitle removes prior external track from memory',funct
     end
     assert(found_remove)
 end)
+test('translated track without cookies uses fast-path translation pipeline',function()
+    local h=harness(); h:load()
+    local item=h:caption('Auto-translated'); h:activate(item)
+    -- In standard mock harness without translator on disk, it tries curl
+    eq(#h.jobs,1)
+    assert(h.jobs[1].command.args[1]:find('curl'))
+end)
 print('Caption tests passed: '..count)

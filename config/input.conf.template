@@ -150,6 +150,9 @@ Shift+B  script-binding sponsorblock_downvote
 # Subtitle sync (autosubsync) — n = syNc
 n    script-binding autosubsync-menu
 
+# Subtitle background box toggle (Netflix / YouTube translucent box <-> transparent Cinema)
+b    cycle-values sub-back-color "#B3080808" "#00000000"
+
 # ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
 # Subtitles menu (uosc) — ؤ = c
 ؤ        script-binding uosc/subtitles
@@ -179,6 +182,9 @@ G        script-binding sponsorblock_submit_segment
 
 # Subtitle sync (autosubsync) — ى = n (syNc)
 ى        script-binding autosubsync-menu
+
+# Subtitle background box toggle — لا = b
+لا       cycle-values sub-back-color "#B3080808" "#00000000"
 
 # Instant play from clipboard — Ctrl+ر = Ctrl+v
 Ctrl+ر           script-binding smart_paste/paste-to-open

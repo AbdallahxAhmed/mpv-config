@@ -75,12 +75,15 @@ slang                     = ar,en
 # upscale chain -> ringing, haloing, color bleed on text. Do not change.
 blend-subtitles           = no
 subs-with-matching-audio  = no
-sub-font                  = "Tahoma"
-sub-font-size             = 42
-sub-border-size           = 2.5
-sub-shadow-offset         = 1
+sub-font                  = "Segoe UI"
+sub-font-size             = 40
+sub-bold                  = yes
 sub-color                 = "#FFFFFFFF"
+sub-back-color            = "#B3080808"
+sub-border-size           = 1.0
 sub-border-color          = "#FF000000"
+sub-shadow-offset         = 0
+sub-margin-y              = 45
 
 # Subtitle Timing & Display Sanitation
 sub-fix-timing = yes

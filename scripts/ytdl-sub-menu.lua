@@ -9,12 +9,15 @@ options.read_options(o, 'ytdl_sub_menu')
 local path = mp.find_config_file('scripts/modules/stream_policy.lua')
 local ok, policy = pcall(dofile, path or '')
 if not ok or type(policy) ~= 'table' then
-    msg.warn('Caption helper missing; using the normal uosc subtitle menu')
-    local function fallback() mp.commandv('script-binding', 'uosc/subtitles') end
-    mp.add_key_binding(nil, 'open', fallback)
-    mp.register_script_message('open', fallback)
-    mp.register_script_message('open-menu', fallback)
-    return
+    ok, policy = pcall(dofile, 'scripts/modules/stream_policy.lua')
+    if not ok or type(policy) ~= 'table' then
+        msg.warn('Caption helper missing; using the normal uosc subtitle menu')
+        local function fallback() mp.commandv('script-binding', 'uosc/subtitles') end
+        mp.add_key_binding(nil, 'open', fallback)
+        mp.register_script_message('open', fallback)
+        mp.register_script_message('open-menu', fallback)
+        return
+    end
 end
 local epoch, revision = 0, 0
 local ready, attempted = false, false
@@ -37,6 +40,7 @@ local function cancel_job()
 end
 local current_temp_file = nil
 local last_external_sub_id = nil
+local current_sub_url = nil
 
 local function cleanup_temp_file()
     if current_temp_file and utils.file_info(current_temp_file) then
@@ -52,6 +56,7 @@ local function reset()
     cancel_job()
     cleanup_temp_file()
     last_external_sub_id = nil
+    current_sub_url = nil
 end
 mp.register_event('start-file', reset)
 mp.register_event('end-file', reset)
@@ -118,10 +123,12 @@ local function ensure_vtt_url(raw_url)
     return sub_url
 end
 
-local function get_temp_sub_path()
+local temp_counter = 0
+local function get_temp_sub_path(suffix)
+    temp_counter = temp_counter + 1
     local temp_dir = (os.getenv('TEMP') or os.getenv('TMP') or 'C:/Windows/Temp'):gsub('\\', '/')
     local pid = tostring(mp.get_property_native('pid') or 0)
-    return string.format('%s/mpv_sub_%s_%d.vtt', temp_dir, pid, os.time())
+    return string.format('%s/mpv_sub_%s_%d_%d%s.vtt', temp_dir, pid, os.time(), temp_counter, suffix or '')
 end
 
 local function find_curl()
@@ -131,6 +138,7 @@ local function find_curl()
 end
 
 local function is_valid_sub_file(path)
+    if not path then return false end
     local f = io.open(path, 'r')
     if not f then return true end
     local chunk = f:read(512) or ''
@@ -155,12 +163,34 @@ local function find_cookies_file()
     return nil
 end
 
-local function find_translator()
-    local mpv_home = mp.command_native and mp.command_native({'expand-path', '~~/'})
+local function find_python()
+    local localappdata = (os.getenv('LOCALAPPDATA') or ''):gsub('\\', '/')
+    local programfiles = (os.getenv('ProgramFiles') or ''):gsub('\\', '/')
     local candidates = {
-        mpv_home and (mpv_home .. '/scripts/vtt_translate.py'):gsub('\\', '/'),
-        mpv_home and (mpv_home .. '/tools/vtt_translate.py'):gsub('\\', '/'),
-        'scripts/vtt_translate.py',
+        localappdata ~= '' and (localappdata .. '/Programs/Python/Python311/python.exe'),
+        localappdata ~= '' and (localappdata .. '/Programs/Python/Python312/python.exe'),
+        localappdata ~= '' and (localappdata .. '/Programs/Python/Python313/python.exe'),
+        localappdata ~= '' and (localappdata .. '/Programs/Python/Python310/python.exe'),
+        programfiles ~= '' and (programfiles .. '/Python311/python.exe'),
+        programfiles ~= '' and (programfiles .. '/Python312/python.exe'),
+        'C:/Python311/python.exe',
+        'C:/Python312/python.exe',
+        'python',
+        'python3',
+    }
+    for _, c in ipairs(candidates) do
+        if c and utils.file_info(c) then return c end
+    end
+    return 'python'
+end
+
+local function find_translator()
+    local appdata = (os.getenv('APPDATA') or ''):gsub('\\', '/')
+    local userprofile = (os.getenv('USERPROFILE') or ''):gsub('\\', '/')
+    local candidates = {
+        mp.find_config_file and mp.find_config_file('tools/vtt_translate.py'),
+        appdata ~= '' and (appdata .. '/mpv/tools/vtt_translate.py'),
+        userprofile ~= '' and (userprofile .. '/Desktop/mpv-config/tools/vtt_translate.py'),
         'tools/vtt_translate.py',
     }
     for _, path in ipairs(candidates) do
@@ -184,21 +214,24 @@ local function find_base_caption()
     return nil
 end
 
-local function mount_caption(path, title, lang)
+local function mount_caption(path, title, lang, entry_url)
     local prev_temp = current_temp_file
     current_temp_file = path
+    current_sub_url = entry_url
     if prev_temp and prev_temp ~= path and utils.file_info(prev_temp) then
         os.remove(prev_temp)
     end
 
     local sid_observer, timeout_timer
+    local old_sub_id = last_external_sub_id
     sid_observer = function(name, new_sid)
-        if type(new_sid) == 'number' and new_sid ~= last_external_sub_id then
+        local sid_num = tonumber(new_sid)
+        if sid_num and sid_num ~= old_sub_id then
             if timeout_timer then timeout_timer:kill(); timeout_timer = nil end
-            if last_external_sub_id then
-                mp.commandv('sub-remove', tostring(last_external_sub_id))
+            if old_sub_id then
+                mp.commandv('sub-remove', tostring(old_sub_id))
             end
-            last_external_sub_id = new_sid
+            last_external_sub_id = sid_num
             mp.unobserve_property(sid_observer)
         end
     end
@@ -218,56 +251,99 @@ end
 select_caption = function(entry)
     if not current_url() or not entry or not policy.http_url(entry.url) then return end
     for _, track in ipairs(mp.get_property_native('track-list', {})) do
-        if track.type == 'sub' and (track['external-filename'] == entry.url or (current_temp_file and track['external-filename'] == current_temp_file)) then
+        if track.type == 'sub' and (track['external-filename'] == entry.url or (current_sub_url == entry.url and current_temp_file and track['external-filename'] == current_temp_file)) then
             select_loaded(track.id, epoch)
             return
         end
     end
     if job and job.label == entry.url then return end
     local title = entry.name .. ' - ' .. kind_names[entry.kind]
-    mp.osd_message('Loading ' .. title .. '...', 3)
 
     local target_url = ensure_vtt_url(entry.url)
-    local temp_path = get_temp_sub_path()
-
+    local temp_path = get_temp_sub_path('_out')
+    local cookie_file = find_cookies_file()
     local user_agent = mp.get_property('file-local-options/user-agent') or 'Mozilla/5.0'
+
+    local base = (entry.kind == 'translated') and find_base_caption()
+    local translator = base and find_translator()
+
+    -- Fast-path for translated tracks without cookies:
+    -- YouTube timedtext?tlang=XX blocks unauthenticated curl with HTTP 429.
+    -- Directly download the base (English/source) transcript and translate locally in ~0.7s.
+    if entry.kind == 'translated' and not cookie_file and base and translator then
+        mp.osd_message('Translating to ' .. entry.name .. '...', 3)
+        local base_url = ensure_vtt_url(base.url)
+        local base_temp = get_temp_sub_path('_base')
+        local base_curl_args = {
+            find_curl(), '-s', '-f', '-L', '--compressed',
+            '--max-time', '15',
+            '-H', 'User-Agent: ' .. user_agent,
+            base_url, '-o', base_temp,
+        }
+        start_async({
+            name = 'subprocess',
+            playback_only = false,
+            capture_stdout = false,
+            capture_stderr = true,
+            args = base_curl_args,
+        }, base.url, function(base_ok, base_res)
+            if not base_ok or (type(base_res) == 'table' and base_res.status ~= 0) or not is_valid_sub_file(base_temp) then
+                if utils.file_info(base_temp) then os.remove(base_temp) end
+                mp.osd_message('Could not load base captions. Refresh the list and retry.', 4)
+                return
+            end
+
+            local py_cmd = {find_python(), translator, '--input', base_temp, '--output', temp_path, '--target', entry.lang, '--source', base.lang or 'en'}
+            start_async({
+                name = 'subprocess',
+                playback_only = false,
+                capture_stdout = false,
+                capture_stderr = true,
+                args = py_cmd,
+            }, 'translate:' .. entry.lang, function(trans_ok, trans_res)
+                if utils.file_info(base_temp) then os.remove(base_temp) end
+                if not trans_ok or (type(trans_res) == 'table' and trans_res.status ~= 0) or not is_valid_sub_file(temp_path) then
+                    if utils.file_info(temp_path) then os.remove(temp_path) end
+                    mp.osd_message('Translation failed. Refresh and retry.', 4)
+                    return
+                end
+                mount_caption(temp_path, title, entry.lang, entry.url)
+            end)
+        end)
+        return
+    end
+
+    mp.osd_message('Loading ' .. title .. '...', 3)
+
+    local raw_temp = get_temp_sub_path('_raw')
     local args = {
         find_curl(),
         '-s', '-f', '-L', '--compressed',
         '--max-time', '15',
         '-H', 'User-Agent: ' .. user_agent,
     }
-    local headers = mp.get_property_native('file-local-options/http-header-fields')
-    if type(headers) == 'table' then
-        for _, h in ipairs(headers) do
-            if type(h) == 'string' and not h:lower():match('^user%-agent:') then
-                args[#args + 1], args[#args + 2] = '-H', h
-            end
-        end
-    end
-    local cookie_file = find_cookies_file()
     if cookie_file then
-        args[#args + 1], args[#args + 2] = '--cookie', cookie_file
+        table.insert(args, '--cookie')
+        table.insert(args, cookie_file)
     end
-    args[#args + 1] = target_url
-    args[#args + 2], args[#args + 3] = '-o', temp_path
+    table.insert(args, target_url)
+    table.insert(args, '-o')
+    table.insert(args, raw_temp)
 
     start_async({
         name = 'subprocess',
-        playback_only = true,
+        playback_only = false,
         capture_stdout = false,
         capture_stderr = true,
         args = args,
     }, entry.url, function(success, result)
-        if not success or (type(result) == 'table' and result.status ~= 0) or not is_valid_sub_file(temp_path) then
-            if utils.file_info(temp_path) then os.remove(temp_path) end
+        if not success or (type(result) == 'table' and result.status ~= 0) or not is_valid_sub_file(raw_temp) then
+            if utils.file_info(raw_temp) then os.remove(raw_temp) end
 
-            local base = (entry.kind == 'translated') and find_base_caption()
-            local translator = base and find_translator()
             if base and translator then
                 mp.osd_message('Translating to ' .. entry.name .. '...', 3)
                 local base_url = ensure_vtt_url(base.url)
-                local base_temp = get_temp_sub_path()
+                local base_temp = get_temp_sub_path('_base')
                 local base_curl_args = {
                     find_curl(), '-s', '-f', '-L', '--compressed',
                     '--max-time', '15',
@@ -276,21 +352,21 @@ select_caption = function(entry)
                 }
                 start_async({
                     name = 'subprocess',
-                    playback_only = true,
+                    playback_only = false,
                     capture_stdout = false,
                     capture_stderr = true,
                     args = base_curl_args,
                 }, base.url, function(base_ok, base_res)
                     if not base_ok or (type(base_res) == 'table' and base_res.status ~= 0) or not is_valid_sub_file(base_temp) then
                         if utils.file_info(base_temp) then os.remove(base_temp) end
-                        mp.osd_message('Could not load captions. Refresh the list and retry.', 4)
+                        mp.osd_message('Could not load base captions. Refresh the list and retry.', 4)
                         return
                     end
 
-                    local py_cmd = {'python', translator, '--input', base_temp, '--output', temp_path, '--target', entry.lang, '--source', base.lang or 'en'}
+                    local py_cmd = {find_python(), translator, '--input', base_temp, '--output', temp_path, '--target', entry.lang, '--source', base.lang or 'en'}
                     start_async({
                         name = 'subprocess',
-                        playback_only = true,
+                        playback_only = false,
                         capture_stdout = false,
                         capture_stderr = true,
                         args = py_cmd,
@@ -301,7 +377,7 @@ select_caption = function(entry)
                             mp.osd_message('Translation failed. Refresh and retry.', 4)
                             return
                         end
-                        mount_caption(temp_path, title, entry.lang)
+                        mount_caption(temp_path, title, entry.lang, entry.url)
                     end)
                 end)
                 return
@@ -312,7 +388,30 @@ select_caption = function(entry)
             return
         end
 
-        mount_caption(temp_path, title, entry.lang)
+        -- Clean raw VTT (strip align:start position:100% and karaoke tags)
+        local py_translator = find_translator()
+        if py_translator then
+            local clean_path = get_temp_sub_path('_clean')
+            local py_clean = {find_python(), py_translator, '--clean-only', '--input', raw_temp, '--output', clean_path, '--target', entry.lang}
+            start_async({
+                name = 'subprocess',
+                playback_only = false,
+                capture_stdout = false,
+                capture_stderr = true,
+                args = py_clean,
+            }, 'clean:' .. entry.lang, function(clean_ok, clean_res)
+                if clean_ok and (type(clean_res) ~= 'table' or clean_res.status == 0) and is_valid_sub_file(clean_path) then
+                    if utils.file_info(raw_temp) then os.remove(raw_temp) end
+                    mount_caption(clean_path, title, entry.lang, entry.url)
+                else
+                    if utils.file_info(clean_path) then os.remove(clean_path) end
+                    mount_caption(raw_temp, title, entry.lang, entry.url)
+                end
+            end)
+            return
+        end
+
+        mount_caption(raw_temp, title, entry.lang, entry.url)
     end)
 end
 local function find_ytdl()
