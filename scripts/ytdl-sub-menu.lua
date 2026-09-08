@@ -130,6 +130,91 @@ local function find_curl()
     return 'curl'
 end
 
+local function is_valid_sub_file(path)
+    local f = io.open(path, 'r')
+    if not f then return true end
+    local chunk = f:read(512) or ''
+    f:close()
+    if chunk:find('<html', 1, true) or chunk:find('<HEAD', 1, true) or chunk:find('<head', 1, true) or chunk:find('<?xml', 1, true) then
+        return false
+    end
+    return true
+end
+
+local function find_cookies_file()
+    local cf = mp.get_property('cookies-file')
+    if cf and cf ~= '' and utils.file_info(cf) then return cf end
+    local mpv_home = mp.command_native and mp.command_native({'expand-path', '~~/'})
+    if mpv_home then
+        for _, name in ipairs({'cookies.txt', 'youtube_cookies.txt'}) do
+            local candidate = (mpv_home .. '/' .. name):gsub('\\', '/')
+            local info = utils.file_info(candidate)
+            if info and info.is_file then return candidate end
+        end
+    end
+    return nil
+end
+
+local function find_translator()
+    local mpv_home = mp.command_native and mp.command_native({'expand-path', '~~/'})
+    local candidates = {
+        mpv_home and (mpv_home .. '/scripts/vtt_translate.py'):gsub('\\', '/'),
+        mpv_home and (mpv_home .. '/tools/vtt_translate.py'):gsub('\\', '/'),
+        'scripts/vtt_translate.py',
+        'tools/vtt_translate.py',
+    }
+    for _, path in ipairs(candidates) do
+        if path and utils.file_info(path) then return path end
+    end
+    return nil
+end
+
+local function find_base_caption()
+    local all = cached_captions()
+    for _, c in ipairs(all) do
+        if (c.kind == 'manual' or c.kind == 'automatic') and (c.lang == 'en' or c.lang:match('^en%-')) then
+            return c
+        end
+    end
+    for _, c in ipairs(all) do
+        if c.kind == 'manual' or c.kind == 'automatic' then
+            return c
+        end
+    end
+    return nil
+end
+
+local function mount_caption(path, title, lang)
+    local prev_temp = current_temp_file
+    current_temp_file = path
+    if prev_temp and prev_temp ~= path and utils.file_info(prev_temp) then
+        os.remove(prev_temp)
+    end
+
+    local sid_observer, timeout_timer
+    sid_observer = function(name, new_sid)
+        if type(new_sid) == 'number' and new_sid ~= last_external_sub_id then
+            if timeout_timer then timeout_timer:kill(); timeout_timer = nil end
+            if last_external_sub_id then
+                mp.commandv('sub-remove', tostring(last_external_sub_id))
+            end
+            last_external_sub_id = new_sid
+            mp.unobserve_property(sid_observer)
+        end
+    end
+    timeout_timer = mp.add_timeout(2.5, function()
+        if sid_observer then
+            mp.unobserve_property(sid_observer)
+            sid_observer = nil
+        end
+    end)
+    mp.observe_property('sid', 'native', sid_observer)
+
+    mp.commandv('sub-add', path, 'select', title, lang)
+    mp.set_property_bool('sub-visibility', true)
+    mp.osd_message('Captions on: ' .. title, 3)
+end
+
 select_caption = function(entry)
     if not current_url() or not entry or not policy.http_url(entry.url) then return end
     for _, track in ipairs(mp.get_property_native('track-list', {})) do
@@ -148,7 +233,7 @@ select_caption = function(entry)
     local user_agent = mp.get_property('file-local-options/user-agent') or 'Mozilla/5.0'
     local args = {
         find_curl(),
-        '-s', '-L', '--compressed',
+        '-s', '-f', '-L', '--compressed',
         '--max-time', '15',
         '-H', 'User-Agent: ' .. user_agent,
     }
@@ -160,6 +245,10 @@ select_caption = function(entry)
             end
         end
     end
+    local cookie_file = find_cookies_file()
+    if cookie_file then
+        args[#args + 1], args[#args + 2] = '--cookie', cookie_file
+    end
     args[#args + 1] = target_url
     args[#args + 2], args[#args + 3] = '-o', temp_path
 
@@ -170,34 +259,60 @@ select_caption = function(entry)
         capture_stderr = true,
         args = args,
     }, entry.url, function(success, result)
-        if not success or (type(result) == 'table' and result.status ~= 0) then
+        if not success or (type(result) == 'table' and result.status ~= 0) or not is_valid_sub_file(temp_path) then
             if utils.file_info(temp_path) then os.remove(temp_path) end
+
+            local base = (entry.kind == 'translated') and find_base_caption()
+            local translator = base and find_translator()
+            if base and translator then
+                mp.osd_message('Translating to ' .. entry.name .. '...', 3)
+                local base_url = ensure_vtt_url(base.url)
+                local base_temp = get_temp_sub_path()
+                local base_curl_args = {
+                    find_curl(), '-s', '-f', '-L', '--compressed',
+                    '--max-time', '15',
+                    '-H', 'User-Agent: ' .. user_agent,
+                    base_url, '-o', base_temp,
+                }
+                start_async({
+                    name = 'subprocess',
+                    playback_only = true,
+                    capture_stdout = false,
+                    capture_stderr = true,
+                    args = base_curl_args,
+                }, base.url, function(base_ok, base_res)
+                    if not base_ok or (type(base_res) == 'table' and base_res.status ~= 0) or not is_valid_sub_file(base_temp) then
+                        if utils.file_info(base_temp) then os.remove(base_temp) end
+                        mp.osd_message('Could not load captions. Refresh the list and retry.', 4)
+                        return
+                    end
+
+                    local py_cmd = {'python', translator, '--input', base_temp, '--output', temp_path, '--target', entry.lang, '--source', base.lang or 'en'}
+                    start_async({
+                        name = 'subprocess',
+                        playback_only = true,
+                        capture_stdout = false,
+                        capture_stderr = true,
+                        args = py_cmd,
+                    }, 'translate:' .. entry.lang, function(trans_ok, trans_res)
+                        if utils.file_info(base_temp) then os.remove(base_temp) end
+                        if not trans_ok or (type(trans_res) == 'table' and trans_res.status ~= 0) or not is_valid_sub_file(temp_path) then
+                            if utils.file_info(temp_path) then os.remove(temp_path) end
+                            mp.osd_message('Translation failed. Refresh and retry.', 4)
+                            return
+                        end
+                        mount_caption(temp_path, title, entry.lang)
+                    end)
+                end)
+                return
+            end
+
             mp.osd_message('Could not load captions. Refresh the list and retry.', 4)
-            msg.warn('Caption download via curl failed')
+            msg.warn('Caption download via curl failed: ' .. (target_url or ''))
             return
         end
 
-        local prev_temp = current_temp_file
-        current_temp_file = temp_path
-        if prev_temp and prev_temp ~= temp_path and utils.file_info(prev_temp) then
-            os.remove(prev_temp)
-        end
-
-        local sid_observer
-        sid_observer = function(name, new_sid)
-            if type(new_sid) == 'number' and new_sid ~= last_external_sub_id then
-                if last_external_sub_id then
-                    mp.commandv('sub-remove', tostring(last_external_sub_id))
-                end
-                last_external_sub_id = new_sid
-                mp.unobserve_property(sid_observer)
-            end
-        end
-        mp.observe_property('sid', 'native', sid_observer)
-
-        mp.commandv('sub-add', temp_path, 'select', title, entry.lang)
-        mp.set_property_bool('sub-visibility', true)
-        mp.osd_message('Captions on: ' .. title, 3)
+        mount_caption(temp_path, title, entry.lang)
     end)
 end
 local function find_ytdl()
