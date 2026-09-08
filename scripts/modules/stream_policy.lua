@@ -427,8 +427,14 @@ function M.analyze_cache_coverage(cache_state, duration)
     last_end = last_end or duration
     local coverage_pct = math.min(100, math.floor((total_cached / duration) * 100 + 0.5))
 
+    -- Strict BOF & EOF check:
+    -- If MPV cache dropped the beginning or end of file because the video exceeded buffer memory,
+    -- dump-cache would produce a truncated file. We must verify bof == true and eof == true.
+    local has_bof = cache_state.bof == true
+    local has_eof = cache_state.eof == true
+
     local is_complete = false
-    if coverage_pct >= 90 or (first_start <= 2 and last_end >= (duration - 2)) then
+    if has_bof and has_eof and (coverage_pct >= 90 or (first_start <= 2 and last_end >= (duration - 2))) then
         is_complete = true
     end
 

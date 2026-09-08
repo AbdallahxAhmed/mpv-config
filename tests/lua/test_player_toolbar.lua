@@ -261,6 +261,8 @@ test('download button dumps cache directly when video is completely buffered', f
     h.props['media-title']='Cached Video Title'
     h.props['duration']=120
     h.props['demuxer-cache-state']={
+        bof=true,
+        eof=true,
         ['seekable-ranges']={{start=0, ['end']=120}}
     }
     h.file_info={size=50000000}
