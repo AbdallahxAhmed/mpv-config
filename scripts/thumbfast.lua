@@ -715,6 +715,7 @@ end
 
 local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end
+    if not mp.utils.file_info(thumbnail_path..".bgra") then return end
     if x ~= nil then
         local scale_w, scale_h = options.scale_factor ~= 1 and (w * options.scale_factor) or nil, options.scale_factor ~= 1 and (h * options.scale_factor) or nil
         if pre_0_30_0 then
@@ -1030,6 +1031,10 @@ local function watch_changes()
             run("quit")
             clear()
             spawned = false
+            file_seq = file_seq + 1
+            options.socket = base_socket .. "_" .. file_seq
+            options.thumbnail = base_thumbnail .. "_" .. file_seq
+            thumbnail_path = options.thumbnail
             spawn(seek_time or mp.get_property_number("time-pos", 0))
             file_timer:resume()
         else
@@ -1052,7 +1057,7 @@ local function watch_changes()
     last_crop = properties["video-crop"]
     last_has_vid = has_vid
 
-    if not spawned and not disabled and options.spawn_first and resized then
+    if not spawned and not disabled and options.spawn_first and effective_w and effective_h then
         spawn(mp.get_property_number("time-pos", 0))
         file_timer:resume()
     end
@@ -1592,6 +1597,7 @@ local function file_load()
         file_bytes = 0
     end
 
+    effective_w, effective_h = nil, nil
     file_seq = file_seq + 1
     options.socket = base_socket .. "_" .. file_seq
     options.thumbnail = base_thumbnail .. "_" .. file_seq
@@ -1602,19 +1608,6 @@ local function file_load()
     end
 
     cancel_queued_processes()
-
-    calc_dimensions()
-    if effective_w and effective_h then
-        info(effective_w, effective_h)
-    end
-    if disabled then return end
-
-    spawned = false
-    if options.spawn_first and effective_w and effective_h then
-        spawn(mp.get_property_number("time-pos", 0))
-        first_file = true
-        file_timer:resume()
-    end
 end
 
 local function shutdown()
