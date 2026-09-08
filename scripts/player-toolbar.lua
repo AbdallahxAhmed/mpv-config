@@ -383,6 +383,61 @@ local function start_download(is_audio_only)
         url = url:sub(8)
     end
 
+    local media_title = mp.get_property('media-title') or 'stream'
+
+    -- Smart Cache Video Saver:
+    -- If the user has already buffered/watched the video in MPV, export directly from demuxer cache!
+    -- Saves instant gigabytes with 0 MB redownloaded.
+    if not is_audio_only then
+        local duration = mp.get_property_number('duration') or 0
+        local cache_state = mp.get_property_native('demuxer-cache-state')
+        local coverage = nil
+        if policy and policy.analyze_cache_coverage then
+            coverage = policy.analyze_cache_coverage(cache_state, duration)
+        end
+
+        if coverage and coverage.is_complete then
+            local target_path = nil
+            local exists_check = function(p)
+                local fi = utils and utils.file_info and utils.file_info(p)
+                return fi ~= nil
+            end
+            if policy and policy.resolve_download_target_path then
+                target_path = policy.resolve_download_target_path(media_title, nil, 'mp4', exists_check)
+            else
+                local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
+                local dir = home:gsub('\\', '/') .. '/Downloads'
+                target_path = dir .. '/' .. media_title:gsub('[\\/:*?"<>|]', '_') .. '.mp4'
+            end
+
+            local start_t = tostring(math.max(0, math.floor(coverage.start_time or 0)))
+            local end_t = tostring(math.ceil(coverage.end_time or duration))
+            mp.osd_message(string.format('Saving from cache (0 MB downloaded): %s', media_title), 3)
+
+            local ok, err = pcall(mp.commandv, 'dump-cache', start_t, end_t, target_path)
+            local file_info = utils and utils.file_info and utils.file_info(target_path)
+            if ok and file_info and file_info.size and file_info.size > 1024 then
+                if msg and msg.info then msg.info(string.format('Successfully dumped cache to %s (%d bytes)', target_path, file_info.size)) end
+                download_badge = 'SAVED'
+                publish_download(true)
+                mp.osd_message(string.format('Saved from cache: %s\nInstant export (0 MB downloaded!)', media_title), 5)
+                if mp.add_timeout then
+                    pcall(function()
+                        download_timer = mp.add_timeout(4, function()
+                            download_badge = nil
+                            publish_download(true)
+                        end)
+                    end)
+                end
+                return
+            else
+                if msg and msg.warn then msg.warn('dump-cache failed or empty (' .. tostring(err) .. '), falling back to yt-dlp') end
+            end
+        elseif coverage and coverage.coverage_pct and coverage.coverage_pct > 0 then
+            if msg and msg.info then msg.info(string.format('Partial cache coverage (%d%%), downloading complete video via yt-dlp.', coverage.coverage_pct)) end
+        end
+    end
+
     local ytdl_format = mp.get_property('ytdl-format')
     local args = nil
     if policy and policy.download_args then
@@ -414,7 +469,6 @@ local function start_download(is_audio_only)
         table.insert(args, url)
     end
 
-    local media_title = mp.get_property('media-title') or 'stream'
     local target_desc = is_audio_only and 'Audio (MP3)' or 'Video'
 
     is_downloading = true

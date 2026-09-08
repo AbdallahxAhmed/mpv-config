@@ -350,4 +350,66 @@ function M.download_args(url, output_dir, is_audio_only, ytdl_format)
     return args
 end
 
+function M.analyze_cache_coverage(cache_state, duration)
+    if type(cache_state) ~= 'table' or type(duration) ~= 'number' or duration <= 0 then
+        return { is_complete = false, coverage_pct = 0, start_time = 0, end_time = 0, total_cached = 0 }
+    end
+    local ranges = cache_state['seekable-ranges']
+    if type(ranges) ~= 'table' or #ranges == 0 then
+        return { is_complete = false, coverage_pct = 0, start_time = 0, end_time = 0, total_cached = 0 }
+    end
+
+    local total_cached = 0
+    local first_start = nil
+    local last_end = nil
+
+    for _, r in ipairs(ranges) do
+        local s = r.start or r[1]
+        local e = r['end'] or r[2]
+        if s and e and e > s then
+            total_cached = total_cached + (e - s)
+            if first_start == nil or s < first_start then first_start = s end
+            if last_end == nil or e > last_end then last_end = e end
+        end
+    end
+
+    first_start = first_start or 0
+    last_end = last_end or duration
+    local coverage_pct = math.min(100, math.floor((total_cached / duration) * 100 + 0.5))
+
+    local is_complete = false
+    if coverage_pct >= 90 or (first_start <= 2 and last_end >= (duration - 2)) then
+        is_complete = true
+    end
+
+    return {
+        is_complete = is_complete,
+        coverage_pct = coverage_pct,
+        start_time = first_start,
+        end_time = last_end,
+        total_cached = total_cached,
+    }
+end
+
+function M.resolve_download_target_path(title, output_dir, ext, exists_fn)
+    local dir = (output_dir or M.default_download_dir()):gsub('\\', '/')
+    local clean_title = (title or 'stream')
+        :gsub('[\\/:*?"<>|]', '_')
+        :gsub('^%s+', '')
+        :gsub('%s+$', '')
+        :gsub('^%.+', '')
+    if clean_title == '' then clean_title = 'video' end
+    ext = (ext or 'mp4'):gsub('^%.', '')
+    local candidate = dir .. '/' .. clean_title .. '.' .. ext
+    if exists_fn and exists_fn(candidate) then
+        for i = 1, 99 do
+            local alt = dir .. '/' .. clean_title .. ' (' .. i .. ').' .. ext
+            if not exists_fn(alt) then
+                return alt
+            end
+        end
+    end
+    return candidate
+end
+
 return M

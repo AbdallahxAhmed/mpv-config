@@ -173,4 +173,42 @@ test('download args builds valid yt-dlp arguments for video and audio', function
     eq(p.download_args(nil), nil)
     eq(p.download_args(''), nil)
 end)
+test('analyze cache coverage accurately identifies complete and partial ranges', function()
+    local cov1 = p.analyze_cache_coverage({['seekable-ranges'] = {{start = 0, ['end'] = 100}}}, 100)
+    eq(cov1.is_complete, true)
+    eq(cov1.coverage_pct, 100)
+    eq(cov1.start_time, 0)
+    eq(cov1.end_time, 100)
+
+    local cov2 = p.analyze_cache_coverage({['seekable-ranges'] = {{start = 1, ['end'] = 99}}}, 100)
+    eq(cov2.is_complete, true)
+    eq(cov2.coverage_pct, 98)
+
+    local cov3 = p.analyze_cache_coverage({['seekable-ranges'] = {{start = 0, ['end'] = 30}}}, 100)
+    eq(cov3.is_complete, false)
+    eq(cov3.coverage_pct, 30)
+
+    local cov4 = p.analyze_cache_coverage({['seekable-ranges'] = {{start = 0, ['end'] = 45}, {start = 50, ['end'] = 98}}}, 100)
+    eq(cov4.is_complete, true)
+    eq(cov4.coverage_pct, 93)
+
+    local cov5 = p.analyze_cache_coverage(nil, 100)
+    eq(cov5.is_complete, false)
+    eq(cov5.coverage_pct, 0)
+
+    local cov6 = p.analyze_cache_coverage({['seekable-ranges'] = {}}, 0)
+    eq(cov6.is_complete, false)
+    eq(cov6.coverage_pct, 0)
+end)
+test('resolve download target path sanitizes title and preserves directory', function()
+    local path1 = p.resolve_download_target_path('Cool Video: Part 1 / 2? *special*', 'D:/Downloads', 'mp4')
+    eq(path1, 'D:/Downloads/Cool Video_ Part 1 _ 2_ _special_.mp4')
+
+    local path2 = p.resolve_download_target_path('', nil, 'mkv')
+    assert(path2:find('/Downloads/video.mkv') ~= nil)
+
+    local mock_files = {['D:/Downloads/video.mp4'] = true, ['D:/Downloads/video (1).mp4'] = true}
+    local path3 = p.resolve_download_target_path('video', 'D:/Downloads', 'mp4', function(p) return mock_files[p] == true end)
+    eq(path3, 'D:/Downloads/video (2).mp4')
+end)
 print('Policy tests passed: '..n)

@@ -204,7 +204,7 @@ profile-desc              = "Network streaming: big cache, display-synced"
 profile-restore           = copy-equal
 cache                     = yes
 demuxer-max-bytes         = 800MiB
-demuxer-max-back-bytes    = 200MiB
+demuxer-max-back-bytes    = 800MiB
 demuxer-readahead-secs    = 60
 # video-sync and interpolation intentionally inherited from the base config
 # (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
@@ -214,6 +214,9 @@ ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
 ytdl-raw-options-append   = socket-timeout=15
 
 [protocol.http]
+profile                   = protocol.https
+
+[protocol.ytdl]
 profile                   = protocol.https
 
 [default]

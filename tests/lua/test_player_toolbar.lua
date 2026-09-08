@@ -39,8 +39,12 @@ local function harness(filters, no_ui)
         command=function(...) h.last_command={...} end,
         commandv=function(...)
             h.arg_count=select('#',...)
-            if not h.ui_ready then error('uosc has not started yet') end
             local c={...}
+            if c[1]=='dump-cache' then
+                h.last_dump_cache=c
+                return true
+            end
+            if not h.ui_ready then error('uosc has not started yet') end
             eq(c[1],'script-message-to');eq(c[2],'uosc')
             if c[3]=='set-button' then
                 h.buttons[c[4]]=c[5]
@@ -55,8 +59,9 @@ local function harness(filters, no_ui)
     package.preload['mp.utils']=function() return {
         format_json=function(value) return value,nil end,
         parse_json=function(str) return h.parsed_json or {} end,
+        file_info=function(path) return h.file_info or {size=1048576} end,
     } end
-    package.preload['mp.msg']=function() return {warn=function() end} end
+    package.preload['mp.msg']=function() return {info=function() end, warn=function() end, error=function() end, debug=function() end} end
     dofile('scripts/player-toolbar.lua')
     function h:click()
         local c=self.button.command;eq(c[1],'script-message-to');eq(c[2],'player_toolbar')
@@ -250,4 +255,26 @@ test('download button extracts URL when source-url has JSON quotes or edl stream
     assert(captured_args ~= nil)
     eq(captured_args[#captured_args], 'https://txxx.com/videos/17007267/mock/')
 end)
+test('download button dumps cache directly when video is completely buffered', function()
+    local h=harness()
+    h.props['path']='https://www.youtube.com/watch?v=buffered_video'
+    h.props['media-title']='Cached Video Title'
+    h.props['duration']=120
+    h.props['demuxer-cache-state']={
+        ['seekable-ranges']={{start=0, ['end']=120}}
+    }
+    h.file_info={size=50000000}
+    h.messages['start-download']()
+    assert(h.last_dump_cache~=nil)
+    eq(h.last_dump_cache[1], 'dump-cache')
+    eq(h.last_dump_cache[2], '0')
+    eq(h.last_dump_cache[3], '120')
+    assert(h.last_dump_cache[4]:find('Cached Video Title.mp4') ~= nil)
+    eq(h.buttons['download-video'].badge, 'SAVED')
+    assert(h.osd:find('Saved from cache: Cached Video Title', 1, true))
+    eq(#(h.timeouts or {}), 1)
+    h.timeouts[1].fn()
+    eq(h.buttons['download-video'].badge, nil)
+end)
 print('Toolbar tests passed: '..total)
+
