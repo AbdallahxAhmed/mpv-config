@@ -51,7 +51,8 @@ The implementation follows the established repository pattern (used by `tools/pa
    ├──> Set is_reordering = false
    ├──> Stop scroll tick
    └──> If start_index ~= target_index:
-           Dispatch single: mp.commandv('playlist-move', start_index - 1, target_index - 1)
+           Delegate to: self:command_or_event(self.current.on_move, ...)
+           (Playlist opener in main.lua executes: mp.commandv('playlist-move', ...))
 ```
 
 ---
@@ -149,7 +150,7 @@ During mouse movement (`handle_cursor_move` or inside the render loop):
   - If cursor leaves edge zone:
     - Stop and clear `self.reorder_scroll_timer`.
 
-#### E. Drag Release & Single-Commit IPC Execution
+#### E. Drag Release & Single-Commit via `opts.on_move` Delegation
 In `Menu:handle_cursor_up()` and on `primary_up`:
 - If `self.is_reordering`:
   - Set `self.is_reordering = false`.
@@ -157,11 +158,20 @@ In `Menu:handle_cursor_up()` and on `primary_up`:
   - Retrieve `from_idx = self.reorder_start_index` and `to_idx = self.reorder_current_index`.
   - Reset state variables.
   - If `from_idx ~= to_idx` and `from_idx` and `to_idx`:
-    - Dispatch a single atomic MPV command:
+    - Invoke the menu's registered `on_move` callback (via uosc's standard `self:command_or_event` dispatcher):
       ```lua
-      mp.commandv('playlist-move', tostring(from_idx - 1), tostring(to_idx - (to_idx > from_idx and 0 or 1)))
+      local callback = self.current.on_move
+      if callback then
+          local event = {
+              type = 'move',
+              from_index = from_idx,
+              to_index = to_idx,
+              menu_id = self.current.id,
+          }
+          self:command_or_event(callback, {from_idx, to_idx, self.current.id}, event)
+      end
       ```
-    - This eliminates all in-flight race conditions; MPV's property observer fires once, perfectly synchronizing with the user's final desired order.
+    - **Key Architectural Advantage**: Rather than hardcoding `mp.commandv('playlist-move')` directly inside `Menu.lua`, delegating to `self.current.on_move` allows the playlist menu definition in `main.lua` to manage the 0-based offset math (`to - (to > from and 0 or 1)`) and any MPV/uosc state synchronization automatically. This preserves clean separation of concerns and keeps `Menu.lua` generic.
 
 #### F. Window Blur & Lost Focus Protection ("Sticky Drag" Fix)
 - Register an observer on MPV's `window-focus` property:
