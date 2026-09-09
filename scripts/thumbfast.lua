@@ -349,6 +349,10 @@ local unique = mp.utils.getpid()
 options.socket = options.socket .. unique
 options.thumbnail = options.thumbnail .. unique
 
+local file_seq = 0
+local base_socket = options.socket
+local base_thumbnail = options.thumbnail
+
 local thumbnail_path = options.thumbnail
 
 if options.direct_io then
@@ -544,6 +548,11 @@ local activity_timer
 
 local function spawn(time)
     if disabled then return end
+
+    if not effective_w or not effective_h then
+        calc_dimensions()
+    end
+    if not effective_w or not effective_h then return end
 
     local path = properties["path"]
     if path == nil then return end
@@ -827,10 +836,6 @@ local function request_seek()
 end
 
 local function check_new_thumb()
-    -- the slave might start writing to the file after checking existance and
-    -- validity but before actually moving the file, so move to a temporary
-    -- location before validity check to make sure everything stays consistant
-    -- and valid thumbnails don't get overwritten by invalid ones
     if not thumbnail_path then thumbnail_path = options.thumbnail end
     local tmp = thumbnail_path..".tmp"
     move_file(thumbnail_path, tmp)
@@ -903,6 +908,11 @@ local function quit()
         return
     end
     run("quit")
+    if file then
+        pcall(function() file:close() end)
+        file = nil
+        file_bytes = 0
+    end
     spawned = false
     real_w, real_h = nil, nil
     clear()
@@ -1029,12 +1039,20 @@ local function watch_changes()
             -- mpv doesn't allow us to change output size
             local seek_time = last_seek_time
             run("quit")
+            if file then
+                pcall(function() file:close() end)
+                file = nil
+                file_bytes = 0
+            end
             clear()
             spawned = false
             file_seq = file_seq + 1
             options.socket = base_socket .. "_" .. file_seq
             options.thumbnail = base_thumbnail .. "_" .. file_seq
             thumbnail_path = options.thumbnail
+            if options.direct_io and os_name == "windows" and winapi then
+                winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+            end
             spawn(seek_time or mp.get_property_number("time-pos", 0))
             file_timer:resume()
         else
@@ -1563,16 +1581,11 @@ function setup_storyboards()
     end
 end
 
-local file_seq = 0
-local base_socket = options.socket
-local base_thumbnail = options.thumbnail
-
 local function file_load()
     clear()
     spawned = false
-    real_w, real_h = nil, nil
-    last_real_w, last_real_h = nil, nil
-    last_effective_w, last_effective_h = nil, nil
+    dirty = true
+    last_vf_runtime = ""
     last_vf_reset, last_crop = nil, nil
     last_rotate = properties["video-rotate"] or 0
     last_par = ""
@@ -1608,10 +1621,29 @@ local function file_load()
     end
 
     cancel_queued_processes()
+
+    calc_dimensions()
+    if effective_w and effective_h then
+        last_par = par
+        last_rotate = properties["video-rotate"] or 0
+        last_vf_reset = vf_string(filters_reset)
+        last_crop = properties["video-crop"]
+        info(effective_w, effective_h)
+        if options.spawn_first and not disabled then
+            spawn(mp.get_property_number("time-pos", 0))
+            file_timer:resume()
+            dirty = false
+        end
+    end
 end
 
 local function shutdown()
     run("quit")
+    if file then
+        pcall(function() file:close() end)
+        file = nil
+        file_bytes = 0
+    end
     remove_thumbnail_files()
     remove_storyboard_files()
     if os_name ~= "windows" then
