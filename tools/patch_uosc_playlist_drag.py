@@ -36,7 +36,7 @@ def get_default_uosc_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 def patch_menus_lua(content: str) -> str:
-    """Replace move_up and move_down actions with drag_reorder in lib/menus.lua."""
+    """Replace move_up and move_down actions with drag_reorder and hook move callback in lib/menus.lua."""
     if PATCH_MARKER in content:
         return content
 
@@ -49,32 +49,60 @@ def patch_menus_lua(content: str) -> str:
 
     replacement = (
         r"\1"
-        f"        {PATCH_MARKER}_START (menus.lua)\n"
+        f"        {PATCH_MARKER}_START (menus.lua:actions)\n"
         r"        actions[#actions + 1] = {\n"
         r"            name = 'drag_reorder',\n"
         r"            icon = 'drag_indicator',\n"
         r"            label = t('Drag to reorder') .. ' (ctrl+up/down)',\n"
         r"            filter_hidden = true,\n"
         r"        }\n"
-        f"        {PATCH_MARKER}_END (menus.lua)\n"
+        f"        {PATCH_MARKER}_END (menus.lua:actions)\n"
         r"\4"
     )
 
     patched, count = re.subn(pattern, replacement, content, flags=re.DOTALL)
     if count == 0:
         raise RuntimeError("Failed to anchor opts.on_move action block in lib/menus.lua")
+
+    # Hook event.type == 'move' callback delegation if present
+    move_cb_pattern = r"(\s+)(elseif\s+event\.type\s*==\s*'key'\s+then)"
+    if re.search(move_cb_pattern, patched):
+        move_cb_hook = (
+            r"\1" f"{PATCH_MARKER}_START (menus.lua:on_move)\n"
+            r"\1elseif event.type == 'move' and opts.on_move then\n"
+            r"\1\topts.on_move(event)\n"
+            r"\1\tmenu:select_index(event.to_index)\n"
+            r"\1" f"{PATCH_MARKER}_END (menus.lua:on_move)\n"
+            r"\1\2"
+        )
+        patched = re.sub(move_cb_pattern, move_cb_hook, patched, count=1)
+
     return patched
 
 
 def unpatch_menus_lua(content: str) -> str:
-    """Restore original move_up/move_down actions in lib/menus.lua."""
+    """Restore original move_up/move_down actions and remove callback hook in lib/menus.lua."""
     if PATCH_MARKER not in content:
         return content
 
-    pattern = (
-        rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua\).*?"
-        rf"{re.escape(PATCH_MARKER)}_END \(menus\.lua\)\n"
+    # 1. Remove move callback hook if present
+    pattern_cb = (
+        rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua:on_move\).*?"
+        rf"{re.escape(PATCH_MARKER)}_END \(menus\.lua:on_move\)\n"
     )
+    patched = re.sub(pattern_cb, "\n", content, flags=re.DOTALL)
+
+    # 2. Restore actions
+    pattern = (
+        rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua:actions\).*?"
+        rf"{re.escape(PATCH_MARKER)}_END \(menus\.lua:actions\)\n"
+    )
+    # Support backward compatibility with older patch marker format
+    if not re.search(pattern, patched, flags=re.DOTALL):
+        pattern = (
+            rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua\).*?"
+            rf"{re.escape(PATCH_MARKER)}_END \(menus\.lua\)\n"
+        )
 
     original_actions = (
         "        actions[#actions + 1] = {\n"
@@ -91,7 +119,7 @@ def unpatch_menus_lua(content: str) -> str:
         "        }\n"
     )
 
-    restored, count = re.subn(pattern, "\n" + original_actions, content, flags=re.DOTALL)
+    restored, count = re.subn(pattern, "\n" + original_actions, patched, flags=re.DOTALL)
     if count == 0:
         raise RuntimeError("Failed to revert patch block in lib/menus.lua")
     return restored
@@ -241,21 +269,35 @@ def patch_menu_lua(content: str) -> str:
     else:
         patched = content.rstrip() + "\n\n" + MENU_REORDER_HELPERS
 
-    # Hook handle_cursor_up(shortcut)
+    # Hook handle_cursor_up(shortcut) - isolate from kinetic scrolling and activation
     up_pattern = r"(function\s+Menu:handle_cursor_up\s*\([^\)]*\)\s*\n)"
-    up_hook = r"\1    if self.is_reordering then self:finish_reorder() end\n"
+    up_hook = (
+        r"\1    if self.is_reordering then\n"
+        r"        self:finish_reorder()\n"
+        r"        self.drag_last_y = nil\n"
+        r"        self.is_dragging = false\n"
+        r"        return\n"
+        r"    end\n"
+    )
     patched, count_up = re.subn(up_pattern, up_hook, patched, count=1)
     if count_up == 0:
         raise RuntimeError("Failed to anchor Menu:handle_cursor_up in elements/Menu.lua")
 
-    # Hook on_global_mouse_move()
+    # Hook on_global_mouse_move() - isolate from drag-scrolling
     move_pattern = r"(function\s+Menu:on_global_mouse_move\s*\([^\)]*\)\s*\n)"
-    move_hook = r"\1    if self.is_reordering then self:update_reorder(cursor.y) end\n"
+    move_hook = (
+        r"\1    if self.is_reordering then\n"
+        r"        self.drag_last_y = nil\n"
+        r"        self.is_dragging = false\n"
+        r"        self:update_reorder(cursor.y)\n"
+        r"        return\n"
+        r"    end\n"
+    )
     patched, count_move = re.subn(move_pattern, move_hook, patched, count=1)
     if count_move == 0:
         # Fallback to handle_cursor_move if upstream changes
         alt_move_pattern = r"(function\s+Menu:handle_cursor_move\s*\([^\)]*\)\s*\n)"
-        patched, count_move = re.subn(alt_move_pattern, r"\1    if self.is_reordering then self:update_reorder(cursor.y) end\n", patched, count=1)
+        patched, count_move = re.subn(alt_move_pattern, r"\1    if self.is_reordering then self:update_reorder(cursor.y); return end\n", patched, count=1)
         if count_move == 0:
             raise RuntimeError("Failed to anchor mouse move handler in elements/Menu.lua")
 
@@ -300,6 +342,14 @@ def patch_menu_lua(content: str) -> str:
         # Close the else block if alt pattern was used
         patched = re.sub(r"(self:activate_selected_item\(shortcut,\s*true\)\s*\n\s*end\)\))", r"\1\n                        end", patched, count=1)
 
+    # Hook visual drag elevation (increase highlight opacity for currently dragged row)
+    highlight_pattern = r"(local\s+highlight_opacity\s*=\s*0\s*\+\s*\(item\.active\s+and\s+0\.8\s+or\s+0\)\s*\+\s*\(is_selected\s+and\s+0\.15\s+or\s+0\))"
+    if re.search(highlight_pattern, patched):
+        highlight_hook = (
+            r"\1 + ((self.is_reordering and self.reorder_current_index == index) and 0.35 or 0)"
+        )
+        patched = re.sub(highlight_pattern, highlight_hook, patched, count=1)
+
     return patched
 
 
@@ -314,8 +364,23 @@ def unpatch_menu_lua(content: str) -> str:
     )
     patched = re.sub(pattern_helpers, "\n", content, flags=re.DOTALL)
 
+    # Revert handle_cursor_up
+    patched = re.sub(
+        r"    if self\.is_reordering then\n\s+self:finish_reorder\(\)\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+return\n\s+end\n",
+        "",
+        patched,
+    )
     patched = re.sub(r"    if self\.is_reordering then self:finish_reorder\(\) end\n", "", patched)
+
+    # Revert on_global_mouse_move
+    patched = re.sub(
+        r"    if self\.is_reordering then\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n",
+        "",
+        patched,
+    )
     patched = re.sub(r"    if self\.is_reordering then self:update_reorder\(cursor\.y\) end\n", "", patched)
+
+    # Revert handle_shortcut
     patched = re.sub(
         r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'\)\) then\n"
         r"        self:abort_reorder\(\)\n"
@@ -326,6 +391,13 @@ def unpatch_menu_lua(content: str) -> str:
     )
     patched = re.sub(
         r"    if self\.is_reordering and \(name == 'esc' or name == 'escape'\) then self:abort_reorder\(\); return true end\n",
+        "",
+        patched,
+    )
+
+    # Revert highlight elevation
+    patched = re.sub(
+        r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.35 or 0\)",
         "",
         patched,
     )
