@@ -155,60 +155,55 @@ end
 
 function Menu:update_reorder(cursor_y)
     if not self.is_reordering or not self.current or not self.current.items then return end
-    if #self.current.items <= 1 then return end
+    local menu = self.current
+    if #menu.items <= 1 then return end
 
-    -- Check if primary button was released without trigger
-    if cursor and not cursor.primary_down then
-        self:finish_reorder()
-        return
-    end
+    local scroll_step = self.scroll_step or self.item_height or 24
+    local top_bound = menu.top
+    local bottom_bound = menu.top + menu.height
+    local threshold = scroll_step * 1.5
+    local base_v = scroll_step * 1.2
 
     -- Non-linear edge auto-scrolling
-    local top_bound = self.ay
-    local bottom_bound = self.by
-    local threshold = self.item_height * 1.5
-    local base_v = (self.scroll_step or 24) * 1.2
-
     if cursor_y < top_bound + threshold then
         local depth = math.max(0, math.min(1, (top_bound + threshold - cursor_y) / threshold))
         local step = math.max(1, math.floor(base_v * (depth ^ 1.5)))
-        self.current.scroll = math.max(0, self.current.scroll - step)
-        request_render()
+        self:set_scroll_by(-step, menu.id)
     elseif cursor_y > bottom_bound - threshold then
-        local max_scroll = math.max(0, #self.current.items * self.item_height - (self.by - self.ay))
         local depth = math.max(0, math.min(1, (cursor_y - (bottom_bound - threshold)) / threshold))
         local step = math.max(1, math.floor(base_v * (depth ^ 1.5)))
-        self.current.scroll = math.min(max_scroll, self.current.scroll + step)
-        request_render()
+        self:set_scroll_by(step, menu.id)
     end
 
-    -- 50% Midpoint Hysteresis calculation
-    local cur_idx = self.reorder_current_index
-    local cur_y_pos = self.ay - self.current.scroll + (cur_idx - 1) * self.item_height
-
-    -- Downward swap
-    if cur_idx < #self.current.items then
-        local next_midpoint = cur_y_pos + self.item_height + (self.item_height * 0.5)
+    -- Downward swap loop (50% midpoint hysteresis)
+    while self.reorder_current_index < #menu.items do
+        local cur_idx = self.reorder_current_index
+        local cur_y_pos = menu.top - menu.scroll_y + scroll_step * (cur_idx - 1)
+        local next_midpoint = cur_y_pos + scroll_step + (scroll_step * 0.5)
         if cursor_y > next_midpoint then
-            local moved_item = table.remove(self.current.items, cur_idx)
-            table.insert(self.current.items, cur_idx + 1, moved_item)
+            local moved_item = table.remove(menu.items, cur_idx)
+            table.insert(menu.items, cur_idx + 1, moved_item)
             self.reorder_current_index = cur_idx + 1
-            self.current.selected_index = cur_idx + 1
+            menu.selected_index = cur_idx + 1
             request_render()
-            return
+        else
+            break
         end
     end
 
-    -- Upward swap
-    if cur_idx > 1 then
-        local prev_midpoint = cur_y_pos - (self.item_height * 0.5)
+    -- Upward swap loop (50% midpoint hysteresis)
+    while self.reorder_current_index > 1 do
+        local cur_idx = self.reorder_current_index
+        local cur_y_pos = menu.top - menu.scroll_y + scroll_step * (cur_idx - 1)
+        local prev_midpoint = cur_y_pos - (scroll_step * 0.5)
         if cursor_y < prev_midpoint then
-            local moved_item = table.remove(self.current.items, cur_idx)
-            table.insert(self.current.items, cur_idx - 1, moved_item)
+            local moved_item = table.remove(menu.items, cur_idx)
+            table.insert(menu.items, cur_idx - 1, moved_item)
             self.reorder_current_index = cur_idx - 1
-            self.current.selected_index = cur_idx - 1
+            menu.selected_index = cur_idx - 1
             request_render()
-            return
+        else
+            break
         end
     end
 end
@@ -231,6 +226,8 @@ function Menu:finish_reorder()
             menu_id = self.current.id,
         }}
         self:command_or_event(self.current.on_move, {{from_idx, to_idx, self.current.id}}, event)
+        self:select_index(to_idx, self.current.id)
+        self:scroll_to_index(to_idx, self.current.id, true)
     end
     request_render()
 end
@@ -304,7 +301,7 @@ def patch_menu_lua(content: str) -> str:
     # Hook handle_shortcut (Escape & Right-click cancellation)
     key_pattern = r"(function\s+Menu:handle_shortcut\s*\([^\)]*\)\s*\n)"
     key_hook = (
-        r"\1    if self.is_reordering and (shortcut and (shortcut.key == 'esc' or shortcut.id == 'esc')) then\n"
+        r"\1    if self.is_reordering and (shortcut and (shortcut.key == 'esc' or shortcut.id == 'esc' or shortcut.id == 'mbtn_right')) then\n"
         r"        self:abort_reorder()\n"
         r"        return\n"
         r"    end\n"
@@ -382,7 +379,7 @@ def unpatch_menu_lua(content: str) -> str:
 
     # Revert handle_shortcut
     patched = re.sub(
-        r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'\)\) then\n"
+        r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'(?: or shortcut\.id == 'mbtn_right')?\)\) then\n"
         r"        self:abort_reorder\(\)\n"
         r"        return\n"
         r"    end\n",
