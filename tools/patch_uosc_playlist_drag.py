@@ -407,11 +407,51 @@ def patch_menu_lua(content: str) -> str:
     if count_border == 0:
         raise RuntimeError("Failed to anchor ass:rect border in elements/Menu.lua")
 
-    # Hook visual highlight opacity (moderate fill opacity to keep text contrast crisp)
-    highlight_pattern = r"(local\s+highlight_opacity\s*=\s*0\s*\+\s*\(item\.active\s+and\s+0\.8\s+or\s+0\)\s*\+\s*\(is_selected\s+and\s+0\.15\s+or\s+0\))"
+    # Hook text contrast for dragged items (guarantees bright white text instead of black fgt)
+    font_color_pattern = r"(local\s+font_color\s*=\s*)(item\.active\s+and\s+fgt\s+or\s+bgt)"
+    if re.search(font_color_pattern, patched):
+        patched = re.sub(
+            font_color_pattern,
+            r"\1(item.active and not (self.is_reordering and self.reorder_current_index == index)) and fgt or bgt",
+            patched,
+            count=1,
+        )
+
+    # Hook visual highlight opacity (standardizes elevated card to 0.40 opacity for all dragged items)
+    highlight_pattern = r"(local\s+highlight_opacity\s*=\s*)(0\s*\+\s*\(item\.active\s+and\s+0\.8\s+or\s+0\)\s*\+\s*\(is_selected\s+and\s+0\.15\s+or\s+0\))"
     if re.search(highlight_pattern, patched):
-        highlight_hook = r"\1 + ((self.is_reordering and self.reorder_current_index == index) and 0.20 or 0)"
+        highlight_hook = r"\1(self.is_reordering and self.reorder_current_index == index) and 0.40 or (\2)"
         patched = re.sub(highlight_pattern, highlight_hook, patched, count=1)
+
+    # Hook action icon color (prevents drag handle from inverting to black text on hover/active)
+    icon_color_pattern = r"(ass:icon\(rect\.ax\s*\+\s*size\s*/\s*2,\s*rect\.ay\s*\+\s*size\s*/\s*2,\s*size\s*\*\s*0\.66,\s*action\.icon,\s*\{\s*\n\s*color\s*=\s*)(is_active\s+and\s+bg\s+or\s+fg)"
+    if re.search(icon_color_pattern, patched):
+        patched = re.sub(
+            icon_color_pattern,
+            r"\1(action.name == 'drag_reorder') and fg or (\2)",
+            patched,
+            count=1,
+        )
+
+    # Hook action rect border (removes black border from drag handle)
+    rect_border_pattern = r"(\n\s*border\s*=\s*)(is_active\s+and\s+self\.gap\s+or\s+nil)"
+    if re.search(rect_border_pattern, patched):
+        patched = re.sub(
+            rect_border_pattern,
+            r"\1(action.name ~= 'drag_reorder' and is_active) and self.gap or nil",
+            patched,
+            count=1,
+        )
+
+    # Hook action rect opacity (subtle translucent pill on hover, prevents dark cutout)
+    rect_opacity_pattern = r"(\n\s*opacity\s*=\s*)(menu_opacity,)"
+    if re.search(rect_opacity_pattern, patched):
+        patched = re.sub(
+            rect_opacity_pattern,
+            r"\1(action.name == 'drag_reorder') and (is_active and menu_opacity * 0.35 or menu_opacity * 0.15) or \2",
+            patched,
+            count=1,
+        )
 
     return patched
 
@@ -502,10 +542,43 @@ def unpatch_menu_lua(content: str) -> str:
         patched,
     )
 
-    # Revert highlight opacity (handles 0.20, 0.35, or any float)
+    # Revert font_color
+    patched = re.sub(
+        r"\(item\.active and not \(self\.is_reordering and self\.reorder_current_index == index\)\) and fgt or bgt",
+        "item.active and fgt or bgt",
+        patched,
+    )
+
+    # Revert highlight opacity (handles 0.40 conditional, or + 0.xx)
+    patched = re.sub(
+        r"\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.\d+ or \((0\s*\+\s*\(item\.active\s+and\s+0\.8\s+or\s+0\)\s*\+\s*\(is_selected\s+and\s+0\.15\s+or\s+0\))\)",
+        r"\1",
+        patched,
+    )
     patched = re.sub(
         r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.\d+ or 0\)",
         "",
+        patched,
+    )
+
+    # Revert action icon color
+    patched = re.sub(
+        r"\(action\.name == 'drag_reorder'\) and fg or \(is_active and bg or fg\)",
+        "is_active and bg or fg",
+        patched,
+    )
+
+    # Revert action rect border
+    patched = re.sub(
+        r"\(action\.name ~= 'drag_reorder' and is_active\) and self\.gap or nil",
+        "is_active and self.gap or nil",
+        patched,
+    )
+
+    # Revert action rect opacity
+    patched = re.sub(
+        r"\(action\.name == 'drag_reorder'\) and \(is_active and menu_opacity \* 0\.35 or menu_opacity \* 0\.15\) or menu_opacity,",
+        "menu_opacity,",
         patched,
     )
 
@@ -522,7 +595,6 @@ def unpatch_menu_lua(content: str) -> str:
         patched,
         flags=re.DOTALL,
     )
-
     return patched
 
 

@@ -48,25 +48,37 @@ function Menu:handle_shortcut(shortcut, info)
 end
 
 function Menu:render()
-\tlocal selected_action
-\tfor index = start_index, end_index, 1 do
-\t\tif is_current and self.mouse_nav
-\t\t\tand (submenu_is_hovered or get_point_to_rectangle_proximity(cursor, item_rect_hitbox) <= 0) then
-\t\t\tself.mouse_hovered_index = index
-\t\tend
-\t\tlocal highlight_opacity = 0 + (item.active and 0.8 or 0) + (is_selected and 0.15 or 0)
-\t\tif highlight_opacity > 0 then
-\t\t\tass:rect(content_rect.ax, item_ay, content_rect.bx, item_by, {
-\t\t\t\tradius = state.radius,
-\t\t\t\tcolor = fg,
-\t\t\t})
-\t\tend
-\t\tif self.mouse_nav and get_point_to_rectangle_proximity(cursor, rect) <= 0 then
-\t\t\tcursor:zone('primary_click', rect, self:create_action(function(shortcut)
-\t\t\t\tself:activate_selected_item(shortcut, true)
-\t\t\tend))
-\t\tend
-\tend
+	local selected_action
+	for index = start_index, end_index, 1 do
+		if is_current and self.mouse_nav
+			and (submenu_is_hovered or get_point_to_rectangle_proximity(cursor, item_rect_hitbox) <= 0) then
+			self.mouse_hovered_index = index
+		end
+		local font_color = item.active and fgt or bgt
+		local highlight_opacity = 0 + (item.active and 0.8 or 0) + (is_selected and 0.15 or 0)
+		if highlight_opacity > 0 then
+			ass:rect(content_rect.ax, item_ay, content_rect.bx, item_by, {
+				radius = state.radius,
+				color = fg,
+			})
+		end
+		ass:rect(rect.ax, rect.ay, rect.bx, rect.by, {
+			radius = state.radius > 2 and state.radius - 1 or state.radius,
+			color = is_active and fg or bg,
+			border = is_active and self.gap or nil,
+			border_color = bg,
+			opacity = menu_opacity,
+			clip = item_clip,
+		})
+		ass:icon(rect.ax + size / 2, rect.ay + size / 2, size * 0.66, action.icon, {
+			color = is_active and bg or fg, opacity = menu_opacity, clip = item_clip,
+		})
+		if self.mouse_nav and get_point_to_rectangle_proximity(cursor, rect) <= 0 then
+			cursor:zone('primary_click', rect, self:create_action(function(shortcut)
+				self:activate_selected_item(shortcut, true)
+			end))
+		end
+	end
 end
 
 return Menu
@@ -111,6 +123,13 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
         self.assertIn("border = (self.is_reordering and self.reorder_current_index == index)", patched)
         self.assertIn("shortcut.key == 'esc' or shortcut.id == 'esc'", patched)
 
+        # Anti-black-text assertions
+        self.assertIn("(item.active and not (self.is_reordering and self.reorder_current_index == index)) and fgt or bgt", patched)
+        self.assertIn("(self.is_reordering and self.reorder_current_index == index) and 0.40 or", patched)
+        self.assertIn("(action.name == 'drag_reorder') and fg", patched)
+        self.assertIn("(action.name ~= 'drag_reorder' and is_active) and self.gap or nil", patched)
+        self.assertIn("(action.name == 'drag_reorder') and (is_active and menu_opacity * 0.35", patched)
+
         # Idempotent
         patched_again = patcher.patch_menu_lua(patched)
         self.assertEqual(patched, patched_again)
@@ -122,6 +141,8 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
         self.assertNotIn("self.drag_start_y", unpatched)
         self.assertNotIn("self.reorder_current_index == index", unpatched)
         self.assertNotIn("border = (self.is_reordering and self.reorder_current_index == index)", unpatched)
+        self.assertNotIn("drag_reorder", unpatched)
+        self.assertNotIn("item.active and not (self.is_reordering", unpatched)
 
     def test_full_directory_patch_and_unpatch(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
