@@ -98,7 +98,6 @@ def unpatch_menus_lua(content: str) -> str:
         rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua:actions\).*?"
         rf"{re.escape(PATCH_MARKER)}_END \(menus\.lua:actions\)\n"
     )
-    # Support backward compatibility with older patch marker format
     if not re.search(pattern, patched, flags=re.DOTALL):
         pattern = (
             rf"\s*{re.escape(PATCH_MARKER)}_START \(menus\.lua\).*?"
@@ -284,7 +283,15 @@ def patch_menu_lua(content: str) -> str:
     down_pattern = r"(function\s+Menu:handle_cursor_down\s*\([^\)]*\)\s*\n)"
     down_hook = (
         r"\1    self.drag_start_y = cursor.y\n"
-        r"    self.drag_start_index = self.mouse_hovered_index or (self.current and self.current.selected_index)\n"
+        r"    local item_idx = self.mouse_hovered_index or (self.current and self.current.selected_index)\n"
+        r"    if not item_idx and self.current and self.current.items and #self.current.items > 0 then\n"
+        r"        local scroll_step = self.scroll_step or self.item_height or 24\n"
+        r"        local calculated = math.floor((cursor.y - self.current.top + self.current.scroll_y) / scroll_step) + 1\n"
+        r"        if calculated >= 1 and calculated <= #self.current.items then\n"
+        r"            item_idx = calculated\n"
+        r"        end\n"
+        r"    end\n"
+        r"    self.drag_start_index = item_idx\n"
     )
     patched, count_down = re.subn(down_pattern, down_hook, patched, count=1)
     if count_down == 0:
@@ -411,33 +418,50 @@ def patch_menu_lua(content: str) -> str:
 
 def unpatch_menu_lua(content: str) -> str:
     """Strip all modifications and restore pristine elements/Menu.lua."""
-    if PATCH_MARKER not in content:
+    if PATCH_MARKER not in content and "is_reordering" not in content and "drag_reorder" not in content:
         return content
 
+    # Remove drag patch helpers
     pattern_helpers = (
         rf"\n*{re.escape(PATCH_MARKER)}_START \(Menu\.lua:drag_and_drop_core\).*?"
         rf"{re.escape(PATCH_MARKER)}_END \(Menu\.lua:drag_and_drop_core\)\n*"
     )
     patched = re.sub(pattern_helpers, "\n", content, flags=re.DOTALL)
+    patched = re.sub(r"\n*-- UOSC_PLAYLIST_DRAG_PATCH_START.*?\n*-- UOSC_PLAYLIST_DRAG_PATCH_END[^\n]*\n*", "\n", patched, flags=re.DOTALL)
 
     # Revert Menu:handle_cursor_down
     patched = re.sub(
         r"    self\.drag_start_y = cursor\.y\n"
-        r"    self\.drag_start_index = self\.mouse_hovered_index or \(self\.current and self\.current\.selected_index\)\n",
+        r"(?:    local item_idx = self\.mouse_hovered_index or \(self\.current and self\.current\.selected_index\)\n"
+        r"    if not item_idx and self\.current and self\.current\.items and #self\.current\.items > 0 then\n"
+        r"        local scroll_step = self\.scroll_step or self\.item_height or 24\n"
+        r"        local calculated = math\.floor\(\(cursor\.y - self\.current\.top \+ self\.current\.scroll_y\) / scroll_step\) \+ 1\n"
+        r"        if calculated >= 1 and calculated <= #self\.current\.items then\n"
+        r"            item_idx = calculated\n"
+        r"        end\n"
+        r"    end\n"
+        r"    self\.drag_start_index = item_idx\n|"
+        r"    self\.drag_start_index = self\.mouse_hovered_index or \(self\.current and self\.current\.selected_index\)\n)",
         "",
         patched,
     )
 
-    # Revert Menu:handle_cursor_up
+    # Revert Menu:handle_cursor_up (handle single or duplicate occurrences)
     patched = re.sub(
-        r"    if self\.is_reordering then\n\s+self:finish_reorder\(\)\n\s+self\.drag_last_y = nil\n\s+self\.drag_start_y = nil\n\s+self\.drag_start_index = nil\n\s+self\.is_dragging = false\n\s+return\n\s+end\n\s+self\.drag_start_y = nil\n\s+self\.drag_start_index = nil\n",
+        r"(?:    if self\.is_reordering then\n\s+self:finish_reorder\(\)\n\s+self\.drag_last_y = nil\n(?:\s+self\.drag_start_y = nil\n\s+self\.drag_start_index = nil\n)?\s+self\.is_dragging = false\n\s+return\n\s+end\n)+",
         "",
         patched,
     )
+    patched = re.sub(r"    self\.drag_start_y = nil\n    self\.drag_start_index = nil\n", "", patched)
 
     # Revert Menu:on_global_mouse_move
     patched = re.sub(
-        r"    if self\.is_reordering then\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n\s+if self\.current and self\.current\.on_move and not \(self\.current\.action_index\) and self\.drag_start_y and self\.drag_start_index then\n\s+if math\.abs\(cursor\.y - self\.drag_start_y\) >= 6 then\n\s+self:start_reorder\(self\.drag_start_index\)\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n\s+end\n",
+        r"(?:    if self\.is_reordering then\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n)+",
+        "",
+        patched,
+    )
+    patched = re.sub(
+        r"    if self\.current and self\.current\.on_move and not \(self\.current\.action_index\) and self\.drag_start_y and self\.drag_start_index then\n\s+if math\.abs\(cursor\.y - self\.drag_start_y\) >= 6 then\n\s+self:start_reorder\(self\.drag_start_index\)\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n\s+end\n",
         "",
         patched,
     )
@@ -478,9 +502,9 @@ def unpatch_menu_lua(content: str) -> str:
         patched,
     )
 
-    # Revert highlight opacity
+    # Revert highlight opacity (handles 0.20, 0.35, or any float)
     patched = re.sub(
-        r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.20 or 0\)",
+        r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.\d+ or 0\)",
         "",
         patched,
     )
