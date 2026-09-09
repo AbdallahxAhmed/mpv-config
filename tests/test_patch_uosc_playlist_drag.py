@@ -22,23 +22,25 @@ SAMPLE_MENUS_LUA = """
 """
 
 SAMPLE_MENU_LUA = """
-function Menu:handle_cursor_move(x, y)
+function Menu:on_global_mouse_move()
 \tself:update_content_dimensions()
 end
 
-function Menu:handle_cursor_up()
+function Menu:handle_cursor_up(shortcut)
 \tself:update_dimensions()
 end
 
-function Menu:handle_key(name)
-\tif name == 'enter' then return end
+function Menu:handle_shortcut(shortcut, info)
+\tif shortcut.key == 'enter' then return end
 end
 
 function Menu:render()
-\t\t\t\tif action.name == 'delete' then
-\t\t\t\t\tcursor:zone('primary_click', action_rect, function() self:delete_item(index) end)
-\t\t\t\tend
+\t\t\t\t\tcursor:zone('primary_click', rect, self:create_action(function(shortcut)
+\t\t\t\t\t\tself:activate_selected_item(shortcut, true)
+\t\t\t\t\tend))
 end
+
+return Menu
 """
 
 
@@ -69,7 +71,7 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
         self.assertIn("reorder_items_snapshot", patched)
         self.assertIn("if self.is_reordering then self:finish_reorder() end", patched)
         self.assertIn("if self.is_reordering then self:update_reorder(cursor.y) end", patched)
-        self.assertIn("name == 'esc' or name == 'escape'", patched)
+        self.assertIn("shortcut.key == 'esc' or shortcut.id == 'esc'", patched)
 
         # Idempotent
         patched_again = patcher.patch_menu_lua(patched)

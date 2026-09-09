@@ -234,55 +234,71 @@ def patch_menu_lua(content: str) -> str:
     if PATCH_MARKER in content:
         return content
 
-    patched = content.rstrip() + "\n\n" + MENU_REORDER_HELPERS
+    if "return Menu" in content:
+        patched = re.sub(r"(\nreturn\s+Menu[^\n]*\s*)$", "\n\n" + MENU_REORDER_HELPERS + r"\1", content.rstrip())
+        if PATCH_MARKER not in patched:
+            patched = re.sub(r"(\nreturn\s+Menu)", "\n\n" + MENU_REORDER_HELPERS + r"\1", content, count=1)
+    else:
+        patched = content.rstrip() + "\n\n" + MENU_REORDER_HELPERS
 
-    # Hook handle_cursor_up
-    up_pattern = r"(function\s+Menu:handle_cursor_up\(\s*\)\s*\n)"
-    up_hook = f"\\1    if self.is_reordering then self:finish_reorder() end\n"
+    # Hook handle_cursor_up(shortcut)
+    up_pattern = r"(function\s+Menu:handle_cursor_up\s*\([^\)]*\)\s*\n)"
+    up_hook = r"\1    if self.is_reordering then self:finish_reorder() end\n"
     patched, count_up = re.subn(up_pattern, up_hook, patched, count=1)
     if count_up == 0:
         raise RuntimeError("Failed to anchor Menu:handle_cursor_up in elements/Menu.lua")
 
-    # Hook handle_cursor_move
-    move_pattern = r"(function\s+Menu:handle_cursor_move\(.*?\)\s*\n)"
-    move_hook = f"\\1    if self.is_reordering then self:update_reorder(cursor.y) end\n"
+    # Hook on_global_mouse_move()
+    move_pattern = r"(function\s+Menu:on_global_mouse_move\s*\([^\)]*\)\s*\n)"
+    move_hook = r"\1    if self.is_reordering then self:update_reorder(cursor.y) end\n"
     patched, count_move = re.subn(move_pattern, move_hook, patched, count=1)
     if count_move == 0:
-        raise RuntimeError("Failed to anchor Menu:handle_cursor_move in elements/Menu.lua")
+        # Fallback to handle_cursor_move if upstream changes
+        alt_move_pattern = r"(function\s+Menu:handle_cursor_move\s*\([^\)]*\)\s*\n)"
+        patched, count_move = re.subn(alt_move_pattern, r"\1    if self.is_reordering then self:update_reorder(cursor.y) end\n", patched, count=1)
+        if count_move == 0:
+            raise RuntimeError("Failed to anchor mouse move handler in elements/Menu.lua")
 
-    # Hook handle_key (Escape cancellation)
-    key_pattern = r"(function\s+Menu:handle_key\(.*?\)\s*\n)"
+    # Hook handle_shortcut (Escape & Right-click cancellation)
+    key_pattern = r"(function\s+Menu:handle_shortcut\s*\([^\)]*\)\s*\n)"
     key_hook = (
-        f"\\1    if self.is_reordering and (name == 'esc' or name == 'escape') then\n"
-        f"        self:abort_reorder()\n"
-        f"        return true\n"
-        f"    end\n"
+        r"\1    if self.is_reordering and (shortcut and (shortcut.key == 'esc' or shortcut.id == 'esc')) then\n"
+        r"        self:abort_reorder()\n"
+        r"        return\n"
+        r"    end\n"
     )
     patched, count_key = re.subn(key_pattern, key_hook, patched, count=1)
     if count_key == 0:
-        raise RuntimeError("Failed to anchor Menu:handle_key in elements/Menu.lua")
+        # Fallback to handle_key
+        alt_key_pattern = r"(function\s+Menu:handle_key\s*\([^\)]*\)\s*\n)"
+        patched, count_key = re.subn(alt_key_pattern, r"\1    if self.is_reordering and (name == 'esc' or name == 'escape') then self:abort_reorder(); return true end\n", patched, count=1)
+        if count_key == 0:
+            raise RuntimeError("Failed to anchor key/shortcut handler in elements/Menu.lua")
 
     # Hook drag handle zone binding
-    action_zone_pattern = r"(if\s+action\.name\s*==\s*'delete'\s+then)"
+    action_zone_pattern = r"(cursor:zone\('primary_click',\s*rect,\s*self:create_action\(function\(shortcut\)\s*\n\s*self:activate_selected_item\(shortcut,\s*true\)\s*\n\s*end\)\))"
     action_zone_hook = (
-        f"if action.name == 'drag_reorder' then\n"
-        f"                cursor:zone('primary_down', action_rect, function() self:start_reorder(index) end)\n"
-        f"            else\\1"
+        r"if action.name == 'drag_reorder' then\n"
+        r"                            cursor:zone('primary_down', rect, function() self:start_reorder(index) end)\n"
+        r"                        else\n"
+        r"                            \1\n"
+        r"                        end"
     )
     patched, count_action = re.subn(action_zone_pattern, action_zone_hook, patched, count=1)
     if count_action == 0:
-        # Fallback to general zone registration pattern
-        alt_pattern = r"(cursor:zone\('primary_click',\s*action_rect,\s*function\(\).*?end\))"
+        # Fallback for generic action_rect or rect
+        alt_pattern = r"(\s+)(cursor:zone\('primary_click',\s*(?:rect|action_rect),)"
         alt_hook = (
-            f"if action.name == 'drag_reorder' then\n"
-            f"                    cursor:zone('primary_down', action_rect, function() self:start_reorder(index) end)\n"
-            f"                else\n"
-            f"                    \\1\n"
-            f"                end"
+            r"\1if action.name == 'drag_reorder' then\n"
+            r"\1    cursor:zone('primary_down', rect, function() self:start_reorder(index) end)\n"
+            r"\1else\n"
+            r"\1    \2"
         )
         patched, count_alt = re.subn(alt_pattern, alt_hook, patched, count=1)
         if count_alt == 0:
             raise RuntimeError("Failed to anchor action zone handler in elements/Menu.lua")
+        # Close the else block if alt pattern was used
+        patched = re.sub(r"(self:activate_selected_item\(shortcut,\s*true\)\s*\n\s*end\)\))", r"\1\n                        end", patched, count=1)
 
     return patched
 
@@ -301,20 +317,31 @@ def unpatch_menu_lua(content: str) -> str:
     patched = re.sub(r"    if self\.is_reordering then self:finish_reorder\(\) end\n", "", patched)
     patched = re.sub(r"    if self\.is_reordering then self:update_reorder\(cursor\.y\) end\n", "", patched)
     patched = re.sub(
-        r"    if self\.is_reordering and \(name == 'esc' or name == 'escape'\) then\n"
+        r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'\)\) then\n"
         r"        self:abort_reorder\(\)\n"
-        r"        return true\n"
+        r"        return\n"
         r"    end\n",
         "",
         patched,
     )
+    patched = re.sub(
+        r"    if self\.is_reordering and \(name == 'esc' or name == 'escape'\) then self:abort_reorder\(\); return true end\n",
+        "",
+        patched,
+    )
 
+    # Restore action zone
     patched = re.sub(
         r"if action\.name == 'drag_reorder' then\s+"
-        r"cursor:zone\('primary_down', action_rect, function\(\) self:start_reorder\(index\) end\)\s+"
-        r"else(if action\.name == 'delete' then)",
+        r"cursor:zone\('primary_down', rect, function\(\) self:start_reorder\(index\) end\)\s+"
+        r"else\s+"
+        r"(cursor:zone\('primary_click', rect, self:create_action\(function\(shortcut\)\s+"
+        r"self:activate_selected_item\(shortcut, true\)\s+"
+        r"end\)\))\s+"
+        r"end",
         r"\1",
         patched,
+        flags=re.DOTALL,
     )
 
     return patched
