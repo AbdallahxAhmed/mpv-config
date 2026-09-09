@@ -125,7 +125,14 @@ When rendering action buttons for the selected item:
     - Set `self.is_reordering = true`.
     - Set `self.reorder_start_index = index`.
     - Set `self.reorder_current_index = index`.
-    - Take snapshot: `self.reorder_items_snapshot = {unpack(self.current.items)}`.
+    - Take stack-safe snapshot:
+      ```lua
+      self.reorder_items_snapshot = {}
+      for i, item in ipairs(self.current.items or {}) do
+          self.reorder_items_snapshot[i] = item
+      end
+      ```
+      *(Avoids `{unpack(...)}` which triggers Lua 5.1 / LuaJIT C-stack overflow on large playlists).*
     - Suppress menu drag-scroll: `self.is_dragging = false`, `self.drag_last_y = nil`, `self.current.fling = nil`.
     - Request re-render.
 
