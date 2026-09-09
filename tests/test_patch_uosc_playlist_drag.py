@@ -29,12 +29,18 @@ SAMPLE_MENUS_LUA = """
 """
 
 SAMPLE_MENU_LUA = """
-function Menu:on_global_mouse_move()
-\tself:update_content_dimensions()
+function Menu:handle_cursor_down()
+\tif self.proximity_raw <= 0 then
+\t\tself.drag_last_y = cursor.y
+\tend
 end
 
 function Menu:handle_cursor_up(shortcut)
 \tself:update_dimensions()
+end
+
+function Menu:on_global_mouse_move()
+\tself:update_content_dimensions()
 end
 
 function Menu:handle_shortcut(shortcut, info)
@@ -42,10 +48,25 @@ function Menu:handle_shortcut(shortcut, info)
 end
 
 function Menu:render()
-\tlocal highlight_opacity = 0 + (item.active and 0.8 or 0) + (is_selected and 0.15 or 0)
-\tcursor:zone('primary_click', rect, self:create_action(function(shortcut)
-\t\tself:activate_selected_item(shortcut, true)
-\tend))
+\tlocal selected_action
+\tfor index = start_index, end_index, 1 do
+\t\tif is_current and self.mouse_nav
+\t\t\tand (submenu_is_hovered or get_point_to_rectangle_proximity(cursor, item_rect_hitbox) <= 0) then
+\t\t\tself.mouse_hovered_index = index
+\t\tend
+\t\tlocal highlight_opacity = 0 + (item.active and 0.8 or 0) + (is_selected and 0.15 or 0)
+\t\tif highlight_opacity > 0 then
+\t\t\tass:rect(content_rect.ax, item_ay, content_rect.bx, item_by, {
+\t\t\t\tradius = state.radius,
+\t\t\t\tcolor = fg,
+\t\t\t})
+\t\tend
+\t\tif self.mouse_nav and get_point_to_rectangle_proximity(cursor, rect) <= 0 then
+\t\t\tcursor:zone('primary_click', rect, self:create_action(function(shortcut)
+\t\t\t\tself:activate_selected_item(shortcut, true)
+\t\t\tend))
+\t\tend
+\tend
 end
 
 return Menu
@@ -83,9 +104,12 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
         self.assertIn("if self.is_reordering then", patched)
         self.assertIn("self:finish_reorder()", patched)
         self.assertIn("self:update_reorder(cursor.y)", patched)
-        self.assertIn("self.drag_last_y = nil", patched)
+        self.assertIn("self.drag_start_y = cursor.y", patched)
+        self.assertIn("math.abs(cursor.y - self.drag_start_y) >= 6", patched)
+        self.assertIn("menu.selected_index = self.reorder_current_index", patched)
+        self.assertIn("not self.is_reordering and", patched)
+        self.assertIn("border = (self.is_reordering and self.reorder_current_index == index)", patched)
         self.assertIn("shortcut.key == 'esc' or shortcut.id == 'esc'", patched)
-        self.assertIn("self.reorder_current_index == index", patched)
 
         # Idempotent
         patched_again = patcher.patch_menu_lua(patched)
@@ -95,8 +119,9 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
         unpatched = patcher.unpatch_menu_lua(patched)
         self.assertNotIn("function Menu:start_reorder", unpatched)
         self.assertNotIn("UOSC_PLAYLIST_DRAG_PATCH", unpatched)
-        self.assertNotIn("self.drag_last_y = nil", unpatched)
+        self.assertNotIn("self.drag_start_y", unpatched)
         self.assertNotIn("self.reorder_current_index == index", unpatched)
+        self.assertNotIn("border = (self.is_reordering and self.reorder_current_index == index)", unpatched)
 
     def test_full_directory_patch_and_unpatch(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

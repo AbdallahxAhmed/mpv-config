@@ -3,9 +3,10 @@
 tools/patch_uosc_playlist_drag.py
 
 Idempotent patcher for uosc to enable drag-and-drop playlist reordering.
-Implements optimistic local reordering, visual elevation/dimming, 
-explicit Escape/Right-click cancellation, non-linear edge auto-scrolling,
-and single-commit release delegation.
+Implements YouTube Music-style free drag-and-drop, optimistic local reordering,
+selection lock & hover isolation (preventing text/handle disappearance),
+elevated card styling with 2px accent border, explicit Escape/Right-click cancellation,
+continuous 60 FPS non-linear edge auto-scrolling, and single-commit release delegation.
 """
 
 from __future__ import annotations
@@ -133,6 +134,8 @@ MENU_REORDER_HELPERS = f"""
 {PATCH_MARKER}_START (Menu.lua:drag_and_drop_core)
 function Menu:start_reorder(index)
     if not self.current or not self.current.on_move then return end
+    if not self.current.items or #self.current.items <= 1 then return end
+    if not index or index < 1 or index > #self.current.items then return end
     if self.search and self.search.query and self.search.query ~= '' then return end
 
     self.is_reordering = true
@@ -164,15 +167,22 @@ function Menu:update_reorder(cursor_y)
     local threshold = scroll_step * 1.5
     local base_v = scroll_step * 1.2
 
-    -- Non-linear edge auto-scrolling
-    if cursor_y < top_bound + threshold then
+    -- Continuous non-linear edge auto-scrolling
+    local is_edge_scrolling = false
+    if cursor_y < top_bound + threshold and menu.scroll_y > 0 then
         local depth = math.max(0, math.min(1, (top_bound + threshold - cursor_y) / threshold))
         local step = math.max(1, math.floor(base_v * (depth ^ 1.5)))
         self:set_scroll_by(-step, menu.id)
-    elseif cursor_y > bottom_bound - threshold then
+        is_edge_scrolling = true
+    elseif cursor_y > bottom_bound - threshold and menu.scroll_y < menu.scroll_height then
         local depth = math.max(0, math.min(1, (cursor_y - (bottom_bound - threshold)) / threshold))
         local step = math.max(1, math.floor(base_v * (depth ^ 1.5)))
         self:set_scroll_by(step, menu.id)
+        is_edge_scrolling = true
+    end
+
+    if is_edge_scrolling then
+        request_render()
     end
 
     -- Downward swap loop (50% midpoint hysteresis)
@@ -240,8 +250,12 @@ function Menu:abort_reorder()
         self.current.items = self.reorder_items_snapshot
     end
     self.reorder_items_snapshot = nil
+    local orig_idx = self.reorder_start_index
     self.reorder_start_index = nil
     self.reorder_current_index = nil
+    if orig_idx and self.current then
+        self:select_index(orig_idx, self.current.id)
+    end
     request_render()
 end
 
@@ -266,21 +280,35 @@ def patch_menu_lua(content: str) -> str:
     else:
         patched = content.rstrip() + "\n\n" + MENU_REORDER_HELPERS
 
-    # Hook handle_cursor_up(shortcut) - isolate from kinetic scrolling and activation
+    # Hook Menu:handle_cursor_down (record drag start coordinates and initial index)
+    down_pattern = r"(function\s+Menu:handle_cursor_down\s*\([^\)]*\)\s*\n)"
+    down_hook = (
+        r"\1    self.drag_start_y = cursor.y\n"
+        r"    self.drag_start_index = self.mouse_hovered_index or (self.current and self.current.selected_index)\n"
+    )
+    patched, count_down = re.subn(down_pattern, down_hook, patched, count=1)
+    if count_down == 0:
+        raise RuntimeError("Failed to anchor Menu:handle_cursor_down in elements/Menu.lua")
+
+    # Hook Menu:handle_cursor_up (finish reorder or clean up drag coordinates)
     up_pattern = r"(function\s+Menu:handle_cursor_up\s*\([^\)]*\)\s*\n)"
     up_hook = (
         r"\1    if self.is_reordering then\n"
         r"        self:finish_reorder()\n"
         r"        self.drag_last_y = nil\n"
+        r"        self.drag_start_y = nil\n"
+        r"        self.drag_start_index = nil\n"
         r"        self.is_dragging = false\n"
         r"        return\n"
         r"    end\n"
+        r"    self.drag_start_y = nil\n"
+        r"    self.drag_start_index = nil\n"
     )
     patched, count_up = re.subn(up_pattern, up_hook, patched, count=1)
     if count_up == 0:
         raise RuntimeError("Failed to anchor Menu:handle_cursor_up in elements/Menu.lua")
 
-    # Hook on_global_mouse_move() - isolate from drag-scrolling
+    # Hook Menu:on_global_mouse_move (free drag initiation >= 6px and active reorder updates)
     move_pattern = r"(function\s+Menu:on_global_mouse_move\s*\([^\)]*\)\s*\n)"
     move_hook = (
         r"\1    if self.is_reordering then\n"
@@ -289,16 +317,21 @@ def patch_menu_lua(content: str) -> str:
         r"        self:update_reorder(cursor.y)\n"
         r"        return\n"
         r"    end\n"
+        r"    if self.current and self.current.on_move and not (self.current.action_index) and self.drag_start_y and self.drag_start_index then\n"
+        r"        if math.abs(cursor.y - self.drag_start_y) >= 6 then\n"
+        r"            self:start_reorder(self.drag_start_index)\n"
+        r"            self.drag_last_y = nil\n"
+        r"            self.is_dragging = false\n"
+        r"            self:update_reorder(cursor.y)\n"
+        r"            return\n"
+        r"        end\n"
+        r"    end\n"
     )
     patched, count_move = re.subn(move_pattern, move_hook, patched, count=1)
     if count_move == 0:
-        # Fallback to handle_cursor_move if upstream changes
-        alt_move_pattern = r"(function\s+Menu:handle_cursor_move\s*\([^\)]*\)\s*\n)"
-        patched, count_move = re.subn(alt_move_pattern, r"\1    if self.is_reordering then self:update_reorder(cursor.y); return end\n", patched, count=1)
-        if count_move == 0:
-            raise RuntimeError("Failed to anchor mouse move handler in elements/Menu.lua")
+        raise RuntimeError("Failed to anchor mouse move handler in elements/Menu.lua")
 
-    # Hook handle_shortcut (Escape & Right-click cancellation)
+    # Hook Menu:handle_shortcut (Escape & Right-click cancellation)
     key_pattern = r"(function\s+Menu:handle_shortcut\s*\([^\)]*\)\s*\n)"
     key_hook = (
         r"\1    if self.is_reordering and (shortcut and (shortcut.key == 'esc' or shortcut.id == 'esc' or shortcut.id == 'mbtn_right')) then\n"
@@ -308,13 +341,42 @@ def patch_menu_lua(content: str) -> str:
     )
     patched, count_key = re.subn(key_pattern, key_hook, patched, count=1)
     if count_key == 0:
-        # Fallback to handle_key
-        alt_key_pattern = r"(function\s+Menu:handle_key\s*\([^\)]*\)\s*\n)"
-        patched, count_key = re.subn(alt_key_pattern, r"\1    if self.is_reordering and (name == 'esc' or name == 'escape') then self:abort_reorder(); return true end\n", patched, count=1)
-        if count_key == 0:
-            raise RuntimeError("Failed to anchor key/shortcut handler in elements/Menu.lua")
+        raise RuntimeError("Failed to anchor key/shortcut handler in elements/Menu.lua")
 
-    # Hook drag handle zone binding
+    # Hook Menu:render (continuous edge auto-scroll tick)
+    render_pattern = r"(function\s+Menu:render\s*\([^\)]*\)\s*\n)"
+    render_hook = r"\1    if self.is_reordering then self:update_reorder(cursor.y) end\n"
+    patched, count_render = re.subn(render_pattern, render_hook, patched, count=1)
+    if count_render == 0:
+        raise RuntimeError("Failed to anchor Menu:render in elements/Menu.lua")
+
+    # Hook selection lock before item loop in draw_menu (locks selected_index to dragged item)
+    for_loop_pattern = r"(\n\s*)(for\s+index\s*=\s*start_index,\s*end_index,\s*1\s+do)"
+    for_loop_hook = (
+        r"\1if self.is_reordering and is_current then\n"
+        r"\1\tmenu.selected_index = self.reorder_current_index\n"
+        r"\1\tself.mouse_hovered_index = self.reorder_current_index\n"
+        r"\1\tmenu.action_index = nil\n"
+        r"\1end"
+        r"\1\2"
+    )
+    patched, count_for = re.subn(for_loop_pattern, for_loop_hook, patched, count=1)
+    if count_for == 0:
+        raise RuntimeError("Failed to anchor item for loop in elements/Menu.lua")
+
+    # Hook hover item selection guard (prevent hover selection stealing during reorder)
+    hover_item_pattern = r"(if\s+)(is_current\s+and\s+self\.mouse_nav\s*\n\s*and\s*\(submenu_is_hovered\s+or\s+get_point_to_rectangle_proximity)"
+    patched, count_hover_item = re.subn(hover_item_pattern, r"\1not self.is_reordering and \2", patched, count=1)
+    if count_hover_item == 0:
+        raise RuntimeError("Failed to anchor hover item selection guard in elements/Menu.lua")
+
+    # Hook hover action selection guard (prevent action selection stealing during reorder)
+    hover_action_pattern = r"(if\s+)(self\.mouse_nav\s+and\s+get_point_to_rectangle_proximity\(cursor,\s*rect\)\s*<=\s*0\s+then)"
+    patched, count_hover_act = re.subn(hover_action_pattern, r"\1not self.is_reordering and \2", patched, count=1)
+    if count_hover_act == 0:
+        raise RuntimeError("Failed to anchor hover action selection guard in elements/Menu.lua")
+
+    # Hook drag handle direct grab zone binding
     action_zone_pattern = r"(cursor:zone\('primary_click',\s*rect,\s*self:create_action\(function\(shortcut\)\s*\n\s*self:activate_selected_item\(shortcut,\s*true\)\s*\n\s*end\)\))"
     action_zone_hook = (
         r"if action.name == 'drag_reorder' then\n"
@@ -325,26 +387,23 @@ def patch_menu_lua(content: str) -> str:
     )
     patched, count_action = re.subn(action_zone_pattern, action_zone_hook, patched, count=1)
     if count_action == 0:
-        # Fallback for generic action_rect or rect
-        alt_pattern = r"(\s+)(cursor:zone\('primary_click',\s*(?:rect|action_rect),)"
-        alt_hook = (
-            r"\1if action.name == 'drag_reorder' then\n"
-            r"\1    cursor:zone('primary_down', rect, function() self:start_reorder(index) end)\n"
-            r"\1else\n"
-            r"\1    \2"
-        )
-        patched, count_alt = re.subn(alt_pattern, alt_hook, patched, count=1)
-        if count_alt == 0:
-            raise RuntimeError("Failed to anchor action zone handler in elements/Menu.lua")
-        # Close the else block if alt pattern was used
-        patched = re.sub(r"(self:activate_selected_item\(shortcut,\s*true\)\s*\n\s*end\)\))", r"\1\n                        end", patched, count=1)
+        raise RuntimeError("Failed to anchor action zone handler in elements/Menu.lua")
 
-    # Hook visual drag elevation (increase highlight opacity for currently dragged row)
+    # Hook card elevation border
+    ass_rect_pattern = r"(\s+ass:rect\(content_rect\.ax,\s*item_ay,\s*content_rect\.bx,\s*item_by,\s*\{\s*\n\s*radius\s*=\s*state\.radius,\s*\n\s*color\s*=\s*fg,)"
+    ass_rect_hook = (
+        r"\1\n"
+        r"\t\t\t\t\tborder = (self.is_reordering and self.reorder_current_index == index) and math.max(1, round(2 * state.scale)) or nil,\n"
+        r"\t\t\t\t\tborder_color = fg,"
+    )
+    patched, count_border = re.subn(ass_rect_pattern, ass_rect_hook, patched, count=1)
+    if count_border == 0:
+        raise RuntimeError("Failed to anchor ass:rect border in elements/Menu.lua")
+
+    # Hook visual highlight opacity (moderate fill opacity to keep text contrast crisp)
     highlight_pattern = r"(local\s+highlight_opacity\s*=\s*0\s*\+\s*\(item\.active\s+and\s+0\.8\s+or\s+0\)\s*\+\s*\(is_selected\s+and\s+0\.15\s+or\s+0\))"
     if re.search(highlight_pattern, patched):
-        highlight_hook = (
-            r"\1 + ((self.is_reordering and self.reorder_current_index == index) and 0.35 or 0)"
-        )
+        highlight_hook = r"\1 + ((self.is_reordering and self.reorder_current_index == index) and 0.20 or 0)"
         patched = re.sub(highlight_pattern, highlight_hook, patched, count=1)
 
     return patched
@@ -361,40 +420,67 @@ def unpatch_menu_lua(content: str) -> str:
     )
     patched = re.sub(pattern_helpers, "\n", content, flags=re.DOTALL)
 
-    # Revert handle_cursor_up
+    # Revert Menu:handle_cursor_down
     patched = re.sub(
-        r"    if self\.is_reordering then\n\s+self:finish_reorder\(\)\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+return\n\s+end\n",
+        r"    self\.drag_start_y = cursor\.y\n"
+        r"    self\.drag_start_index = self\.mouse_hovered_index or \(self\.current and self\.current\.selected_index\)\n",
         "",
         patched,
     )
-    patched = re.sub(r"    if self\.is_reordering then self:finish_reorder\(\) end\n", "", patched)
 
-    # Revert on_global_mouse_move
+    # Revert Menu:handle_cursor_up
     patched = re.sub(
-        r"    if self\.is_reordering then\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n",
+        r"    if self\.is_reordering then\n\s+self:finish_reorder\(\)\n\s+self\.drag_last_y = nil\n\s+self\.drag_start_y = nil\n\s+self\.drag_start_index = nil\n\s+self\.is_dragging = false\n\s+return\n\s+end\n\s+self\.drag_start_y = nil\n\s+self\.drag_start_index = nil\n",
         "",
         patched,
     )
+
+    # Revert Menu:on_global_mouse_move
+    patched = re.sub(
+        r"    if self\.is_reordering then\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n\s+if self\.current and self\.current\.on_move and not \(self\.current\.action_index\) and self\.drag_start_y and self\.drag_start_index then\n\s+if math\.abs\(cursor\.y - self\.drag_start_y\) >= 6 then\n\s+self:start_reorder\(self\.drag_start_index\)\n\s+self\.drag_last_y = nil\n\s+self\.is_dragging = false\n\s+self:update_reorder\(cursor\.y\)\n\s+return\n\s+end\n\s+end\n",
+        "",
+        patched,
+    )
+
+    # Revert Menu:handle_shortcut
+    patched = re.sub(
+        r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'(?: or shortcut\.id == 'mbtn_right')?\)\) then\n\s+self:abort_reorder\(\)\n\s+return\n\s+end\n",
+        "",
+        patched,
+    )
+
+    # Revert Menu:render
     patched = re.sub(r"    if self\.is_reordering then self:update_reorder\(cursor\.y\) end\n", "", patched)
 
-    # Revert handle_shortcut
+    # Revert selection lock
     patched = re.sub(
-        r"    if self\.is_reordering and \(shortcut and \(shortcut\.key == 'esc' or shortcut\.id == 'esc'(?: or shortcut\.id == 'mbtn_right')?\)\) then\n"
-        r"        self:abort_reorder\(\)\n"
-        r"        return\n"
-        r"    end\n",
-        "",
-        patched,
-    )
-    patched = re.sub(
-        r"    if self\.is_reordering and \(name == 'esc' or name == 'escape'\) then self:abort_reorder\(\); return true end\n",
+        r"if self\.is_reordering and is_current then\n\s*menu\.selected_index = self\.reorder_current_index\n\s*self\.mouse_hovered_index = self\.reorder_current_index\n\s*menu\.action_index = nil\n\s*end\n\t*",
         "",
         patched,
     )
 
-    # Revert highlight elevation
+    # Revert hover guards
     patched = re.sub(
-        r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.35 or 0\)",
+        r"if not self\.is_reordering and (is_current\s+and\s+self\.mouse_nav\s*\n\s*and\s*\(submenu_is_hovered\s+or\s+get_point_to_rectangle_proximity)",
+        r"if \1",
+        patched,
+    )
+    patched = re.sub(
+        r"if not self\.is_reordering and (self\.mouse_nav\s+and\s+get_point_to_rectangle_proximity\(cursor,\s*rect\)\s*<=\s*0\s+then)",
+        r"if \1",
+        patched,
+    )
+
+    # Revert card elevation border
+    patched = re.sub(
+        r"\n\t+border = \(self\.is_reordering and self\.reorder_current_index == index\) and math\.max\(1, round\(2 \* state\.scale\)\) or nil,\n\t+border_color = fg,",
+        "",
+        patched,
+    )
+
+    # Revert highlight opacity
+    patched = re.sub(
+        r" \+ \(\(self\.is_reordering and self\.reorder_current_index == index\) and 0\.20 or 0\)",
         "",
         patched,
     )
