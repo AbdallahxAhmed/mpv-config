@@ -240,6 +240,10 @@ local last_real_w, last_real_h
 local script_name
 
 local show_thumbnail = false
+local overlay_seq = 0
+local has_valid_frame = false
+local pending_respawn = false
+local pending_respawn_time = nil
 
 local filters_reset = {["lavfi-crop"]=true, ["crop"]=true}
 local filters_runtime = {["hflip"]=true, ["vflip"]=true}
@@ -514,7 +518,8 @@ local function info(w, h)
         info_timer = mp.add_timeout(0.05, function() info(w, h) end)
     end
 
-    local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=true, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
+    local is_available = not disabled and (has_valid_frame or using_storyboards)
+    local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=is_available, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
     if pre_0_30_0 then
         mp.command_native({"script-message", "thumbfast-info", json})
     else
@@ -726,11 +731,17 @@ local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end
     if not mp.utils.file_info(thumbnail_path..".bgra") then return end
     if x ~= nil then
+        overlay_seq = overlay_seq + 1
+        local current_seq = overlay_seq
         local scale_w, scale_h = options.scale_factor ~= 1 and (w * options.scale_factor) or nil, options.scale_factor ~= 1 and (h * options.scale_factor) or nil
         if pre_0_30_0 then
             mp.command_native({"overlay-add", options.overlay_id, x, y, thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h})
         else
-            mp.command_native_async({"overlay-add", options.overlay_id, x, y, thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h}, function() end)
+            mp.command_native_async({"overlay-add", options.overlay_id, x, y, thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h}, function(success, result, error)
+                if current_seq ~= overlay_seq or not show_thumbnail then
+                    mp.command_native_async({"overlay-remove", options.overlay_id}, function() end)
+                end
+            end)
         end
     elseif script then
         local json, err = mp.utils.format_json({width=w, height=h, scale_factor=options.scale_factor, x=x, y=y, socket=options.socket, thumbnail=thumbnail_path, overlay_id=options.overlay_id})
@@ -857,7 +868,10 @@ local function check_new_thumb()
             do_raw_seek(next_target, true)
         end
 
-        if real_w and (real_w ~= last_real_w or real_h ~= last_real_h) then
+        local had_frame = has_valid_frame
+        has_valid_frame = true
+
+        if not had_frame or (real_w and (real_w ~= last_real_w or real_h ~= last_real_h)) then
             last_real_w, last_real_h = real_w, real_h
             info(real_w, real_h)
         end
@@ -877,9 +891,12 @@ file_timer = mp.add_periodic_timer(file_check_period, function()
 end)
 file_timer:kill()
 
+local respawn_thumbnailer
+
 local function clear()
     file_timer:kill()
     seek_timer:kill()
+    overlay_seq = overlay_seq + 1
     if options.quit_after_inactivity > 0 then
         if show_thumbnail or activity_timer:is_enabled() then
             activity_timer:kill()
@@ -898,6 +915,12 @@ local function clear()
         mp.command_native({"overlay-remove", options.overlay_id})
     else
         mp.command_native_async({"overlay-remove", options.overlay_id}, function() end)
+    end
+    if pending_respawn and respawn_thumbnailer then
+        local seek_time = pending_respawn_time
+        pending_respawn = false
+        pending_respawn_time = nil
+        respawn_thumbnailer(seek_time)
     end
 end
 
@@ -1034,27 +1057,37 @@ local function watch_changes()
         info(effective_w, effective_h)
     end
 
+    respawn_thumbnailer = function(seek_time)
+        run("quit")
+        if file then
+            pcall(function() file:close() end)
+            file = nil
+            file_bytes = 0
+        end
+        spawned = false
+        has_valid_frame = false
+        file_seq = file_seq + 1
+        options.socket = base_socket .. "_" .. file_seq
+        options.thumbnail = base_thumbnail .. "_" .. file_seq
+        thumbnail_path = options.thumbnail
+        if options.direct_io and os_name == "windows" and winapi then
+            winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+        end
+        spawn(seek_time or mp.get_property_number("time-pos", 0))
+        file_timer:resume()
+    end
+
     if spawned then
         if resized then
             -- mpv doesn't allow us to change output size
+            if show_thumbnail then
+                pending_respawn = true
+                pending_respawn_time = last_seek_time
+                return
+            end
             local seek_time = last_seek_time
-            run("quit")
-            if file then
-                pcall(function() file:close() end)
-                file = nil
-                file_bytes = 0
-            end
             clear()
-            spawned = false
-            file_seq = file_seq + 1
-            options.socket = base_socket .. "_" .. file_seq
-            options.thumbnail = base_thumbnail .. "_" .. file_seq
-            thumbnail_path = options.thumbnail
-            if options.direct_io and os_name == "windows" and winapi then
-                winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
-            end
-            spawn(seek_time or mp.get_property_number("time-pos", 0))
-            file_timer:resume()
+            respawn_thumbnailer(seek_time)
         else
             if rotate ~= last_rotate then
                 run("set video-rotate "..rotate)
@@ -1603,6 +1636,9 @@ local function file_load()
     end
     using_storyboards = false
     thumbnail_delta = nil
+    has_valid_frame = false
+    pending_respawn = false
+    pending_respawn_time = nil
 
     if file then
         pcall(function() file:close() end)
