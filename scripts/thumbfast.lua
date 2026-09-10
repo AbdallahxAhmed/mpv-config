@@ -58,6 +58,7 @@ mp.utils = require "mp.utils"
 mp.options = require "mp.options"
 local msg = mp.msg
 mp.options.read_options(options, "thumbfast")
+mp.msg.warn("THUMBFAST DEBUG BUILD ca85926 LOADED")
 
 local properties = {}
 local pre_0_30_0 = mp.command_native_async == nil
@@ -791,6 +792,7 @@ local function pump_overlay()
         end
     else
         -- Want visible: desired is the overlay-add command table
+        mp.msg.warn("OVERLAY ADD path=" .. tostring(desired[5]))
         if pre_0_30_0 then
             local res = mp.command_native(desired)
             overlay_busy = false
@@ -803,6 +805,7 @@ local function pump_overlay()
             if desired_overlay ~= nil then pump_overlay() end
         else
             mp.command_native_async(desired, function(success, result, error)
+                mp.msg.warn("OVERLAY RESULT success=" .. tostring(success) .. " error=" .. tostring(error))
                 overlay_busy = false
                 if success then
                     overlay_visible = true
@@ -912,6 +915,7 @@ end
 
 do_raw_seek = function(target_time, fast)
     if not target_time then return end
+    mp.msg.warn("SEEK SENT target=" .. tostring(target_time))
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     local use_fast = fast or is_net or allow_fast_seek
     run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
@@ -970,6 +974,7 @@ local function check_new_thumb()
     spawn_waiting = false
     local w, h = real_res(effective_w, effective_h, finfo.size)
     if w then -- only accept valid thumbnails
+        mp.msg.warn("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
         stop_seek_watchdog()
         seek_retry_count = 0
         seek_in_flight = false
@@ -1072,6 +1077,8 @@ local function thumb(time, r_x, r_y, script)
 
     time = tonumber(time)
     if time == nil then return end
+
+    mp.msg.warn("THUMB REQUEST time=" .. tostring(time) .. " x=" .. tostring(r_x) .. " storyboard=" .. tostring(using_storyboards))
 
     if not using_storyboards then
         thumbnail_path = options.thumbnail
