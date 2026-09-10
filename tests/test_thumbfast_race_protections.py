@@ -398,5 +398,68 @@ class TestSeekPipelineStateMachineSimulation(unittest.TestCase):
         self.assertTrue(pipeline.respawn_called)
 
 
+class TestThumbfastPersistentPipeAndDraining(unittest.TestCase):
+    """Verify non-blocking persistent named pipe draining and partial write protection."""
+
+    def setUp(self):
+        self.thumbfast_lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def test_winapi_functions_defined(self):
+        """winapi must implement drain_pipe, get_pipe, close_pipe, and update_socket."""
+        self.assertIn("winapi.drain_pipe = function()", self.thumbfast_lua)
+        self.assertIn("winapi.get_pipe = function()", self.thumbfast_lua)
+        self.assertIn("winapi.close_pipe = function()", self.thumbfast_lua)
+        self.assertIn("winapi.update_socket = function(sock_name)", self.thumbfast_lua)
+
+    def test_run_uses_winapi_persistent_pipe_and_drains(self):
+        """run() on Windows must use winapi.get_pipe and drain_pipe to prevent buffer stalls."""
+        run_match = re.search(
+            r"local function run\(command\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(run_match, "run() function not found")
+        run_body = run_match.group(1)
+        self.assertIn("winapi.get_pipe()", run_body)
+        self.assertIn("winapi.drain_pipe()", run_body)
+        self.assertIn("winapi.C.WriteFile", run_body)
+
+    def test_check_new_thumb_drains_pipe_and_guards_partial_writes(self):
+        """check_new_thumb must drain the pipe and verify minimum expected frame size."""
+        check_match = re.search(
+            r"local function check_new_thumb\(\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(check_match, "check_new_thumb() function not found")
+        check_body = check_match.group(1)
+        self.assertIn("if winapi then winapi.drain_pipe() end", check_body)
+        self.assertIn("min_expected", check_body)
+        self.assertIn("raw_info.size < min_expected", check_body)
+
+    def test_lifecycle_closes_pipe(self):
+        """respawn_thumbnailer, quit, shutdown, and remove_thumbnail_files must close pipe."""
+        for fn_name in ["respawn_thumbnailer", "quit", "shutdown", "remove_thumbnail_files"]:
+            match = re.search(
+                rf"local function {fn_name}\([^)]*\)\n(.*?)^end",
+                self.thumbfast_lua,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"{fn_name}() not found")
+            self.assertIn("winapi.close_pipe()", match.group(1), f"winapi.close_pipe() missing in {fn_name}()")
+
+    def test_spawn_waiting_prevents_respawn_storm(self):
+        """do_raw_seek must not trigger respawn_thumbnailer if still spawn_waiting."""
+        seek_match = re.search(
+            r"do_raw_seek = function\(target_time, fast\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(seek_match, "do_raw_seek function not found")
+        seek_body = seek_match.group(1)
+        self.assertIn("if not spawn_waiting then", seek_body)
+        self.assertIn("pending_seek_target = target_time", seek_body)
+
+
 if __name__ == "__main__":
     unittest.main()

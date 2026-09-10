@@ -58,7 +58,6 @@ mp.utils = require "mp.utils"
 mp.options = require "mp.options"
 local msg = mp.msg
 mp.options.read_options(options, "thumbfast")
-mp.msg.warn("THUMBFAST DEBUG BUILD ca85926 LOADED")
 
 local properties = {}
 local pre_0_30_0 = mp.command_native_async == nil
@@ -163,56 +162,7 @@ local function closest_thumbnail(tbl, target)
 end
 
 local winapi = {}
-if options.direct_io then
-    local ffi_loaded, ffi = pcall(require, "ffi")
-    if ffi_loaded then
-        winapi = {
-            ffi = ffi,
-            C = ffi.C,
-            bit = require("bit"),
-            socket_wc = "",
 
-            -- WinAPI constants
-            CP_UTF8 = 65001,
-            GENERIC_WRITE = 0x40000000,
-            OPEN_EXISTING = 3,
-            FILE_FLAG_WRITE_THROUGH = 0x80000000,
-            FILE_FLAG_NO_BUFFERING = 0x20000000,
-            PIPE_NOWAIT = ffi.new("unsigned long[1]", 0x00000001),
-
-            INVALID_HANDLE_VALUE = ffi.cast("void*", -1),
-
-            -- don't care about how many bytes WriteFile wrote, so allocate something to store the result once
-            _lpNumberOfBytesWritten = ffi.new("unsigned long[1]"),
-        }
-        -- cache flags used in run() to avoid bor() call
-        winapi._createfile_pipe_flags = winapi.bit.bor(winapi.FILE_FLAG_WRITE_THROUGH, winapi.FILE_FLAG_NO_BUFFERING)
-
-        ffi.cdef[[
-            void* __stdcall CreateFileW(const wchar_t *lpFileName, unsigned long dwDesiredAccess, unsigned long dwShareMode, void *lpSecurityAttributes, unsigned long dwCreationDisposition, unsigned long dwFlagsAndAttributes, void *hTemplateFile);
-            bool __stdcall WriteFile(void *hFile, const void *lpBuffer, unsigned long nNumberOfBytesToWrite, unsigned long *lpNumberOfBytesWritten, void *lpOverlapped);
-            bool __stdcall CloseHandle(void *hObject);
-            bool __stdcall SetNamedPipeHandleState(void *hNamedPipe, unsigned long *lpMode, unsigned long *lpMaxCollectionCount, unsigned long *lpCollectDataTimeout);
-            int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags, const char *lpMultiByteStr, int cbMultiByte, wchar_t *lpWideCharStr, int cchWideChar);
-        ]]
-
-        winapi.MultiByteToWideChar = function(MultiByteStr)
-            if MultiByteStr then
-                local utf16_len = winapi.C.MultiByteToWideChar(winapi.CP_UTF8, 0, MultiByteStr, -1, nil, 0)
-                if utf16_len > 0 then
-                    local utf16_str = winapi.ffi.new("wchar_t[?]", utf16_len)
-                    if winapi.C.MultiByteToWideChar(winapi.CP_UTF8, 0, MultiByteStr, -1, utf16_str, utf16_len) > 0 then
-                        return utf16_str
-                    end
-                end
-            end
-            return ""
-        end
-
-    else
-        options.direct_io = false
-    end
-end
 
 local file
 local file_bytes = 0
@@ -366,15 +316,96 @@ local base_thumbnail = options.thumbnail
 
 local thumbnail_path = options.thumbnail
 
-if options.direct_io then
-    if os_name == "windows" then
-        winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
-    end
+if os_name == "windows" then
+    local ffi_loaded, ffi = pcall(require, "ffi")
+    if ffi_loaded then
+        winapi = {
+            ffi = ffi,
+            C = ffi.C,
+            socket_wc = nil,
+            INVALID_HANDLE_VALUE = ffi.cast("void*", -1),
+            pipe_handle = ffi.cast("void*", -1),
+            pipe_buf = ffi.new("char[4096]"),
+            bytes_avail = ffi.new("unsigned long[1]"),
+            bytes_read = ffi.new("unsigned long[1]"),
+            bytes_written = ffi.new("unsigned long[1]"),
+            CP_UTF8 = 65001,
+            GENERIC_READ_WRITE = 0xC0000000, -- GENERIC_READ (0x80000000) | GENERIC_WRITE (0x40000000)
+            OPEN_EXISTING = 3,
+            PIPE_NOWAIT = ffi.new("unsigned long[1]", 0x00000001),
+        }
 
-    if winapi.socket_wc == "" then
-        options.direct_io = false
+        ffi.cdef[[
+            void* __stdcall CreateFileW(const wchar_t *lpFileName, unsigned long dwDesiredAccess, unsigned long dwShareMode, void *lpSecurityAttributes, unsigned long dwCreationDisposition, unsigned long dwFlagsAndAttributes, void *hTemplateFile);
+            int __stdcall WriteFile(void *hFile, const void *lpBuffer, unsigned long nNumberOfBytesToWrite, unsigned long *lpNumberOfBytesWritten, void *lpOverlapped);
+            int __stdcall ReadFile(void *hFile, void *lpBuffer, unsigned long nNumberOfBytesToRead, unsigned long *lpNumberOfBytesRead, void *lpOverlapped);
+            int __stdcall PeekNamedPipe(void *hNamedPipe, void *lpBuffer, unsigned long nBufferSize, unsigned long *lpBytesRead, unsigned long *lpTotalBytesAvail, unsigned long *lpBytesLeftThisMessage);
+            int __stdcall CloseHandle(void *hObject);
+            int __stdcall SetNamedPipeHandleState(void *hNamedPipe, unsigned long *lpMode, unsigned long *lpMaxCollectionCount, unsigned long *lpCollectDataTimeout);
+            int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags, const char *lpMultiByteStr, int cbMultiByte, wchar_t *lpWideCharStr, int cchWideChar);
+        ]]
+
+        winapi.MultiByteToWideChar = function(MultiByteStr)
+            if MultiByteStr then
+                local utf16_len = winapi.C.MultiByteToWideChar(winapi.CP_UTF8, 0, MultiByteStr, -1, nil, 0)
+                if utf16_len > 0 then
+                    local utf16_str = winapi.ffi.new("wchar_t[?]", utf16_len)
+                    if winapi.C.MultiByteToWideChar(winapi.CP_UTF8, 0, MultiByteStr, -1, utf16_str, utf16_len) > 0 then
+                        return utf16_str
+                    end
+                end
+            end
+            return nil
+        end
+
+        winapi.update_socket = function(sock_name)
+            winapi.close_pipe()
+            winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. sock_name)
+        end
+
+        winapi.close_pipe = function()
+            if winapi.pipe_handle ~= winapi.INVALID_HANDLE_VALUE then
+                winapi.C.CloseHandle(winapi.pipe_handle)
+                winapi.pipe_handle = winapi.INVALID_HANDLE_VALUE
+            end
+        end
+
+        winapi.drain_pipe = function()
+            if winapi.pipe_handle == winapi.INVALID_HANDLE_VALUE then return end
+            while winapi.C.PeekNamedPipe(winapi.pipe_handle, nil, 0, nil, winapi.bytes_avail, nil) ~= 0 do
+                if winapi.bytes_avail[0] == 0 then break end
+                local to_read = winapi.bytes_avail[0] < 4096 and winapi.bytes_avail[0] or 4096
+                if winapi.C.ReadFile(winapi.pipe_handle, winapi.pipe_buf, to_read, winapi.bytes_read, nil) == 0 then
+                    break
+                end
+                if winapi.bytes_read[0] == 0 then break end
+            end
+        end
+
+        winapi.get_pipe = function()
+            if winapi.pipe_handle ~= winapi.INVALID_HANDLE_VALUE then
+                return winapi.pipe_handle
+            end
+            if not winapi.socket_wc then return winapi.INVALID_HANDLE_VALUE end
+            local h = winapi.C.CreateFileW(
+                winapi.socket_wc,
+                winapi.GENERIC_READ_WRITE,
+                0, nil,
+                winapi.OPEN_EXISTING,
+                0, nil
+            )
+            if h ~= winapi.INVALID_HANDLE_VALUE then
+                winapi.C.SetNamedPipeHandleState(h, winapi.PIPE_NOWAIT, nil, nil)
+                winapi.pipe_handle = h
+                winapi.drain_pipe()
+            end
+            return winapi.pipe_handle
+        end
+
+        winapi.update_socket(options.socket)
     end
 end
+
 
 options.scale_factor = math.floor(options.scale_factor)
 
@@ -535,6 +566,9 @@ local function info(w, h)
 end
 
 local function remove_thumbnail_files()
+    if winapi then
+        winapi.close_pipe()
+    end
     if file then
         file:close()
         file = nil
@@ -703,20 +737,24 @@ end
 local function run(command)
     if not spawned then return false end
 
-    if options.direct_io then
-        local hPipe = winapi.C.CreateFileW(winapi.socket_wc, winapi.GENERIC_WRITE, 0, nil, winapi.OPEN_EXISTING, winapi._createfile_pipe_flags, nil)
-        if hPipe ~= winapi.INVALID_HANDLE_VALUE then
-            local buf = command .. "\n"
-            winapi.C.SetNamedPipeHandleState(hPipe, winapi.PIPE_NOWAIT, nil, nil)
-            winapi.C.WriteFile(hPipe, buf, #buf, winapi._lpNumberOfBytesWritten, nil)
-            winapi.C.CloseHandle(hPipe)
-            return true
-        end
-
-        return false
-    end
-
     local command_n = command.."\n"
+
+    if os_name == "windows" and winapi then
+        local hPipe = winapi.get_pipe()
+        if hPipe ~= winapi.INVALID_HANDLE_VALUE then
+            winapi.drain_pipe()
+            local ok = winapi.C.WriteFile(hPipe, command_n, #command_n, winapi.bytes_written, nil)
+            if ok ~= 0 and winapi.bytes_written[0] == #command_n then
+                winapi.drain_pipe()
+                return true
+            else
+                winapi.close_pipe()
+                return false
+            end
+        else
+            return false
+        end
+    end
 
     if os_name == "windows" then
         if not file then
@@ -749,6 +787,9 @@ end
 
 local function respawn_thumbnailer(seek_time)
     run("quit")
+    if winapi then
+        winapi.close_pipe()
+    end
     if file then
         pcall(function() file:close() end)
         file = nil
@@ -760,8 +801,8 @@ local function respawn_thumbnailer(seek_time)
     options.socket = base_socket .. "_" .. file_seq
     options.thumbnail = base_thumbnail .. "_" .. file_seq
     thumbnail_path = options.thumbnail
-    if options.direct_io and os_name == "windows" and winapi then
-        winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+    if winapi then
+        winapi.update_socket(options.socket)
     end
     spawn(seek_time or mp.get_property_number("time-pos", 0))
     file_timer:resume()
@@ -799,7 +840,7 @@ local function pump_overlay()
         end
     else
         -- Want visible: desired is the overlay-add command table
-        mp.msg.warn("OVERLAY ADD path=" .. tostring(desired[5]))
+        mp.msg.trace("OVERLAY ADD path=" .. tostring(desired[5]))
         if pre_0_30_0 then
             local res = mp.command_native(desired)
             overlay_busy = false
@@ -812,7 +853,7 @@ local function pump_overlay()
             if desired_overlay ~= nil then pump_overlay() end
         else
             mp.command_native_async(desired, function(success, result, error)
-                mp.msg.warn("OVERLAY RESULT success=" .. tostring(success) .. " error=" .. tostring(error))
+                mp.msg.trace("OVERLAY RESULT success=" .. tostring(success) .. " error=" .. tostring(error))
                 overlay_busy = false
                 if success then
                     overlay_visible = true
@@ -925,7 +966,7 @@ end
 
 do_raw_seek = function(target_time, fast)
     if not target_time then return end
-    mp.msg.warn("SEEK SENT target=" .. tostring(target_time))
+    mp.msg.trace("SEEK SENT target=" .. tostring(target_time))
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     local use_fast = fast or is_net or allow_fast_seek
     local sent = run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
@@ -935,11 +976,15 @@ do_raw_seek = function(target_time, fast)
         last_seek_sent_time = mp.get_time()
         arm_seek_watchdog()
     else
-        mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
-        seek_in_flight = false
-        current_seek_target = nil
-        if respawn_thumbnailer then
-            respawn_thumbnailer(target_time)
+        if not spawn_waiting then
+            mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
+            seek_in_flight = false
+            current_seek_target = nil
+            if respawn_thumbnailer then
+                respawn_thumbnailer(target_time)
+            end
+        else
+            pending_seek_target = target_time
         end
     end
 end
@@ -985,9 +1030,17 @@ local function request_seek()
 end
 
 local function check_new_thumb()
+    if winapi then winapi.drain_pipe() end
     if not thumbnail_path then thumbnail_path = options.thumbnail end
     local raw_info = mp.utils.file_info(thumbnail_path)
     if not raw_info or raw_info.size == 0 then return false end
+
+    if effective_w and effective_h then
+        local min_expected = math.max(0, (effective_w - 5) * (effective_h - 5) * 4)
+        if raw_info.size < min_expected then
+            return false
+        end
+    end
 
     local tmp = thumbnail_path..".tmp"
     move_file(thumbnail_path, tmp)
@@ -996,7 +1049,7 @@ local function check_new_thumb()
     spawn_waiting = false
     local w, h = real_res(effective_w, effective_h, finfo.size)
     if w then -- only accept valid thumbnails
-        mp.msg.warn("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
+        mp.msg.trace("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
         stop_seek_watchdog()
         seek_retry_count = 0
         seek_in_flight = false
@@ -1090,6 +1143,9 @@ local function quit()
         return
     end
     run("quit")
+    if winapi then
+        winapi.close_pipe()
+    end
     if file then
         pcall(function() file:close() end)
         file = nil
@@ -1109,7 +1165,7 @@ local function thumb(time, r_x, r_y, script)
     time = tonumber(time)
     if time == nil then return end
 
-    mp.msg.warn("THUMB REQUEST time=" .. tostring(time) .. " x=" .. tostring(r_x) .. " storyboard=" .. tostring(using_storyboards))
+    mp.msg.trace("THUMB REQUEST time=" .. tostring(time) .. " x=" .. tostring(r_x) .. " storyboard=" .. tostring(using_storyboards))
 
     if not using_storyboards then
         thumbnail_path = options.thumbnail
@@ -1785,6 +1841,9 @@ local function file_load()
     pending_respawn = false
     pending_respawn_time = nil
 
+    if winapi then
+        winapi.close_pipe()
+    end
     if file then
         pcall(function() file:close() end)
         file = nil
@@ -1797,8 +1856,8 @@ local function file_load()
     options.thumbnail = base_thumbnail .. "_" .. file_seq
     thumbnail_path = options.thumbnail
 
-    if options.direct_io and os_name == "windows" and winapi then
-        winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+    if winapi then
+        winapi.update_socket(options.socket)
     end
 
     cancel_queued_processes()
@@ -1822,6 +1881,9 @@ local function shutdown()
     stop_seek_watchdog()
     seek_retry_count = 0
     run("quit")
+    if winapi then
+        winapi.close_pipe()
+    end
     if file then
         pcall(function() file:close() end)
         file = nil
