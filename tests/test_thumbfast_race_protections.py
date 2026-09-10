@@ -194,5 +194,209 @@ class TestUoscTimelinePatcher(unittest.TestCase):
         self.assertIn("patch_uosc_timeline_thumb", deployer_src)
 
 
+class TestThumbfastSeekWatchdogAndPipeline(unittest.TestCase):
+    """Verify the seek queue, timer-driven watchdog, and triple-buffered frame slots."""
+
+    def setUp(self):
+        self.thumbfast_lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def test_universal_seek_gating(self):
+        """seek() must gate on seek_in_flight universally without an `if is_net` check."""
+        seek_match = re.search(
+            r"local function seek\(fast\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(seek_match, "seek() function not found")
+        seek_body = seek_match.group(1)
+        self.assertIn("if seek_in_flight then", seek_body)
+        self.assertIn("pending_seek_target = last_seek_time", seek_body)
+        self.assertNotIn("if is_net then", seek_body)
+
+    def test_watchdog_lifecycle_functions(self):
+        """arm_seek_watchdog and stop_seek_watchdog must exist and use a 2.5s timer."""
+        self.assertIn("local function stop_seek_watchdog()", self.thumbfast_lua)
+        self.assertIn("local function arm_seek_watchdog()", self.thumbfast_lua)
+        self.assertIn("mp.add_timeout(2.5", self.thumbfast_lua)
+
+    def test_watchdog_disarmed_on_frame_and_lifecycle(self):
+        """stop_seek_watchdog must be called in check_new_thumb, clear, file_load, shutdown, and quit."""
+        for fn_name in ["check_new_thumb", "clear", "file_load", "shutdown", "quit"]:
+            match = re.search(
+                rf"local function {fn_name}\([^)]*\)\n(.*?)^end",
+                self.thumbfast_lua,
+                re.MULTILINE | re.DOTALL,
+            )
+            self.assertIsNotNone(match, f"{fn_name}() not found")
+            self.assertIn("stop_seek_watchdog()", match.group(1), f"stop_seek_watchdog() missing in {fn_name}()")
+
+    def test_triple_buffering_frame_slot_exists(self):
+        """check_new_thumb must use rotating frame slots to prevent Windows sharing violations."""
+        self.assertIn("local frame_slot = 0", self.thumbfast_lua)
+        self.assertIn("local active_bgra_path = nil", self.thumbfast_lua)
+        self.assertIn("frame_slot = (frame_slot % 3) + 1", self.thumbfast_lua)
+        self.assertIn('thumbnail_path .. "." .. frame_slot .. ".bgra"', self.thumbfast_lua)
+
+    def test_draw_uses_active_bgra_path(self):
+        """draw() must target active_bgra_path to match the rotating slots."""
+        draw_match = re.search(
+            r"local function draw\(w, h, script\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(draw_match)
+        self.assertIn("active_bgra_path", draw_match.group(1))
+
+    def test_overlay_add_checks_callback_success(self):
+        """mp.command_native_async callback must check success and not blindly assume visibility."""
+        self.assertIn("function(success, result, error)", self.thumbfast_lua)
+        self.assertIn("if success then", self.thumbfast_lua)
+        self.assertIn("overlay_visible = true", self.thumbfast_lua)
+        self.assertIn("overlay_visible = false", self.thumbfast_lua)
+
+
+class TestSeekPipelineStateMachineSimulation(unittest.TestCase):
+    """Behavioral simulation of the seek queue, watchdog, and slot rotation state machine."""
+
+    class SimulatedSeekPipeline:
+        def __init__(self):
+            self.seek_in_flight = False
+            self.current_seek_target = None
+            self.pending_seek_target = None
+            self.seek_watchdog_armed = False
+            self.seek_watchdog_timeout = 2.5
+            self.seek_retry_count = 0
+            self.max_seek_retries = 2
+            self.frame_slot = 0
+            self.active_bgra = None
+            self.dispatched_seeks = []
+            self.respawn_called = False
+
+        def arm_watchdog(self):
+            self.seek_watchdog_armed = True
+
+        def stop_watchdog(self):
+            self.seek_watchdog_armed = False
+
+        def do_raw_seek(self, target_time):
+            self.dispatched_seeks.append(target_time)
+            self.seek_in_flight = True
+            self.current_seek_target = target_time
+            self.arm_watchdog()
+
+        def seek(self, target_time):
+            if self.seek_in_flight:
+                self.pending_seek_target = target_time
+                return
+            self.do_raw_seek(target_time)
+
+        def fire_watchdog_timeout(self, show_thumbnail=True):
+            if not self.seek_watchdog_armed:
+                return
+            self.seek_watchdog_armed = False
+            if not self.seek_in_flight or not show_thumbnail:
+                return
+            self.seek_in_flight = False
+            self.current_seek_target = None
+            retry_target = self.pending_seek_target or (self.dispatched_seeks[-1] if self.dispatched_seeks else None)
+            self.pending_seek_target = None
+            if retry_target and self.seek_retry_count < self.max_seek_retries:
+                self.seek_retry_count += 1
+                self.do_raw_seek(retry_target)
+            elif retry_target:
+                self.seek_retry_count = 0
+                self.respawn_called = True
+
+        def accept_frame(self, show_thumbnail=True):
+            self.stop_watchdog()
+            self.seek_retry_count = 0
+            self.seek_in_flight = False
+            completed = self.current_seek_target
+            self.current_seek_target = None
+
+            self.frame_slot = (self.frame_slot % 3) + 1
+            self.active_bgra = f"thumb.{self.frame_slot}.bgra"
+
+            next_target = self.pending_seek_target
+            self.pending_seek_target = None
+            if next_target and show_thumbnail:
+                if completed is None or abs(next_target - completed) > 0.05:
+                    self.do_raw_seek(next_target)
+
+    def test_deadlock_recovery_when_seek_stalls_and_movement_stops(self):
+        """Simulate seek A stalling while user moves to B and stops.
+
+        The watchdog must fire, clear in-flight, and dispatch B automatically.
+        """
+        pipeline = self.SimulatedSeekPipeline()
+        # User starts moving: seek to 10.0
+        pipeline.seek(10.0)
+        self.assertTrue(pipeline.seek_in_flight)
+        self.assertEqual(pipeline.current_seek_target, 10.0)
+        self.assertTrue(pipeline.seek_watchdog_armed)
+
+        # User scrubs quickly to 12.0, 15.0, and stops at 20.0
+        pipeline.seek(12.0)
+        pipeline.seek(15.0)
+        pipeline.seek(20.0)
+        # Pending should be the latest position 20.0
+        self.assertEqual(pipeline.pending_seek_target, 20.0)
+        # Only 1 seek dispatched so far
+        self.assertEqual(pipeline.dispatched_seeks, [10.0])
+
+        # Seek 10.0 stalls (no frame arrives). Watchdog fires at 2.5s.
+        pipeline.fire_watchdog_timeout()
+
+        # Deadlock broken! Seek 20.0 was automatically dispatched.
+        self.assertEqual(pipeline.dispatched_seeks, [10.0, 20.0])
+        self.assertEqual(pipeline.current_seek_target, 20.0)
+        self.assertEqual(pipeline.seek_retry_count, 1)
+        self.assertTrue(pipeline.seek_watchdog_armed)
+
+        # Now frame 20.0 arrives
+        pipeline.accept_frame()
+        self.assertFalse(pipeline.seek_in_flight)
+        self.assertFalse(pipeline.seek_watchdog_armed)
+        self.assertEqual(pipeline.seek_retry_count, 0)
+        self.assertEqual(pipeline.active_bgra, "thumb.1.bgra")
+
+    def test_triple_buffering_slot_rotation(self):
+        """Consecutive frames must rotate across slots 1, 2, 3 without colliding."""
+        pipeline = self.SimulatedSeekPipeline()
+        slots = []
+        for _ in range(7):
+            pipeline.accept_frame()
+            slots.append(pipeline.active_bgra)
+        expected = [
+            "thumb.1.bgra",
+            "thumb.2.bgra",
+            "thumb.3.bgra",
+            "thumb.1.bgra",
+            "thumb.2.bgra",
+            "thumb.3.bgra",
+            "thumb.1.bgra",
+        ]
+        self.assertEqual(slots, expected)
+
+    def test_respawn_after_max_retries_exhausted(self):
+        """If repeated seeks produce no frames, respawn thumbnailer."""
+        pipeline = self.SimulatedSeekPipeline()
+        pipeline.seek(5.0)
+
+        # Retry 1
+        pipeline.fire_watchdog_timeout()
+        self.assertEqual(pipeline.seek_retry_count, 1)
+        self.assertFalse(pipeline.respawn_called)
+
+        # Retry 2
+        pipeline.fire_watchdog_timeout()
+        self.assertEqual(pipeline.seek_retry_count, 2)
+        self.assertFalse(pipeline.respawn_called)
+
+        # Retries exhausted -> respawn
+        pipeline.fire_watchdog_timeout()
+        self.assertTrue(pipeline.respawn_called)
+
+
 if __name__ == "__main__":
     unittest.main()

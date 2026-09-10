@@ -248,6 +248,8 @@ local desired_overlay = nil     -- nil = no pending change, false = want hidden,
 local overlay_visible = false
 local pending_respawn = false
 local pending_respawn_time = nil
+local active_bgra_path = nil
+local frame_slot = 0
 
 local filters_reset = {["lavfi-crop"]=true, ["crop"]=true}
 local filters_runtime = {["hflip"]=true, ["vflip"]=true}
@@ -538,7 +540,13 @@ local function remove_thumbnail_files()
         file_bytes = 0
     end
     os.remove(options.thumbnail)
+    os.remove(options.thumbnail..".tmp")
     os.remove(options.thumbnail..".bgra")
+    for i = 1, 3 do
+        os.remove(options.thumbnail.."."..i..".bgra")
+    end
+    active_bgra_path = nil
+    frame_slot = 0
 end
 
 local function remove_storyboard_files()
@@ -731,10 +739,33 @@ local function run(command)
     end
 end
 
+local function respawn_thumbnailer(seek_time)
+    run("quit")
+    if file then
+        pcall(function() file:close() end)
+        file = nil
+        file_bytes = 0
+    end
+    spawned = false
+    has_valid_frame = false
+    file_seq = file_seq + 1
+    options.socket = base_socket .. "_" .. file_seq
+    options.thumbnail = base_thumbnail .. "_" .. file_seq
+    thumbnail_path = options.thumbnail
+    if options.direct_io and os_name == "windows" and winapi then
+        winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
+    end
+    spawn(seek_time or mp.get_property_number("time-pos", 0))
+    file_timer:resume()
+end
+
 -- Single-flight coalescing overlay dispatcher.
 -- At most one overlay command is in flight at any time.
 -- While busy, the latest request replaces any pending request.
 -- A stale callback never issues overlay-remove — it re-pumps instead.
+local add_retry_count = 0
+local max_add_retries = 2
+
 local function pump_overlay()
     if overlay_busy then return end
     local desired = desired_overlay
@@ -748,25 +779,42 @@ local function pump_overlay()
             mp.command_native({"overlay-remove", options.overlay_id})
             overlay_busy = false
             overlay_visible = false
+            add_retry_count = 0
             if desired_overlay ~= nil then pump_overlay() end
         else
             mp.command_native_async({"overlay-remove", options.overlay_id}, function()
                 overlay_busy = false
                 overlay_visible = false
+                add_retry_count = 0
                 if desired_overlay ~= nil then pump_overlay() end
             end)
         end
     else
         -- Want visible: desired is the overlay-add command table
         if pre_0_30_0 then
-            mp.command_native(desired)
+            local res = mp.command_native(desired)
             overlay_busy = false
-            overlay_visible = true
+            if res then
+                overlay_visible = true
+                add_retry_count = 0
+            else
+                overlay_visible = false
+            end
             if desired_overlay ~= nil then pump_overlay() end
         else
-            mp.command_native_async(desired, function()
+            mp.command_native_async(desired, function(success, result, error)
                 overlay_busy = false
-                overlay_visible = true
+                if success then
+                    overlay_visible = true
+                    add_retry_count = 0
+                else
+                    overlay_visible = false
+                    mp.msg.warn("thumbfast: overlay-add failed: " .. tostring(error))
+                    if show_thumbnail and desired_overlay == nil and add_retry_count < max_add_retries then
+                        add_retry_count = add_retry_count + 1
+                        desired_overlay = desired
+                    end
+                end
                 if desired_overlay ~= nil then pump_overlay() end
             end)
         end
@@ -775,12 +823,13 @@ end
 
 local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end
-    if not mp.utils.file_info(thumbnail_path..".bgra") then return end
+    local frame_file = active_bgra_path or (thumbnail_path..".bgra")
+    if not mp.utils.file_info(frame_file) then return end
     if x ~= nil then
         local scale_w = options.scale_factor ~= 1 and (w * options.scale_factor) or nil
         local scale_h = options.scale_factor ~= 1 and (h * options.scale_factor) or nil
         desired_overlay = {"overlay-add", options.overlay_id, x, y,
-            thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h}
+            frame_file, 0, "bgra", w, h, (4*w), scale_w, scale_h}
         pump_overlay()
     elseif script then
         local json, err = mp.utils.format_json({width=w, height=h, scale_factor=options.scale_factor, x=x, y=y, socket=options.socket, thumbnail=thumbnail_path, overlay_id=options.overlay_id})
@@ -829,7 +878,39 @@ local current_seek_target = nil
 local last_seek_sent_time = 0
 local pending_seek_target = nil
 
-local function do_raw_seek(target_time, fast)
+local seek_watchdog = nil
+local seek_retry_count = 0
+local max_seek_retries = 2
+
+local function stop_seek_watchdog()
+    if seek_watchdog then
+        seek_watchdog:kill()
+        seek_watchdog = nil
+    end
+end
+
+local do_raw_seek
+
+local function arm_seek_watchdog()
+    stop_seek_watchdog()
+    seek_watchdog = mp.add_timeout(2.5, function()
+        seek_watchdog = nil
+        if not seek_in_flight or not show_thumbnail then return end
+        seek_in_flight = false
+        current_seek_target = nil
+        local retry_target = pending_seek_target or last_seek_time
+        pending_seek_target = nil
+        if retry_target and seek_retry_count < max_seek_retries then
+            seek_retry_count = seek_retry_count + 1
+            do_raw_seek(retry_target, true)
+        elseif retry_target and respawn_thumbnailer then
+            seek_retry_count = 0
+            respawn_thumbnailer(retry_target)
+        end
+    end)
+end
+
+do_raw_seek = function(target_time, fast)
     if not target_time then return end
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     local use_fast = fast or is_net or allow_fast_seek
@@ -837,19 +918,14 @@ local function do_raw_seek(target_time, fast)
     seek_in_flight = true
     current_seek_target = target_time
     last_seek_sent_time = mp.get_time()
-    pending_seek_target = nil
+    arm_seek_watchdog()
 end
 
 local function seek(fast)
     if not last_seek_time then return end
-    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
-    if is_net then
-        local now = mp.get_time()
-        -- Network streams: debounce requests to prevent overwhelming the network connection
-        if seek_in_flight and (now - last_seek_sent_time) < 2.0 then
-            pending_seek_target = last_seek_time
-            return
-        end
+    if seek_in_flight then
+        pending_seek_target = last_seek_time
+        return
     end
     do_raw_seek(last_seek_time, fast)
 end
@@ -894,17 +970,27 @@ local function check_new_thumb()
     spawn_waiting = false
     local w, h = real_res(effective_w, effective_h, finfo.size)
     if w then -- only accept valid thumbnails
-        move_file(tmp, thumbnail_path..".bgra")
-
-        real_w, real_h = w, h
+        stop_seek_watchdog()
+        seek_retry_count = 0
         seek_in_flight = false
+        local completed_target = current_seek_target
         current_seek_target = nil
 
-        -- If user moved cursor while previous seek was in flight, dispatch next seek immediately
-        if pending_seek_target then
-            local next_target = pending_seek_target
-            pending_seek_target = nil
-            do_raw_seek(next_target, true)
+        -- Triple-buffered rotating frame slot to prevent Windows file-read/lock races
+        frame_slot = (frame_slot % 3) + 1
+        local target_bgra = thumbnail_path .. "." .. frame_slot .. ".bgra"
+        move_file(tmp, target_bgra)
+        active_bgra_path = target_bgra
+
+        real_w, real_h = w, h
+
+        -- If user moved cursor while seek was in flight, dispatch next seek immediately
+        local next_target = pending_seek_target
+        pending_seek_target = nil
+        if next_target and show_thumbnail then
+            if not completed_target or math.abs(next_target - completed_target) > 0.05 then
+                do_raw_seek(next_target, true)
+            end
         end
 
         local had_frame = has_valid_frame
@@ -930,9 +1016,9 @@ file_timer = mp.add_periodic_timer(file_check_period, function()
 end)
 file_timer:kill()
 
-local respawn_thumbnailer
-
 local function clear()
+    stop_seek_watchdog()
+    seek_retry_count = 0
     file_timer:kill()
     seek_timer:kill()
     if options.quit_after_inactivity > 0 then
@@ -960,6 +1046,8 @@ local function clear()
 end
 
 local function quit()
+    stop_seek_watchdog()
+    seek_retry_count = 0
     activity_timer:kill()
     if show_thumbnail then
         activity_timer:resume()
@@ -1090,26 +1178,6 @@ local function watch_changes()
         info(effective_w, effective_h)
     elseif last_has_vid ~= has_vid and has_vid ~= 0 then
         info(effective_w, effective_h)
-    end
-
-    respawn_thumbnailer = function(seek_time)
-        run("quit")
-        if file then
-            pcall(function() file:close() end)
-            file = nil
-            file_bytes = 0
-        end
-        spawned = false
-        has_valid_frame = false
-        file_seq = file_seq + 1
-        options.socket = base_socket .. "_" .. file_seq
-        options.thumbnail = base_thumbnail .. "_" .. file_seq
-        thumbnail_path = options.thumbnail
-        if options.direct_io and os_name == "windows" and winapi then
-            winapi.socket_wc = winapi.MultiByteToWideChar("\\\\.\\pipe\\" .. options.socket)
-        end
-        spawn(seek_time or mp.get_property_number("time-pos", 0))
-        file_timer:resume()
     end
 
     if spawned then
@@ -1662,9 +1730,13 @@ local function file_load()
     last_tone_mapping = nil
     last_seek_time = nil
     last_decoded_time = nil
+    stop_seek_watchdog()
+    seek_retry_count = 0
     seek_in_flight = false
     pending_seek_target = nil
     current_seek_target = nil
+    active_bgra_path = nil
+    frame_slot = 0
     if info_timer then
         info_timer:kill()
         info_timer = nil
@@ -1709,6 +1781,8 @@ local function file_load()
 end
 
 local function shutdown()
+    stop_seek_watchdog()
+    seek_retry_count = 0
     run("quit")
     if file then
         pcall(function() file:close() end)
