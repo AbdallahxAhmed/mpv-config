@@ -557,7 +557,8 @@ local function info(w, h)
     end
 
     local is_available = not disabled
-    local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=is_available, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
+    local is_ready = not disabled and (has_valid_frame or (using_storyboards == true))
+    local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=is_available, ready=is_ready, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
     if pre_0_30_0 then
         mp.command_native({"script-message", "thumbfast-info", json})
     else
@@ -610,7 +611,16 @@ local function spawn(time)
     if path == nil then return end
 
     local is_net = properties["demuxer-via-network"] or (type(path) == "string" and path:find("^https?://") ~= nil)
-    local demux_bytes = is_net and "2MiB" or "32MiB"
+    if is_net and type(path) == "string" and path:find("^https?://") then
+        local open_fn = properties["stream-open-filename"]
+        local is_raw_webpage = (open_fn == nil or open_fn == path) and not path:find("%.mp4[%?#]?") and not path:find("%.mkv[%?#]?") and not path:find("%.webm[%?#]?") and not path:find("%.m3u8[%?#]?")
+        if is_raw_webpage then
+            return
+        end
+    end
+
+    local demux_bytes = is_net and "64MiB" or "32MiB"
+    local reahead_secs = is_net and "15" or "0"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
     local spawn_path = (is_net and properties["stream-open-filename"] and properties["stream-open-filename"] ~= "" and properties["stream-open-filename"]) or path
 
@@ -636,7 +646,7 @@ local function spawn(time)
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
         "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
         "--start="..time, seek_mode,
-        "--ytdl-format=worst", "--demuxer-readahead-secs=0", "--demuxer-max-bytes="..demux_bytes,
+        "--ytdl-format=worst", "--demuxer-readahead-secs="..reahead_secs, "--demuxer-max-bytes="..demux_bytes,
         "--http-header-fields="..(properties["http-header-fields"] or ""), -- does this actually work well with SVP?
         "--cookies="..(properties["cookies"] or "no"),
         "--cookies-file="..(properties["cookies-file"] or ""),
@@ -648,6 +658,9 @@ local function spawn(time)
     }
 
     if is_net then
+        table.insert(args, "--demuxer-max-back-bytes=32MiB")
+        table.insert(args, "--cache=yes")
+        table.insert(args, "--demuxer-seekable-cache=yes")
         table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=2")
     end
 
@@ -1312,7 +1325,20 @@ local function watch_changes()
 end
 
 local function update_property(name, value)
+    local old_val = properties[name]
     properties[name] = value
+    if name == "stream-open-filename" and old_val ~= value and value and value ~= "" then
+        local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+        if is_net then
+            if spawned then
+                clear()
+                respawn_thumbnailer(last_seek_time or 0)
+            elseif options.spawn_first and effective_w and effective_h then
+                spawn(mp.get_property_number("time-pos", 0))
+                if file_timer and not file_timer:is_enabled() then file_timer:resume() end
+            end
+        end
+    end
     if name == "user-data/mpv/ytdl/json-subprocess-result" and not using_storyboards then
         dirty = true
         setup_storyboards()

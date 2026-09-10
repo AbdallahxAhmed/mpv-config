@@ -120,6 +120,22 @@ class TestThumbfastAvailability(unittest.TestCase):
         self.assertIn("available=is_available", self.thumbfast_lua)
         self.assertNotIn("has_valid_frame or using_storyboards", self.thumbfast_lua)
 
+    def test_ready_field_reported_for_placeholder_suppression(self):
+        """ready field must be broadcast to allow uosc to suppress empty black placeholders."""
+        self.assertIn("ready=is_ready", self.thumbfast_lua)
+        self.assertIn("local is_ready = not disabled and (has_valid_frame or (using_storyboards == true))", self.thumbfast_lua)
+
+    def test_network_stream_open_filename_resolution(self):
+        """update_property must handle stream-open-filename resolution for network media."""
+        self.assertIn('if name == "stream-open-filename"', self.thumbfast_lua)
+        self.assertIn("respawn_thumbnailer(last_seek_time or 0)", self.thumbfast_lua)
+
+    def test_network_demuxer_cache_flags(self):
+        """Network playback must use seekable cache, readahead, and back-bytes for smooth scrubbing."""
+        self.assertIn('local reahead_secs = is_net and "15" or "0"', self.thumbfast_lua)
+        self.assertIn('local demux_bytes = is_net and "64MiB" or "32MiB"', self.thumbfast_lua)
+        self.assertIn('table.insert(args, "--demuxer-seekable-cache=yes")', self.thumbfast_lua)
+
 
 class TestThumbfastMidHoverTeardownGuard(unittest.TestCase):
     """Verify mid-hover resize defers teardown."""
@@ -157,12 +173,20 @@ class TestUoscTimelinePatcher(unittest.TestCase):
         "end\n"
     )
 
-    SAMPLE_TIMELINE_PATCHED = (
+    SAMPLE_FULL_TIMELINE = (
         "function Timeline:on_global_mouse_leave()\n"
         "\tself.pressed = false\n"
-        "\t-- UOSC_TIMELINE_THUMB_CLEANUP_PATCH\n"
-        "\tself:clear_thumbnail()\n"
-        "end\n"
+        "end\n\n"
+        "\t\t\tlocal ax, ay = (thumb_x - border), (thumb_y - border)\n"
+        "\t\t\tlocal bx, by = (thumb_x + thumb_width + border), (thumb_y + thumb_height + border)\n"
+        "\t\t\tass:rect(ax, ay, bx, by, {\n"
+        "\t\t\t\tcolor = bg,\n"
+        "\t\t\t\tborder = 1,\n"
+        "\t\t\t\topacity = {main = config.opacity.thumbnail, border = 0.08 * config.opacity.thumbnail},\n"
+        "\t\t\t\tborder_color = fg,\n"
+        "\t\t\t\tradius = state.radius,\n"
+        "\t\t\t})\n"
+        "\t\t\tlocal thumb_seconds = 10\n"
     )
 
     def test_patch_adds_clear_thumbnail(self):
@@ -173,11 +197,30 @@ class TestUoscTimelinePatcher(unittest.TestCase):
         body = parts[1].split("end")[0]
         self.assertIn("self:clear_thumbnail()", body)
 
+    def test_patch_guards_thumbnail_ass_rect(self):
+        from tools.patch_uosc_timeline_thumb import patch_timeline_lua
+        result = patch_timeline_lua(self.SAMPLE_FULL_TIMELINE)
+        self.assertIn("if thumbnail.ready ~= false then", result)
+        self.assertIn("UOSC_TIMELINE_THUMB_READY_PATCH", result)
+
+    def test_unpatch_restores_thumbnail_ass_rect(self):
+        from tools.patch_uosc_timeline_thumb import patch_timeline_lua, unpatch_timeline_lua
+        patched = patch_timeline_lua(self.SAMPLE_FULL_TIMELINE)
+        self.assertIn("if thumbnail.ready ~= false then", patched)
+        unpatched = unpatch_timeline_lua(patched)
+        self.assertNotIn("if thumbnail.ready ~= false then", unpatched)
+        self.assertNotIn("UOSC_TIMELINE_THUMB_READY_PATCH", unpatched)
+        self.assertIn("ass:rect(ax, ay, bx, by, {", unpatched)
+
     def test_patch_is_idempotent(self):
         from tools.patch_uosc_timeline_thumb import patch_timeline_lua
         first = patch_timeline_lua(self.SAMPLE_TIMELINE)
         second = patch_timeline_lua(first)
         self.assertEqual(first, second)
+
+        first_full = patch_timeline_lua(self.SAMPLE_FULL_TIMELINE)
+        second_full = patch_timeline_lua(first_full)
+        self.assertEqual(first_full, second_full)
 
     def test_unpatch_removes_clear_thumbnail(self):
         from tools.patch_uosc_timeline_thumb import patch_timeline_lua, unpatch_timeline_lua
