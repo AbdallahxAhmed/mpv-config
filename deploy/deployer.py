@@ -666,6 +666,18 @@ def deploy(
             results.append({"name": name, "status": "ok", "detail": "recoverable replacement"})
             if audit_log:
                 audit_log.record_file(os.path.join(config_dir, name), "copy", "ok", "transaction committed")
+        # Apply uosc Timeline mouse-leave patch to ensure thumbnail cleanup on window exit
+        try:
+            from tools.patch_uosc_timeline_thumb import run_patcher, get_default_uosc_dir
+            from pathlib import Path
+            uosc_dir = Path(config_dir) / "scripts" / "uosc"
+            if not uosc_dir.exists():
+                uosc_dir = get_default_uosc_dir()
+            if uosc_dir.exists():
+                run_patcher(uosc_dir)
+                results.append({"name": "uosc-timeline-thumb-patch", "status": "ok", "detail": "mouse-leave cleanup patched"})
+        except Exception as exc:
+            results.append({"name": "uosc-timeline-thumb-patch", "status": "warn", "detail": str(exc)})
     if env.os == "windows":
         ensure_windows_shortcuts(env, audit_log=audit_log)
     return results

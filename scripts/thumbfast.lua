@@ -240,8 +240,12 @@ local last_real_w, last_real_h
 local script_name
 
 local show_thumbnail = false
-local overlay_seq = 0
 local has_valid_frame = false
+
+-- Single-flight overlay dispatcher state
+local overlay_busy = false
+local desired_overlay = nil     -- nil = no pending change, false = want hidden, table = want visible
+local overlay_visible = false
 local pending_respawn = false
 local pending_respawn_time = nil
 
@@ -518,7 +522,7 @@ local function info(w, h)
         info_timer = mp.add_timeout(0.05, function() info(w, h) end)
     end
 
-    local is_available = not disabled and (has_valid_frame or using_storyboards)
+    local is_available = not disabled
     local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=is_available, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
     if pre_0_30_0 then
         mp.command_native({"script-message", "thumbfast-info", json})
@@ -727,22 +731,57 @@ local function run(command)
     end
 end
 
+-- Single-flight coalescing overlay dispatcher.
+-- At most one overlay command is in flight at any time.
+-- While busy, the latest request replaces any pending request.
+-- A stale callback never issues overlay-remove — it re-pumps instead.
+local function pump_overlay()
+    if overlay_busy then return end
+    local desired = desired_overlay
+    if desired == nil then return end  -- no pending change
+    desired_overlay = nil
+    overlay_busy = true
+
+    if desired == false then
+        -- Want hidden
+        if pre_0_30_0 then
+            mp.command_native({"overlay-remove", options.overlay_id})
+            overlay_busy = false
+            overlay_visible = false
+            if desired_overlay ~= nil then pump_overlay() end
+        else
+            mp.command_native_async({"overlay-remove", options.overlay_id}, function()
+                overlay_busy = false
+                overlay_visible = false
+                if desired_overlay ~= nil then pump_overlay() end
+            end)
+        end
+    else
+        -- Want visible: desired is the overlay-add command table
+        if pre_0_30_0 then
+            mp.command_native(desired)
+            overlay_busy = false
+            overlay_visible = true
+            if desired_overlay ~= nil then pump_overlay() end
+        else
+            mp.command_native_async(desired, function()
+                overlay_busy = false
+                overlay_visible = true
+                if desired_overlay ~= nil then pump_overlay() end
+            end)
+        end
+    end
+end
+
 local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end
     if not mp.utils.file_info(thumbnail_path..".bgra") then return end
     if x ~= nil then
-        overlay_seq = overlay_seq + 1
-        local current_seq = overlay_seq
-        local scale_w, scale_h = options.scale_factor ~= 1 and (w * options.scale_factor) or nil, options.scale_factor ~= 1 and (h * options.scale_factor) or nil
-        if pre_0_30_0 then
-            mp.command_native({"overlay-add", options.overlay_id, x, y, thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h})
-        else
-            mp.command_native_async({"overlay-add", options.overlay_id, x, y, thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h}, function(success, result, error)
-                if current_seq ~= overlay_seq or not show_thumbnail then
-                    mp.command_native_async({"overlay-remove", options.overlay_id}, function() end)
-                end
-            end)
-        end
+        local scale_w = options.scale_factor ~= 1 and (w * options.scale_factor) or nil
+        local scale_h = options.scale_factor ~= 1 and (h * options.scale_factor) or nil
+        desired_overlay = {"overlay-add", options.overlay_id, x, y,
+            thumbnail_path..".bgra", 0, "bgra", w, h, (4*w), scale_w, scale_h}
+        pump_overlay()
     elseif script then
         local json, err = mp.utils.format_json({width=w, height=h, scale_factor=options.scale_factor, x=x, y=y, socket=options.socket, thumbnail=thumbnail_path, overlay_id=options.overlay_id})
         mp.commandv("script-message-to", script, "thumbfast-render", json)
@@ -896,7 +935,6 @@ local respawn_thumbnailer
 local function clear()
     file_timer:kill()
     seek_timer:kill()
-    overlay_seq = overlay_seq + 1
     if options.quit_after_inactivity > 0 then
         if show_thumbnail or activity_timer:is_enabled() then
             activity_timer:kill()
@@ -911,11 +949,8 @@ local function clear()
     last_x = nil
     last_y = nil
     if script_name then return end
-    if pre_0_30_0 then
-        mp.command_native({"overlay-remove", options.overlay_id})
-    else
-        mp.command_native_async({"overlay-remove", options.overlay_id}, function() end)
-    end
+    desired_overlay = false
+    pump_overlay()
     if pending_respawn and respawn_thumbnailer then
         local seek_time = pending_respawn_time
         pending_respawn = false

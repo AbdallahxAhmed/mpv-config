@@ -117,7 +117,8 @@ class TestAuditPatches(unittest.TestCase):
             content = f.read()
 
         self.assertIn("network=yes", content)
-        self.assertIn("hwdec=yes", content)
+        self.assertIn("hwdec=no", content)
+        self.assertIn("tone_mapping=auto", content)
         self.assertIn("max_height=200", content)
         self.assertIn("max_width=200", content)
         self.assertIn("spawn_first=yes", content)
