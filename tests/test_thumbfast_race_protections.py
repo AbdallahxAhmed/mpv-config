@@ -217,7 +217,7 @@ class TestThumbfastSeekWatchdogAndPipeline(unittest.TestCase):
         """arm_seek_watchdog and stop_seek_watchdog must exist and use a 2.5s timer."""
         self.assertIn("local function stop_seek_watchdog()", self.thumbfast_lua)
         self.assertIn("local function arm_seek_watchdog()", self.thumbfast_lua)
-        self.assertIn("mp.add_timeout(2.5", self.thumbfast_lua)
+        self.assertTrue("mp.add_timeout(timeout" in self.thumbfast_lua or "mp.add_timeout(2.5" in self.thumbfast_lua)
 
     def test_watchdog_disarmed_on_frame_and_lifecycle(self):
         """stop_seek_watchdog must be called in check_new_thumb, clear, file_load, shutdown, and quit."""

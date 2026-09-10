@@ -701,7 +701,7 @@ local function spawn(time)
 end
 
 local function run(command)
-    if not spawned then return end
+    if not spawned then return false end
 
     if options.direct_io then
         local hPipe = winapi.C.CreateFileW(winapi.socket_wc, winapi.GENERIC_WRITE, 0, nil, winapi.OPEN_EXISTING, winapi._createfile_pipe_flags, nil)
@@ -710,9 +710,10 @@ local function run(command)
             winapi.C.SetNamedPipeHandleState(hPipe, winapi.PIPE_NOWAIT, nil, nil)
             winapi.C.WriteFile(hPipe, buf, #buf, winapi._lpNumberOfBytesWritten, nil)
             winapi.C.CloseHandle(hPipe)
+            return true
         end
 
-        return
+        return false
     end
 
     local command_n = command.."\n"
@@ -723,20 +724,26 @@ local function run(command)
         end
     elseif pre_0_33_0 then
         subprocess({"/usr/bin/env", "sh", "-c", "echo '" .. command .. "' | socat - " .. options.socket})
-        return
+        return true
     elseif not file then
         file = io.open(options.socket, "r+")
     end
     if file then
-        local ok = pcall(function()
+        local ok, err = pcall(function()
             file:write(command_n)
             file:flush()
         end)
         if not ok then
+            mp.msg.warn("thumbfast: pipe write failed: " .. tostring(err))
             pcall(function() file:close() end)
             file = nil
             file_bytes = 0
+            return false
         end
+        return true
+    else
+        mp.msg.warn("thumbfast: pipe open failed: " .. tostring(options.socket))
+        return false
     end
 end
 
@@ -896,9 +903,12 @@ local do_raw_seek
 
 local function arm_seek_watchdog()
     stop_seek_watchdog()
-    seek_watchdog = mp.add_timeout(2.5, function()
+    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
+    local timeout = is_net and 2.5 or 0.4
+    seek_watchdog = mp.add_timeout(timeout, function()
         seek_watchdog = nil
         if not seek_in_flight or not show_thumbnail then return end
+        mp.msg.warn("SEEK WATCHDOG FIRED target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
         seek_in_flight = false
         current_seek_target = nil
         local retry_target = pending_seek_target or last_seek_time
@@ -918,11 +928,20 @@ do_raw_seek = function(target_time, fast)
     mp.msg.warn("SEEK SENT target=" .. tostring(target_time))
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     local use_fast = fast or is_net or allow_fast_seek
-    run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
-    seek_in_flight = true
-    current_seek_target = target_time
-    last_seek_sent_time = mp.get_time()
-    arm_seek_watchdog()
+    local sent = run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
+    if sent then
+        seek_in_flight = true
+        current_seek_target = target_time
+        last_seek_sent_time = mp.get_time()
+        arm_seek_watchdog()
+    else
+        mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
+        seek_in_flight = false
+        current_seek_target = nil
+        if respawn_thumbnailer then
+            respawn_thumbnailer(target_time)
+        end
+    end
 end
 
 local function seek(fast)
@@ -967,10 +986,13 @@ end
 
 local function check_new_thumb()
     if not thumbnail_path then thumbnail_path = options.thumbnail end
+    local raw_info = mp.utils.file_info(thumbnail_path)
+    if not raw_info or raw_info.size == 0 then return false end
+
     local tmp = thumbnail_path..".tmp"
     move_file(thumbnail_path, tmp)
     local finfo = mp.utils.file_info(tmp)
-    if not finfo then return false end
+    if not finfo or finfo.size == 0 then return false end
     spawn_waiting = false
     local w, h = real_res(effective_w, effective_h, finfo.size)
     if w then -- only accept valid thumbnails
@@ -1009,6 +1031,15 @@ local function check_new_thumb()
             file_timer:kill()
         end
         return true
+    else
+        mp.msg.warn("FRAME REJECTED path=" .. tostring(tmp) .. " size=" .. tostring(finfo.size) .. " req=" .. tostring(effective_w) .. "x" .. tostring(effective_h))
+        seek_in_flight = false
+        current_seek_target = nil
+        local next_target = pending_seek_target
+        pending_seek_target = nil
+        if next_target and show_thumbnail then
+            do_raw_seek(next_target, true)
+        end
     end
 
     return false
