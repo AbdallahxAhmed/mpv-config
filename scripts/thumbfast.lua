@@ -367,6 +367,7 @@ if os_name == "windows" then
             int __stdcall CloseHandle(void *hObject);
             int __stdcall SetNamedPipeHandleState(void *hNamedPipe, unsigned long *lpMode, unsigned long *lpMaxCollectionCount, unsigned long *lpCollectDataTimeout);
             int __stdcall MultiByteToWideChar(unsigned int CodePage, unsigned long dwFlags, const char *lpMultiByteStr, int cbMultiByte, wchar_t *lpWideCharStr, int cchWideChar);
+            unsigned long __stdcall GetLastError(void);
         ]]
 
         winapi.MultiByteToWideChar = function(MultiByteStr)
@@ -697,6 +698,8 @@ local function spawn(time)
         table.insert(args, "--demuxer-max-back-bytes=16MiB")
         table.insert(args, "--cache=yes")
         table.insert(args, "--demuxer-seekable-cache=yes")
+        table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
+        table.insert(args, "--stream-buffer-size=512KiB")
     end
 
     if not pre_0_30_0 then
@@ -739,9 +742,11 @@ local function spawn(time)
 
     subprocess(args, true,
         function(success, result)
-            if spawn_waiting and (success == false or not result or (result.status ~= 0 and result.status ~= -2)) then
-                spawned = false
-                spawn_waiting = false
+            spawned = false
+            spawn_waiting = false
+            if winapi then winapi.close_pipe() end
+            if file then pcall(function() file:close() end); file = nil; file_bytes = 0 end
+            if (success == false or not result or (result.status ~= 0 and result.status ~= -2)) then
                 options.tone_mapping = "no"
                 mp.msg.error("mpv subprocess create failed")
                 if not spawn_working then -- notify users of required configuration
@@ -776,7 +781,9 @@ local function spawn(time)
                     mp.commandv("script-message-to", "implay", "show-message", "thumbfast initial setup", "Set mpv_path=ImPlay in thumbfast config:\n" .. string.gsub(mp.command_native({"expand-path", "~~/script-opts/thumbfast.conf"}), "[/\\]", path_separator).."\nand restart ImPlay")
                 end
                 spawn_working = true
-                spawn_waiting = false
+            end
+            if show_thumbnail and respawn_thumbnailer and last_seek_time then
+                respawn_thumbnailer(last_seek_time)
             end
         end
     )
@@ -796,7 +803,10 @@ local function run(command)
                 winapi.drain_pipe()
                 return true
             else
-                winapi.close_pipe()
+                local err = winapi.C.GetLastError and winapi.C.GetLastError() or 0
+                if err == 109 or err == 232 then
+                    winapi.close_pipe()
+                end
                 return false
             end
         else
@@ -980,6 +990,7 @@ local pending_seek_target = nil
 local seek_watchdog = nil
 local seek_retry_count = 0
 local max_seek_retries = 2
+local pipe_fail_count = 0
 
 local function stop_seek_watchdog()
     if seek_watchdog then
@@ -1007,7 +1018,14 @@ local function arm_seek_watchdog()
             do_raw_seek(retry_target, true)
         elseif retry_target and respawn_thumbnailer then
             seek_retry_count = 0
-            respawn_thumbnailer(retry_target)
+            if is_net then
+                -- On network streams, NEVER kill the worker process on a slow seek!
+                -- Subprocess teardown destroys TLS sessions and the demuxer cache,
+                -- creating repeated multi-second stalls and stuck frames.
+                do_raw_seek(retry_target, true)
+            else
+                respawn_thumbnailer(retry_target)
+            end
         end
     end)
 end
@@ -1019,6 +1037,7 @@ do_raw_seek = function(target_time, fast)
     local use_fast = fast or is_net or allow_fast_seek
     local sent = run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
     if sent then
+        pipe_fail_count = 0
         seek_in_flight = true
         current_seek_target = target_time
         last_seek_sent_time = mp.get_time()
@@ -1029,8 +1048,15 @@ do_raw_seek = function(target_time, fast)
                 mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
                 seek_in_flight = false
                 current_seek_target = nil
-                if respawn_thumbnailer then
-                    respawn_thumbnailer(target_time)
+                pending_seek_target = target_time
+                -- Do NOT immediately kill the process on a single failed pipe write!
+                -- The background worker might be temporarily busy demuxing network packets.
+                if not is_net and respawn_thumbnailer then
+                    pipe_fail_count = pipe_fail_count + 1
+                    if pipe_fail_count >= 3 then
+                        pipe_fail_count = 0
+                        respawn_thumbnailer(target_time)
+                    end
                 end
             end
         else
@@ -1102,6 +1128,7 @@ local function check_new_thumb()
         mp.msg.trace("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
         stop_seek_watchdog()
         seek_retry_count = 0
+        pipe_fail_count = 0
         seek_in_flight = false
         local completed_target = current_seek_target
         current_seek_target = nil

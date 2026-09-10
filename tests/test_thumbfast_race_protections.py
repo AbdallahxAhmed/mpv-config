@@ -549,6 +549,24 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertNotEqual(remove_pos, -1, "remove_thumbnail_files missing")
         self.assertLess(exit_pos, remove_pos, "early exit must happen before remove_thumbnail_files")
 
+    def test_network_seek_watchdog_does_not_kill_worker(self):
+        """On network streams, seek_watchdog must redispatch rather than killing the worker."""
+        watchdog_match = re.search(
+            r"seek_watchdog = mp\.add_timeout\(timeout, function\(\)\n(.*?)^    end\)",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(watchdog_match, "seek_watchdog function not found")
+        watchdog_body = watchdog_match.group(1)
+        self.assertIn("if is_net then", watchdog_body)
+        self.assertIn("do_raw_seek(retry_target, true)", watchdog_body)
+        self.assertIn("respawn_thumbnailer(retry_target)", watchdog_body)
+
+    def test_network_reconnect_options_present(self):
+        """Network streaming arguments must include reconnect and buffer options."""
+        self.assertIn('table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")', self.thumbfast_lua)
+        self.assertIn('table.insert(args, "--stream-buffer-size=512KiB")', self.thumbfast_lua)
+
 
 if __name__ == "__main__":
     unittest.main()
