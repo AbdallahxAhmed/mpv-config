@@ -504,5 +504,51 @@ class TestThumbfastPersistentPipeAndDraining(unittest.TestCase):
         self.assertIn("pending_seek_target = target_time", seek_body)
 
 
+class TestThumbfastNetworkReliability(unittest.TestCase):
+    """Verify HTTP headers, User-Agent propagation, and HLS low-bitrate optimization."""
+
+    def setUp(self):
+        self.thumbfast_lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def test_user_agent_and_headers_extracted_and_passed(self):
+        """User-agent and HTTP headers must be observed, cached, and passed to the thumbnailer."""
+        self.assertIn("mp.observe_property(\"user-agent\", \"string\", update_property)", self.thumbfast_lua)
+        self.assertIn("mp.observe_property(\"http-header-fields\", \"native\", update_property)", self.thumbfast_lua)
+        self.assertIn("cached_user_agent = sb_j.http_headers[\"User-Agent\"]", self.thumbfast_lua)
+        self.assertIn("table.insert(args, \"--user-agent=\"..user_agent)", self.thumbfast_lua)
+        self.assertIn("table.insert(args, \"--http-header-fields=\"..header_fields)", self.thumbfast_lua)
+
+    def test_hls_min_bitrate_option(self):
+        """HLS playback must specify --hls-bitrate=min for fast thumbnail seeking."""
+        self.assertIn('table.insert(args, "--hls-bitrate=min")', self.thumbfast_lua)
+
+    def test_storyboard_header_table_safety(self):
+        """setup_storyboards must safely parse http-header-fields table without string.match crashing on table."""
+        sb_match = re.search(
+            r"function setup_storyboards\(\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(sb_match, "setup_storyboards function not found")
+        sb_body = sb_match.group(1)
+        self.assertIn('if type(headers) == "table"', sb_body)
+        self.assertNotIn('string.match(properties["http-header-fields"]', sb_body)
+
+    def test_storyboard_early_exit_preserves_files(self):
+        """setup_storyboards must return early before remove_thumbnail_files if not video_url."""
+        sb_match = re.search(
+            r"function setup_storyboards\(\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(sb_match, "setup_storyboards function not found")
+        sb_body = sb_match.group(1)
+        exit_pos = sb_body.find("if not video_url then return end")
+        remove_pos = sb_body.find("remove_thumbnail_files()")
+        self.assertNotEqual(exit_pos, -1, "early return guard for non-storyboard url missing")
+        self.assertNotEqual(remove_pos, -1, "remove_thumbnail_files missing")
+        self.assertLess(exit_pos, remove_pos, "early exit must happen before remove_thumbnail_files")
+
+
 if __name__ == "__main__":
     unittest.main()

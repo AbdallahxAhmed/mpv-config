@@ -60,6 +60,30 @@ local msg = mp.msg
 mp.options.read_options(options, "thumbfast")
 
 local properties = {}
+local cached_user_agent = nil
+local cached_referer = nil
+local cached_header_fields = nil
+
+local function get_formatted_headers()
+    local fields = properties["http-header-fields"]
+    local list = {}
+    if type(fields) == "table" then
+        for _, v in ipairs(fields) do
+            if type(v) == "string" and v ~= "" then
+                table.insert(list, v)
+            end
+        end
+    elseif type(fields) == "string" and fields ~= "" then
+        table.insert(list, fields)
+    end
+    if #list == 0 and cached_header_fields and cached_header_fields ~= "" then
+        table.insert(list, cached_header_fields)
+    end
+    if #list > 0 then
+        return table.concat(list, ",")
+    end
+    return nil
+end
 local pre_0_30_0 = mp.command_native_async == nil
 local pre_0_33_0 = true
 local support_media_control = mp.get_property_native("media-controls") ~= nil
@@ -611,9 +635,9 @@ local function spawn(time)
     if path == nil then return end
 
     local is_net = properties["demuxer-via-network"] or (type(path) == "string" and path:find("^https?://") ~= nil)
+    local open_fn = properties["stream-open-filename"]
     if is_net and type(path) == "string" and path:find("^https?://") then
-        local open_fn = properties["stream-open-filename"]
-        local is_raw_webpage = (open_fn == nil or open_fn == path) and not path:find("%.mp4[%?#]?") and not path:find("%.mkv[%?#]?") and not path:find("%.webm[%?#]?") and not path:find("%.m3u8[%?#]?")
+        local is_raw_webpage = (open_fn == nil or open_fn == path or open_fn == "") and not path:find("%.mp4[%?#]?") and not path:find("%.mkv[%?#]?") and not path:find("%.webm[%?#]?") and not path:find("%.m3u8[%?#]?")
         if is_raw_webpage then
             return
         end
@@ -622,7 +646,7 @@ local function spawn(time)
     local demux_bytes = is_net and "64MiB" or "32MiB"
     local reahead_secs = is_net and "15" or "0"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
-    local spawn_path = (is_net and properties["stream-open-filename"] and properties["stream-open-filename"] ~= "" and properties["stream-open-filename"]) or path
+    local spawn_path = (is_net and open_fn and open_fn ~= "" and open_fn) or path
 
     if options.quit_after_inactivity > 0 then
         if show_thumbnail or activity_timer:is_enabled() then
@@ -638,16 +662,12 @@ local function spawn(time)
     local vid = properties["vid"]
     has_vid = vid or 0
 
-    -- TODO: add filtered ytdl-raw-options, especially for 'cookies' option, and maybe 'extractor-args' too
-    -- TODO: use native property for cookies and cookies-file??
-
     local args = {
         mpv_path, "--no-config", "--msg-level=all=no", "--idle", "--pause", "--keep-open=always", "--really-quiet", "--no-terminal",
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
         "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
         "--start="..time, seek_mode,
         "--ytdl-format=worst", "--demuxer-readahead-secs="..reahead_secs, "--demuxer-max-bytes="..demux_bytes,
-        "--http-header-fields="..(properties["http-header-fields"] or ""), -- does this actually work well with SVP?
         "--cookies="..(properties["cookies"] or "no"),
         "--cookies-file="..(properties["cookies-file"] or ""),
         "--vd-lavc-skiploopfilter=all", "--vd-lavc-software-fallback=1", "--vd-lavc-fast", "--vd-lavc-threads=2", "--hwdec="..(options.hwdec and "auto" or "no"),
@@ -657,11 +677,26 @@ local function spawn(time)
         "--ovc=rawvideo", "--of=image2", "--ofopts=update=1", "--o="..thumbnail_path
     }
 
+    local user_agent = properties["user-agent"] or cached_user_agent
+    if user_agent and user_agent ~= "" then
+        table.insert(args, "--user-agent="..user_agent)
+    end
+
+    local referer = properties["referrer"] or cached_referer
+    if referer and referer ~= "" then
+        table.insert(args, "--referrer="..referer)
+    end
+
+    local header_fields = get_formatted_headers()
+    if header_fields and header_fields ~= "" then
+        table.insert(args, "--http-header-fields="..header_fields)
+    end
+
     if is_net then
-        table.insert(args, "--demuxer-max-back-bytes=32MiB")
+        table.insert(args, "--hls-bitrate=min")
+        table.insert(args, "--demuxer-max-back-bytes=16MiB")
         table.insert(args, "--cache=yes")
         table.insert(args, "--demuxer-seekable-cache=yes")
-        table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=2")
     end
 
     if not pre_0_30_0 then
@@ -958,7 +993,7 @@ local do_raw_seek
 local function arm_seek_watchdog()
     stop_seek_watchdog()
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
-    local timeout = is_net and 2.5 or 0.4
+    local timeout = is_net and 6.0 or 0.4
     seek_watchdog = mp.add_timeout(timeout, function()
         seek_watchdog = nil
         if not seek_in_flight or not show_thumbnail then return end
@@ -990,11 +1025,13 @@ do_raw_seek = function(target_time, fast)
         arm_seek_watchdog()
     else
         if not spawn_waiting then
-            mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
-            seek_in_flight = false
-            current_seek_target = nil
-            if respawn_thumbnailer then
-                respawn_thumbnailer(target_time)
+            if spawned then
+                mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
+                seek_in_flight = false
+                current_seek_target = nil
+                if respawn_thumbnailer then
+                    respawn_thumbnailer(target_time)
+                end
             end
         else
             pending_seek_target = target_time
@@ -1318,9 +1355,9 @@ local function watch_changes()
     last_crop = properties["video-crop"]
     last_has_vid = has_vid
 
-    if not spawned and not disabled and options.spawn_first and effective_w and effective_h then
+    if not spawned and not disabled and (show_thumbnail or options.spawn_first) and effective_w and effective_h then
         spawn(mp.get_property_number("time-pos", 0))
-        file_timer:resume()
+        if file_timer and not file_timer:is_enabled() then file_timer:resume() end
     end
 end
 
@@ -1333,15 +1370,34 @@ local function update_property(name, value)
             if spawned then
                 clear()
                 respawn_thumbnailer(last_seek_time or 0)
-            elseif options.spawn_first and effective_w and effective_h then
-                spawn(mp.get_property_number("time-pos", 0))
-                if file_timer and not file_timer:is_enabled() then file_timer:resume() end
+            elseif show_thumbnail or options.spawn_first then
+                calc_dimensions()
+                if effective_w and effective_h then
+                    spawn(mp.get_property_number("time-pos", 0))
+                    if file_timer and not file_timer:is_enabled() then file_timer:resume() end
+                end
             end
         end
     end
-    if name == "user-data/mpv/ytdl/json-subprocess-result" and not using_storyboards then
-        dirty = true
-        setup_storyboards()
+    if name == "user-data/mpv/ytdl/json-subprocess-result" then
+        if value and type(value) == "table" and value.stdout and value.stdout ~= "" then
+            local sb_j = mp.utils.parse_json(value.stdout)
+            if sb_j and sb_j.http_headers then
+                cached_user_agent = sb_j.http_headers["User-Agent"]
+                cached_referer = sb_j.http_headers["Referer"] or sb_j.webpage_url
+                local h_list = {}
+                for k, v in pairs(sb_j.http_headers) do
+                    table.insert(h_list, k .. ": " .. tostring(v))
+                end
+                if #h_list > 0 then
+                    cached_header_fields = table.concat(h_list, ",")
+                end
+            end
+        end
+        if not using_storyboards then
+            dirty = true
+            setup_storyboards()
+        end
     end
 end
 
@@ -1729,12 +1785,30 @@ function setup_storyboards()
     local forced_path = open_filename and path ~= open_filename -- and properties["demuxer-via-network"]
     if not forced_path then return end
 
-    remove_thumbnail_files()
-    remove_storyboard_files()
-
-    local referer = string.match(properties["http-header-fields"] or "", "Referer:([^,]+)") or "" -- TODO: use native property here
+    local referer = ""
+    local headers = properties["http-header-fields"]
+    if type(headers) == "table" then
+        for _, h in ipairs(headers) do
+            if type(h) == "string" then
+                local ref = string.match(h, "^[Rr]eferer:%s*(.+)$") or string.match(h, "[Rr]eferer:([^,]+)")
+                if ref and ref ~= "" then
+                    referer = ref
+                    break
+                end
+            end
+        end
+    elseif type(headers) == "string" then
+        referer = string.match(headers, "[Rr]eferer:([^,]+)") or ""
+    end
+    if referer == "" and type(properties["referrer"]) == "string" then
+        referer = properties["referrer"]
+    end
 
     local video_url = storyboard_supported_url(path, referer)
+    if not video_url then return end
+
+    remove_thumbnail_files()
+    remove_storyboard_files()
 
     if video_url then
         find_ytdl_path()
@@ -1867,6 +1941,11 @@ local function file_load()
     pending_respawn = false
     pending_respawn_time = nil
 
+    cached_user_agent = nil
+    cached_referer = nil
+    cached_header_fields = nil
+
+    run("quit")
     if winapi then
         winapi.close_pipe()
     end
@@ -1942,7 +2021,9 @@ mp.observe_property("video-params", "native", update_property_dirty)
 mp.observe_property("vf", "native", update_property_dirty)
 mp.observe_property("tone-mapping", "native", update_property_dirty)
 mp.observe_property("demuxer-via-network", "native", update_property)
-mp.observe_property("http-header-fields", "string", update_property)
+mp.observe_property("http-header-fields", "native", update_property)
+mp.observe_property("user-agent", "string", update_property)
+mp.observe_property("referrer", "string", update_property)
 mp.observe_property("cookies", "string", update_property)
 mp.observe_property("cookies-file", "string", update_property)
 mp.observe_property("stream-open-filename", "native", update_property)
