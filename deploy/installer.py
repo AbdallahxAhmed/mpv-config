@@ -1118,10 +1118,6 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
         from deploy import detector
         env = detector.detect()
 
-    ui.header("Syncing MPV Dependencies Suite")
-    target = target_dir or _get_target_tools_dir(env)
-    ui.info(f"Target directory: {target}")
-
     if dry_run:
         return [
             {"name": "yt-dlp", "status": "skipped", "detail": "dry-run"},
@@ -1129,6 +1125,10 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
             {"name": "alass", "status": "skipped", "detail": "dry-run"},
             {"name": "ffsubsync", "status": "skipped", "detail": "dry-run"},
         ]
+
+    ui.header("Syncing MPV Dependencies Suite")
+    target = target_dir or _get_target_tools_dir(env)
+    ui.info(f"Target directory: {target}")
 
     os.makedirs(target, exist_ok=True)
 

@@ -126,7 +126,8 @@ end
 local temp_counter = 0
 local function get_temp_sub_path(suffix)
     temp_counter = temp_counter + 1
-    local temp_dir = (os.getenv('TEMP') or os.getenv('TMP') or 'C:/Windows/Temp'):gsub('\\', '/')
+    local temp_dir = os.getenv('TEMP') or os.getenv('TMP') or os.getenv('TMPDIR') or '/tmp'
+    temp_dir = temp_dir:gsub('\\', '/')
     local pid = tostring(mp.get_property_native('pid') or 0)
     return string.format('%s/mpv_sub_%s_%d_%d%s.vtt', temp_dir, pid, os.time(), temp_counter, suffix or '')
 end

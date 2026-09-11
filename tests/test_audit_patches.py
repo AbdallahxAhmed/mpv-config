@@ -339,7 +339,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(len(controls), 1)
         items = controls[0].split(",")
         self.assertEqual(items[0], "menu")
-        self.assertEqual(items[-2:], ["space", "fullscreen"])
+        self.assertEqual(items[-2:], ["gap", "fullscreen"])
         self.assertIn("command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", items)
         self.assertTrue(
             "button:audio-tracks" in items or

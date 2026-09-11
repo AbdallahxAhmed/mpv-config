@@ -27,7 +27,10 @@ mp.register_script_message('open-menu', function(json)
 end)
 mp.register_script_message('set-button', function(name, json)
     local button = utils.parse_json(json)
-    mp.set_property_native('user-data/gui-test/button', button)
+    mp.set_property_native('user-data/gui-test/button/' .. name, button)
+    if name == 'stable-volume' then
+        mp.set_property_native('user-data/gui-test/button', button)
+    end
 end)
 mp.commandv('script-message', 'uosc-version', 'fixture')
 """
