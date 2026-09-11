@@ -131,8 +131,8 @@ class TestThumbfastAvailability(unittest.TestCase):
         self.assertIn("respawn_thumbnailer(last_seek_time or 0)", self.thumbfast_lua)
 
     def test_network_demuxer_cache_flags(self):
-        """Network playback must use seekable cache, readahead, and back-bytes for smooth scrubbing."""
-        self.assertIn('local reahead_secs = is_net and "15" or "0"', self.thumbfast_lua)
+        """Network playback must use seekable cache, zero readahead for single-frame decoding, and back-bytes."""
+        self.assertIn('local reahead_secs = "0"', self.thumbfast_lua)
         self.assertIn('local demux_bytes = is_net and "64MiB" or "32MiB"', self.thumbfast_lua)
         self.assertIn('table.insert(args, "--demuxer-seekable-cache=yes")', self.thumbfast_lua)
 
@@ -563,9 +563,25 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertIn("respawn_thumbnailer(retry_target)", watchdog_body)
 
     def test_network_reconnect_options_present(self):
-        """Network streaming arguments must include reconnect and buffer options."""
-        self.assertIn('table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")', self.thumbfast_lua)
-        self.assertIn('table.insert(args, "--stream-buffer-size=512KiB")', self.thumbfast_lua)
+        """Network streaming arguments must include stream-lavf reconnect and framedrop options."""
+        self.assertIn('table.insert(args, "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")', self.thumbfast_lua)
+        self.assertIn('table.insert(args, "--hr-seek-framedrop=yes")', self.thumbfast_lua)
+
+    def test_network_seek_superseding_in_flight(self):
+        """On network streams, seek should supersede obsolete in-flight seeks when cursor moves far away."""
+        self.assertIn("math.abs(last_seek_time - current_seek_target) > 3.0", self.thumbfast_lua)
+        self.assertIn("do_raw_seek(last_seek_time, true)", self.thumbfast_lua)
+
+    def test_clear_removes_overlay_before_script_name_check(self):
+        """clear() must hide and pump overlay before checking script_name to prevent stuck overlays."""
+        clear_idx = self.thumbfast_lua.find("local function clear()")
+        self.assertNotEqual(clear_idx, -1)
+        clear_body = self.thumbfast_lua[clear_idx:clear_idx + 1200]
+        desired_idx = clear_body.find("desired_overlay = false")
+        script_name_idx = clear_body.find("if script_name then return end")
+        self.assertNotEqual(desired_idx, -1)
+        self.assertNotEqual(script_name_idx, -1)
+        self.assertLess(desired_idx, script_name_idx, "desired_overlay = false must precede if script_name then return end")
 
 
 if __name__ == "__main__":

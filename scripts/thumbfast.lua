@@ -645,7 +645,7 @@ local function spawn(time)
     end
 
     local demux_bytes = is_net and "64MiB" or "32MiB"
-    local reahead_secs = is_net and "15" or "0"
+    local reahead_secs = "0"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
     local spawn_path = (is_net and open_fn and open_fn ~= "" and open_fn) or path
 
@@ -698,8 +698,9 @@ local function spawn(time)
         table.insert(args, "--demuxer-max-back-bytes=16MiB")
         table.insert(args, "--cache=yes")
         table.insert(args, "--demuxer-seekable-cache=yes")
-        table.insert(args, "--demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
-        table.insert(args, "--stream-buffer-size=512KiB")
+        table.insert(args, "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
+        table.insert(args, "--hr-seek-framedrop=yes")
+        table.insert(args, "--network-timeout=10")
     end
 
     if not pre_0_30_0 then
@@ -1067,8 +1068,18 @@ end
 
 local function seek(fast)
     if not last_seek_time then return end
+    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     if seek_in_flight then
         pending_seek_target = last_seek_time
+        -- On network streams, if user moved cursor far from in-flight seek target (> 3s away)
+        -- and the in-flight seek has been running for >= 0.25s, supersede it immediately
+        -- so mpv cancels the obsolete HTTP range request instead of waiting for it.
+        if is_net and current_seek_target and math.abs(last_seek_time - current_seek_target) > 3.0 then
+            local now = mp.get_time()
+            if (now - last_seek_sent_time) >= 0.25 then
+                do_raw_seek(last_seek_time, true)
+            end
+        end
         return
     end
     do_raw_seek(last_seek_time, fast)
@@ -1200,9 +1211,9 @@ local function clear()
     show_thumbnail = false
     last_x = nil
     last_y = nil
-    if script_name then return end
     desired_overlay = false
     pump_overlay()
+    if script_name then return end
     if pending_respawn and respawn_thumbnailer then
         local seek_time = pending_respawn_time
         pending_respawn = false
