@@ -20,7 +20,7 @@ if not ok or type(policy) ~= 'table' then
     end
 end
 local epoch, revision = 0, 0
-local ready, attempted = false, false
+local ready = false
 local captions, choices, job = nil, {}, nil
 local open_menu, select_caption, refresh
 local kind_names = {manual = 'Creator captions', automatic = 'Auto-generated', translated = 'Auto-translated'}
@@ -51,7 +51,7 @@ end
 
 local function reset()
     epoch, revision = epoch + 1, revision + 1
-    ready, attempted = false, false
+    ready = false
     captions, choices = nil, {}
     cancel_job()
     cleanup_temp_file()
@@ -69,8 +69,7 @@ local function parse_captions(stdout)
     return policy.captions(data, mp.get_property_native('slang', {'ar', 'en'}))
 end
 local function cached_captions()
-    if not captions and not attempted then
-        attempted = true
+    if not captions then
         local result = mp.get_property_native('user-data/mpv/ytdl/json-subprocess-result')
         if type(result) == 'table' and result.status == 0 then captions = parse_captions(result.stdout) end
     end
@@ -116,6 +115,7 @@ local function select_loaded(id, generation)
 end
 local function ensure_vtt_url(raw_url)
     if type(raw_url) ~= 'string' then return raw_url end
+    if raw_url:match('%.vtt$') or raw_url:find('%.vtt%?') then return raw_url end
     local sub_url = raw_url:gsub('fmt=[%a%d]+', 'fmt=vtt')
     if not sub_url:find('fmt=vtt') then
         sub_url = sub_url .. (sub_url:find('%?') and '&' or '?') .. 'fmt=vtt'

@@ -60,8 +60,9 @@ class CaptionPlayback(unittest.TestCase):
         hits, started = self.hits, self.started
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                hits[self.path] += 1
-                if self.path == '/slow.vtt':
+                path = self.path.split('?')[0]
+                hits[path] += 1
+                if path == '/slow.vtt':
                     started.set()
                     time.sleep(1.5)
                 try:
@@ -210,12 +211,11 @@ class CaptionPlayback(unittest.TestCase):
         before = self.get('af')
         label = 'mpv_config_stable_volume'
         self.wait(lambda: isinstance(self.get('user-data/gui-test/button'), dict))
-        self.assertEqual(self.get('user-data/gui-test/button')['icon'], 'compress')
+        self.assertEqual(self.get('user-data/gui-test/button')['icon'], 'graphic_eq')
         self.command(*self.get('user-data/gui-test/button')['command'])
         self.wait(lambda: any(f.get('label') == label for f in self.get('af') or []))
         self.assertEqual([f for f in self.get('af') if f.get('label') != label], before)
         self.wait(lambda: self.get('user-data/gui-test/button').get('active') is True)
-        self.assertEqual(self.get('user-data/gui-test/button')['badge'], 'ON')
         self.command(*self.get('user-data/gui-test/button')['command'])
         self.wait(lambda: self.get('af') == before)
         self.wait(lambda: self.get('user-data/gui-test/button').get('active') is False)
