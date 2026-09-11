@@ -1202,6 +1202,7 @@ end)
 file_timer:kill()
 
 local function clear()
+    mp.msg.trace("CLEAR received show=" .. tostring(show_thumbnail) .. " x=" .. tostring(last_x) .. " y=" .. tostring(last_y))
     stop_seek_watchdog()
     seek_retry_count = 0
     file_timer:kill()

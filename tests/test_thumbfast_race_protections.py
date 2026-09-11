@@ -607,6 +607,7 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertNotEqual(desired_idx, -1)
         self.assertNotEqual(script_name_idx, -1)
         self.assertLess(desired_idx, script_name_idx, "desired_overlay = false must precede if script_name then return end")
+        self.assertIn('mp.msg.trace("CLEAR received show="', clear_body)
 
 
 if __name__ == "__main__":
