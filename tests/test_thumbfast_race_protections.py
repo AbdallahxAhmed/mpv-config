@@ -131,10 +131,11 @@ class TestThumbfastAvailability(unittest.TestCase):
         self.assertIn("respawn_thumbnailer(last_seek_time or 0)", self.thumbfast_lua)
 
     def test_network_demuxer_cache_flags(self):
-        """Network playback must use seekable cache, zero readahead for single-frame decoding, and back-bytes."""
-        self.assertIn('local reahead_secs = "0"', self.thumbfast_lua)
+        """Network playback must use seekable cache, readahead for nearby scrubbing, and back-bytes."""
+        self.assertIn('local reahead_secs = is_net and "5" or "0"', self.thumbfast_lua)
         self.assertIn('local demux_bytes = is_net and "64MiB" or "32MiB"', self.thumbfast_lua)
         self.assertIn('table.insert(args, "--demuxer-seekable-cache=yes")', self.thumbfast_lua)
+        self.assertIn('table.insert(args, "--demuxer-max-back-bytes=32MiB")', self.thumbfast_lua)
 
 
 class TestThumbfastMidHoverTeardownGuard(unittest.TestCase):
@@ -567,10 +568,31 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertIn('table.insert(args, "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")', self.thumbfast_lua)
         self.assertIn('table.insert(args, "--hr-seek-framedrop=yes")', self.thumbfast_lua)
 
-    def test_network_seek_superseding_in_flight(self):
-        """On network streams, seek should supersede obsolete in-flight seeks when cursor moves far away."""
-        self.assertIn("math.abs(last_seek_time - current_seek_target) > 3.0", self.thumbfast_lua)
-        self.assertIn("do_raw_seek(last_seek_time, true)", self.thumbfast_lua)
+    def test_strict_single_flight_seek(self):
+        """Seek dispatching must be strictly single-flight; when busy, only update pending_seek_target without overlapping calls."""
+        seek_idx = self.thumbfast_lua.find("local function seek(fast)")
+        self.assertNotEqual(seek_idx, -1)
+        seek_body = self.thumbfast_lua[seek_idx:seek_idx + 300]
+        self.assertIn("pending_seek_target = last_seek_time", seek_body)
+        self.assertIn("if seek_in_flight then", seek_body)
+        self.assertNotIn("math.abs(last_seek_time - current_seek_target)", seek_body)
+
+    def test_extractor_headers_preserved_across_file_loaded(self):
+        """yt-dlp extractor headers must not be cleared in file_load, and must reset on start-file."""
+        file_load_idx = self.thumbfast_lua.find("local function file_load()")
+        self.assertNotEqual(file_load_idx, -1)
+        file_load_body = self.thumbfast_lua[file_load_idx:file_load_idx + 1500]
+        self.assertNotIn("cached_user_agent = nil", file_load_body)
+        self.assertNotIn("cached_referer = nil", file_load_body)
+        self.assertNotIn("cached_header_fields = nil", file_load_body)
+        self.assertIn('mp.register_event("start-file", reset_network_auth)', self.thumbfast_lua)
+
+    def test_bounded_worker_retries_on_failure(self):
+        """Thumbnail worker failures must log error details and only retry within bounded count."""
+        self.assertIn("local worker_retry_count = 0", self.thumbfast_lua)
+        self.assertIn("local max_worker_retries = 2", self.thumbfast_lua)
+        self.assertIn("thumbnail worker failed: status=", self.thumbfast_lua)
+        self.assertIn("worker_retry_count < max_worker_retries", self.thumbfast_lua)
 
     def test_clear_removes_overlay_before_script_name_check(self):
         """clear() must hide and pump overlay before checking script_name to prevent stuck overlays."""

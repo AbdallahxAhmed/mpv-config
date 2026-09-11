@@ -63,6 +63,7 @@ local properties = {}
 local cached_user_agent = nil
 local cached_referer = nil
 local cached_header_fields = nil
+local cached_auth_path = nil
 
 local function get_formatted_headers()
     local fields = properties["http-header-fields"]
@@ -225,6 +226,8 @@ local pending_respawn = false
 local pending_respawn_time = nil
 local active_bgra_path = nil
 local frame_slot = 0
+local worker_retry_count = 0
+local max_worker_retries = 2
 
 local filters_reset = {["lavfi-crop"]=true, ["crop"]=true}
 local filters_runtime = {["hflip"]=true, ["vflip"]=true}
@@ -645,7 +648,7 @@ local function spawn(time)
     end
 
     local demux_bytes = is_net and "64MiB" or "32MiB"
-    local reahead_secs = "0"
+    local reahead_secs = is_net and "5" or "0"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
     local spawn_path = (is_net and open_fn and open_fn ~= "" and open_fn) or path
 
@@ -664,7 +667,7 @@ local function spawn(time)
     has_vid = vid or 0
 
     local args = {
-        mpv_path, "--no-config", "--msg-level=all=no", "--idle", "--pause", "--keep-open=always", "--really-quiet", "--no-terminal",
+        mpv_path, "--no-config", "--msg-level=all=error", "--idle", "--pause", "--keep-open=always", "--really-quiet", "--no-terminal",
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
         "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
         "--start="..time, seek_mode,
@@ -678,24 +681,28 @@ local function spawn(time)
         "--ovc=rawvideo", "--of=image2", "--ofopts=update=1", "--o="..thumbnail_path
     }
 
-    local user_agent = properties["user-agent"] or cached_user_agent
+    local is_same_path = (not cached_auth_path) or (cached_auth_path == path)
+    local user_agent = properties["user-agent"] or (is_same_path and cached_user_agent)
     if user_agent and user_agent ~= "" then
         table.insert(args, "--user-agent="..user_agent)
     end
 
-    local referer = properties["referrer"] or cached_referer
+    local referer = properties["referrer"] or (is_same_path and cached_referer)
     if referer and referer ~= "" then
         table.insert(args, "--referrer="..referer)
     end
 
     local header_fields = get_formatted_headers()
+    if (not header_fields or header_fields == "") and is_same_path and cached_header_fields and cached_header_fields ~= "" then
+        header_fields = cached_header_fields
+    end
     if header_fields and header_fields ~= "" then
         table.insert(args, "--http-header-fields="..header_fields)
     end
 
     if is_net then
         table.insert(args, "--hls-bitrate=min")
-        table.insert(args, "--demuxer-max-back-bytes=16MiB")
+        table.insert(args, "--demuxer-max-back-bytes=32MiB")
         table.insert(args, "--cache=yes")
         table.insert(args, "--demuxer-seekable-cache=yes")
         table.insert(args, "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
@@ -749,7 +756,11 @@ local function spawn(time)
             if file then pcall(function() file:close() end); file = nil; file_bytes = 0 end
             if (success == false or not result or (result.status ~= 0 and result.status ~= -2)) then
                 options.tone_mapping = "no"
-                mp.msg.error("mpv subprocess create failed")
+                local err_msg = "thumbnail worker failed: status=" .. tostring(result and result.status)
+                if result and result.stderr and result.stderr ~= "" then
+                    err_msg = err_msg .. " stderr=" .. tostring(result.stderr):gsub("\r?\n", " ")
+                end
+                mp.msg.error(err_msg)
                 if not spawn_working then -- notify users of required configuration
                     if options.mpv_path == "mpv" then
                         if properties["current-vo"] == "libmpv" then
@@ -777,6 +788,15 @@ local function spawn(time)
                         mp.commandv("script-message-to", "implay", "show-message", "thumbfast", "Set mpv_path=PATH_TO_ImPlay in thumbfast config:\n" .. string.gsub(mp.command_native({"expand-path", "~~/script-opts/thumbfast.conf"}), "[/\\]", path_separator).."\nand restart ImPlay")
                     end
                 end
+                if show_thumbnail and respawn_thumbnailer and worker_retry_count < max_worker_retries and last_seek_time then
+                    worker_retry_count = worker_retry_count + 1
+                    mp.add_timeout(1.0, function()
+                        if show_thumbnail and last_seek_time then
+                            respawn_thumbnailer(last_seek_time)
+                        end
+                    end)
+                end
+                return
             elseif success == true and result and (result.status == 0 or result.status == -2) then
                 if not spawn_working and properties["current-vo"] == "libmpv" and options.mpv_path ~= mpv_path then
                     mp.commandv("script-message-to", "implay", "show-message", "thumbfast initial setup", "Set mpv_path=ImPlay in thumbfast config:\n" .. string.gsub(mp.command_native({"expand-path", "~~/script-opts/thumbfast.conf"}), "[/\\]", path_separator).."\nand restart ImPlay")
@@ -1068,18 +1088,8 @@ end
 
 local function seek(fast)
     if not last_seek_time then return end
-    local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     if seek_in_flight then
         pending_seek_target = last_seek_time
-        -- On network streams, if user moved cursor far from in-flight seek target (> 3s away)
-        -- and the in-flight seek has been running for >= 0.25s, supersede it immediately
-        -- so mpv cancels the obsolete HTTP range request instead of waiting for it.
-        if is_net and current_seek_target and math.abs(last_seek_time - current_seek_target) > 3.0 then
-            local now = mp.get_time()
-            if (now - last_seek_sent_time) >= 0.25 then
-                do_raw_seek(last_seek_time, true)
-            end
-        end
         return
     end
     do_raw_seek(last_seek_time, fast)
@@ -1163,6 +1173,7 @@ local function check_new_thumb()
 
         local had_frame = has_valid_frame
         has_valid_frame = true
+        worker_retry_count = 0
 
         if not had_frame or (real_w and (real_w ~= last_real_w or real_h ~= last_real_h)) then
             last_real_w, last_real_h = real_w, real_h
@@ -1421,6 +1432,7 @@ local function update_property(name, value)
         if value and type(value) == "table" and value.stdout and value.stdout ~= "" then
             local sb_j = mp.utils.parse_json(value.stdout)
             if sb_j and sb_j.http_headers then
+                cached_auth_path = properties["path"]
                 cached_user_agent = sb_j.http_headers["User-Agent"]
                 cached_referer = sb_j.http_headers["Referer"] or sb_j.webpage_url
                 local h_list = {}
@@ -1979,10 +1991,6 @@ local function file_load()
     pending_respawn = false
     pending_respawn_time = nil
 
-    cached_user_agent = nil
-    cached_referer = nil
-    cached_header_fields = nil
-
     run("quit")
     if winapi then
         winapi.close_pipe()
@@ -2081,6 +2089,16 @@ mp.observe_property("duration", "native", on_duration)
 mp.register_script_message("thumb", thumb)
 mp.register_script_message("clear", clear)
 
+local function reset_network_auth()
+    cached_user_agent = nil
+    cached_referer = nil
+    cached_header_fields = nil
+    cached_auth_path = nil
+    worker_retry_count = 0
+end
+
+mp.register_event("start-file", reset_network_auth)
+mp.register_event("end-file", reset_network_auth)
 mp.register_event("file-loaded", file_load)
 mp.register_event("shutdown", shutdown)
 
