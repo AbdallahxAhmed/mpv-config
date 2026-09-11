@@ -803,9 +803,6 @@ local function spawn(time)
                 end
                 spawn_working = true
             end
-            if show_thumbnail and respawn_thumbnailer and last_seek_time then
-                respawn_thumbnailer(last_seek_time)
-            end
         end
     )
 end

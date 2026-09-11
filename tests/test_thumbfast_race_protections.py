@@ -593,6 +593,9 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertIn("local max_worker_retries = 2", self.thumbfast_lua)
         self.assertIn("thumbnail worker failed: status=", self.thumbfast_lua)
         self.assertIn("worker_retry_count < max_worker_retries", self.thumbfast_lua)
+        spawn_idx = self.thumbfast_lua.find("local function spawn(time)")
+        spawn_body = self.thumbfast_lua[spawn_idx:spawn_idx + 6000]
+        self.assertNotIn("spawn_working = true\n            end\n            if show_thumbnail and respawn_thumbnailer and last_seek_time then", spawn_body)
 
     def test_clear_removes_overlay_before_script_name_check(self):
         """clear() must hide and pump overlay before checking script_name to prevent stuck overlays."""
