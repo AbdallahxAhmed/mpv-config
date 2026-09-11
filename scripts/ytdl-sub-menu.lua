@@ -165,6 +165,12 @@ local function find_cookies_file()
 end
 
 local function find_python()
+    if package.config:sub(1,1) ~= '\\' then
+        for _, bin in ipairs({'/usr/bin/python3', '/usr/local/bin/python3', 'python3', 'python'}) do
+            if utils.file_info(bin) then return bin end
+        end
+        return 'python3'
+    end
     local localappdata = (os.getenv('LOCALAPPDATA') or ''):gsub('\\', '/')
     local programfiles = (os.getenv('ProgramFiles') or ''):gsub('\\', '/')
     local candidates = {

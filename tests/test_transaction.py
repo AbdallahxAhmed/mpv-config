@@ -163,7 +163,7 @@ class TransactionTests(unittest.TestCase):
                 self.update()
         leftovers = list(self.root.glob(".config.recovery-*"))
         self.assertEqual(len(leftovers), 1)
-        self.assertIn(str(leftovers[0]), str(caught.exception))
+        self.assertIn(leftovers[0].name, str(caught.exception))
         self.assertTrue((leftovers[0] / "journal.json").is_file())
         self.assertEqual((leftovers[0] / "old/scripts/managed.txt").read_text(), "old")
         self.assertTrue(list(self.root.glob("config.backup.*")))

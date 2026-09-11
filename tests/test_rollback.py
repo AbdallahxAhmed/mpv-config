@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 from deploy.deployer import rollback_config
+from deploy.transaction import canonical
 
 
 class TestRollback(unittest.TestCase):
@@ -30,7 +31,7 @@ class TestRollback(unittest.TestCase):
             real_replace = os.replace
 
             def record_replace(src, dst, *args, **kwargs):
-                if os.path.dirname(os.path.abspath(dst)) == os.path.abspath(config_dir):
+                if canonical(os.path.dirname(dst)) == canonical(config_dir):
                     renamed_into_config.append(os.path.basename(dst))
                 return real_replace(src, dst, *args, **kwargs)
 
@@ -88,7 +89,7 @@ class TestRollback(unittest.TestCase):
                 # Fail the first rename into the live config directory, then
                 # let the engine's own recovery renames proceed normally.
                 if (not state["failed"]
-                        and os.path.dirname(os.path.abspath(dst)) == os.path.abspath(config_dir)):
+                        and canonical(os.path.dirname(dst)) == canonical(config_dir)):
                     state["failed"] = True
                     raise RuntimeError("boom")
                 return real_replace(src, dst, *args, **kwargs)
