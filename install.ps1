@@ -18,7 +18,8 @@
 
 [CmdletBinding()]
 param(
-    [switch]$SyncDeps
+    [switch]$SyncDeps,
+    [string]$Branch = "main"
 )
 
 # IMPORTANT: We deliberately do NOT use `$ErrorActionPreference = "Stop"` at
@@ -29,7 +30,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 $REPO        = "AbdallahxAhmed/mpv-config"
-$BRANCH      = "main"
+$BRANCH      = if ($Branch) { $Branch } else { "main" }
 $INSTALL_DIR = "$env:USERPROFILE\.mpv-deploy"
 $SCRIPT_URL  = "https://raw.githubusercontent.com/$REPO/$BRANCH/install.ps1"
 
@@ -130,6 +131,7 @@ if (-not $isAdmin) {
         "-File", $tempScript
     )
     if ($SyncDeps) { $elevatedArgs += "-SyncDeps" }
+    if ($Branch -and $Branch -ne "main") { $elevatedArgs += @("-Branch", $Branch) }
 
     try {
         Start-Process -FilePath $hostExe -Verb RunAs -ArgumentList $elevatedArgs -Environment @{ "MPV_BOOTSTRAPPED" = "1" } -ErrorAction Stop
@@ -440,7 +442,7 @@ if ($useGit) {
     $prevPref = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
-        git clone --depth=1 "https://github.com/$REPO.git" $INSTALL_DIR 2>&1 | Out-Null
+        git clone --depth=1 -b $BRANCH "https://github.com/$REPO.git" $INSTALL_DIR 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  ERROR: git clone failed (exit $LASTEXITCODE)" -ForegroundColor Red
             if (-not $env:MPV_NO_PAUSE) { Read-Host "Press Enter to close" }
