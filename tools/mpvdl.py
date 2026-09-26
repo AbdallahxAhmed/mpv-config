@@ -66,10 +66,26 @@ def find_mpv() -> Optional[str]:
     return None
 
 
+def ensure_sync_daemon():
+    """Ensure local MPV sync daemon is running on port 8765."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8765/health", timeout=0.3) as r:
+            return
+    except Exception:
+        pass
+    try:
+        from tools.native_host.cookie_sync_host import start_http_server
+        start_http_server()
+    except Exception:
+        pass
+
+
 class MpvDownloader:
     """Core download controller coordinating Registry, Session, and Engine."""
 
     def __init__(self, output_dir: Optional[str] = None):
+        ensure_sync_daemon()
         self.output_dir = output_dir or get_default_download_dir()
         self.registry = SiteRegistry()
         self.session = SessionManager()

@@ -67,12 +67,24 @@ async function syncDomainCookies(domain) {
         const netscapeText = formatNetscapeCookies(allCookies);
         const userAgent = navigator.userAgent;
 
+        // 1. Send via Native Messaging
         sendToNativeHost({
             action: "sync_cookies",
             domain: domain,
             cookies: netscapeText,
             user_agent: userAgent
         });
+
+        // 2. Send via local HTTP daemon (fallback / dual-sync)
+        fetch("http://127.0.0.1:8765/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                domain: domain,
+                cookies: netscapeText,
+                user_agent: userAgent
+            })
+        }).catch(() => {});
     } catch (err) {
         console.warn(`${LOG_PREFIX} Cookie sync error for ${domain}:`, err);
     }
@@ -103,6 +115,33 @@ if (chrome.webRequest && chrome.webRequest.onBeforeRequest) {
             if (url && (url.includes(".m3u8") || url.includes("/manifest")) && !url.includes("google")) {
                 if (details.tabId > 0) {
                     capturedStreams.set(details.tabId, url);
+                    try {
+                        chrome.tabs.get(details.tabId, (tab) => {
+                            const pageUrl = tab ? tab.url : "";
+                            const title = tab ? tab.title : "";
+                            let slug = "";
+                            if (pageUrl) {
+                                slug = pageUrl.split("/").filter(Boolean).pop();
+                            }
+                            sendToNativeHost({
+                                action: "stream_captured",
+                                slug: slug,
+                                url: url,
+                                title: title,
+                                page_url: pageUrl
+                            });
+                            fetch("http://127.0.0.1:8765/stream", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    slug: slug,
+                                    url: url,
+                                    title: title,
+                                    page_url: pageUrl
+                                })
+                            }).catch(() => {});
+                        });
+                    } catch (_) {}
                 }
             }
         },

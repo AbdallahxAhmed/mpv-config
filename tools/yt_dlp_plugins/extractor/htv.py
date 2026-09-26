@@ -1,7 +1,7 @@
 import os
 import json
 import time
-
+import urllib.request
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 
 try:
@@ -17,6 +17,11 @@ except ImportError:
         AES = None
         SHA256 = None
         get_random_bytes = None
+
+try:
+    from curl_cffi import requests as cffi_requests
+except ImportError:
+    cffi_requests = None
 
 from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import ExtractorError, urljoin
@@ -46,7 +51,7 @@ except ImportError:
             ENGINE = "native"
             QUALITY_CEILING = 1080
             REQUIRES_COOKIES = True
-            PREFERRED_BROWSERS = ("brave", "chrome", "edge", "firefox")
+            PREFERRED_BROWSERS = ("helium", "brave", "chrome", "edge")
             EXTRA_YTDL_OPTS = {}
             @classmethod
             def ytdl_opts(cls):
@@ -64,7 +69,7 @@ class HanimeTVIE(SiteKit, InfoExtractor):
     _VALID_URL = r'https?://(?:www\.)?hanime\.tv/(?:videos/hentai|hentai/video|playlists/[0-9a-z]+/video)/(?P<id>[0-9a-z\-]+)'
     _AES_KEY = bytes.fromhex("5d657a4dcb0bad1c637ff2e221059b10ff17ae39fe855003e846918941f4ebe3")
     _AES_HEADER = bytes.fromhex("6874762d696e7365637572652d7631")
-    
+
     _TESTS = [{
         'url': 'https://hanime.tv/videos/hentai/itadaki-seieki',
         'info_dict': {
@@ -77,8 +82,6 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         }
     }]
 
-    # This is not an AEAD scheme as much as it is a method of obscuring messages as the KEY and TAG for AES-256 GCM are known
-    # beforehand. Note that, IV could be safely transmitted in the public without breaching the security.
     @classmethod
     def _digest_token(cls, o):
         o = json.dumps(o)
@@ -106,27 +109,64 @@ class HanimeTVIE(SiteKit, InfoExtractor):
 
         return json.loads(plaintext.decode('utf-8'))
 
-    # Based on @barely-sad-one's code. This was perhaps reverse-engineered from the WASM code with some form of LLM assistance,
-    # but it is not disclosed in the pull-request because yt-dlp has a ban on LLMs.
     @classmethod
     def _generate_credentials_local(cls):
         ts = int(time.time())
         digest = SHA256.new(f'{ts},Xkdi29,https://hanime.tv,mn2,{ts}'.encode('utf-8')).hexdigest()
         return digest, ts
 
+    def _get_cached_m3u8(self, video_id):
+        """Query local MPV sync daemon and active streams file for intercepted M3U8 manifest."""
+        # 1. Local HTTP Daemon
+        try:
+            req = urllib.request.Request(f'http://127.0.0.1:8765/stream?slug={video_id}')
+            with urllib.request.urlopen(req, timeout=1.0) as r:
+                data = json.loads(r.read().decode('utf-8'))
+                if data.get('status') == 'ok' and data.get('stream', {}).get('url'):
+                    return data['stream']['url']
+        except Exception:
+            pass
+
+        # 2. Local disk cache
+        try:
+            cache_file = os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "active_streams.json")
+            if os.path.isfile(cache_file):
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    disk_cache = json.load(f)
+                if video_id in disk_cache and disk_cache[video_id].get("url"):
+                    return disk_cache[video_id]["url"]
+        except Exception:
+            pass
+
+        return None
+
     def _real_extract(self, url):
         video_id = self._match_id(url)
+
+        # 1. Check if direct M3U8 stream manifest was intercepted by browser companion
+        cached_m3u8 = self._get_cached_m3u8(video_id)
+        if cached_m3u8:
+            self.to_screen(f'[hanime] Using intercepted high-speed stream manifest from browser companion: {video_id}')
+            formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p')
+            return {
+                'id': video_id,
+                'title': video_id.replace('-', ' ').title(),
+                'formats': formats
+            }
+
         try:
             page = self._download_webpage(url, video_id, fatal=False, headers={'User-Agent': USER_AGENT})
         except Exception:
             page = None       
+
         ssignature, stime = self._generate_credentials_local()
         payload = self._digest_token({
             'timestamp_unix': int(time.time()),
             'directive': 'htv_player_handshake',
             'slug': video_id,
         })
-        # Auto-discover local cookie file if not already passed to yt-dlp
+
+        # Auto-discover local cookie files
         cookie_header = None
         candidate_cookies = [
             os.path.join(os.environ.get("APPDATA", ""), "yt-dlp", "cookies.txt"),
@@ -165,33 +205,67 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         if cookie_header:
             handshake_headers['Cookie'] = cookie_header
 
-        try:
-            _, handle = self._download_webpage_handle(
-                "https://auth.hanime.tv/api/v11/handshake",
-                video_id,
-                headers=handshake_headers,
-                data=json.dumps({'token': payload}).encode('ascii'),
-                note='Downloading video manifest'
-            )
-        except Exception as exc:
-            if '403' in str(exc) or 'Forbidden' in str(exc):
-                raise ExtractorError(
-                    'Cloudflare Turnstile challenge active on hanime.tv (HTTP 403 Forbidden).\n'
-                    'Fix: Export cookies from your browser (using extension "Get cookies.txt LOCALLY") '
-                    'and save to %APPDATA%\\yt-dlp\\cookies.txt or Desktop\\mpv-config\\cookies.txt',
-                    expected=True
+        manifest = None
+
+        # 2. Try curl_cffi modern browser TLS impersonation if available
+        if cffi_requests:
+            try:
+                resp = cffi_requests.post(
+                    "https://auth.hanime.tv/api/v11/handshake",
+                    headers=handshake_headers,
+                    data=json.dumps({'token': payload}),
+                    impersonate="chrome124",
+                    timeout=15
                 )
-            raise
+                if resp.status_code == 200:
+                    xtoken = resp.headers.get('X-Token') or resp.headers.get('x-token')
+                    if xtoken:
+                        manifest = self._parse_token(xtoken)
+            except Exception:
+                pass
 
-        # Manifest is transmitted in headers to confuse scrapers; whether or not it is optimal is not important.
-        xtoken = handle.headers.get('X-Token') or handle.headers.get('x-token')
-        if not xtoken:
+        # 3. Fallback to standard yt-dlp HTTP handle
+        if not manifest:
+            try:
+                _, handle = self._download_webpage_handle(
+                    "https://auth.hanime.tv/api/v11/handshake",
+                    video_id,
+                    headers=handshake_headers,
+                    data=json.dumps({'token': payload}).encode('ascii'),
+                    note='Downloading video manifest'
+                )
+                xtoken = handle.headers.get('X-Token') or handle.headers.get('x-token')
+                if xtoken:
+                    manifest = self._parse_token(xtoken)
+            except Exception as exc:
+                # Check one more time if browser captured stream during request
+                stream = self._get_cached_m3u8(video_id)
+                if stream:
+                    formats = self._extract_m3u8_formats(stream, video_id, ext='mp4', m3u8_id='1080p')
+                    return {
+                        'id': video_id,
+                        'title': video_id.replace('-', ' ').title(),
+                        'formats': formats
+                    }
+
+                if '403' in str(exc) or 'Forbidden' in str(exc):
+                    raise ExtractorError(
+                        f'Cloudflare Turnstile challenge active on hanime.tv (HTTP 403 Forbidden).\n'
+                        f'Plug & Play Auto-Fix:\n'
+                        f'1. Open this video once in your browser (Helium / Brave / Chrome):\n'
+                        f'   {url}\n'
+                        f'2. The MPV Companion extension & userscript will automatically sync the fresh clearance\n'
+                        f'   and stream manifest to yt-dlp / MPV in real time (zero manual export needed!).\n'
+                        f'3. Or click "🎬 Play in MPV" or "⚡ Turbo Download" on the floating player pill.',
+                        expected=True
+                    )
+                raise
+
+        if not manifest:
             raise ExtractorError('No X-Token found in response headers from auth.hanime.tv. Cloudflare challenge or auth error.', expected=True)
-        manifest = self._parse_token(xtoken)
-        formats = []
 
+        formats = []
         for source in manifest['sources']:
-            # NOTE Premium streams are not supported and will not be supported in future.
             if source['kind'] == 'normal':
                 result = self._extract_m3u8_formats(
                     urljoin('https://hanime.tv', source['src']), video_id, ext='mp4', m3u8_id=source['label'])

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-register_extension.py — Automatically register MPV Companion Extension and Native Host in Windows Registry.
+register_extension.py — Automatically pack and register MPV Companion Extension and Native Host in Windows Registry.
 
-Works for Brave, Google Chrome, and Microsoft Edge under HKCU (requires zero admin elevation).
+Works for Helium, Brave, Google Chrome, and Microsoft Edge under HKCU (zero admin elevation).
 Derives a persistent, deterministic Extension ID via 2048-bit RSA key pair.
+Generates valid CRX3 package and registers in Windows Registry.
 """
 
 from __future__ import annotations
@@ -12,8 +13,10 @@ import os
 import sys
 import json
 import base64
+import shutil
 import hashlib
 import winreg
+import subprocess
 from pathlib import Path
 
 # Setup encoding safety for Windows terminal
@@ -29,6 +32,8 @@ ext_dir = root_dir / "tools" / "extension"
 native_dir = root_dir / "tools" / "native_host"
 manifest_path = ext_dir / "manifest.json"
 key_pem_path = native_dir / "key.pem"
+key_pkcs8_path = native_dir / "key_pkcs8.pem"
+crx_path = root_dir / "tools" / "extension.crx"
 host_manifest_path = native_dir / "com.mpv.cookiesync.json"
 host_bat_path = native_dir / "cookie_sync.bat"
 
@@ -55,10 +60,13 @@ def ensure_key_and_manifest() -> tuple[str, str]:
         key = RSA.generate(2048)
         key_pem = key.export_key(format='PEM')
         key_pem_path.write_bytes(key_pem)
+        key_pkcs8_path.write_bytes(key.export_key(format='PEM', pkcs=8))
         log(f"Key saved to {key_pem_path}")
     else:
         key_pem = key_pem_path.read_bytes()
         key = RSA.import_key(key_pem)
+        if not key_pkcs8_path.exists():
+            key_pkcs8_path.write_bytes(key.export_key(format='PEM', pkcs=8))
 
     # 2. Get public key in DER format
     pub_der = key.publickey().export_key(format='DER')
@@ -73,9 +81,47 @@ def ensure_key_and_manifest() -> tuple[str, str]:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["key"] = pub_b64
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        log(f"Updated manifest.json. Deterministic Extension ID: {ext_id}")
+        log(f"Deterministic Extension ID: {ext_id}")
 
     return pub_b64, ext_id
+
+def find_chromium_binary() -> str | None:
+    """Find any available Chromium browser executable to pack the extension."""
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\imput\Helium\Application\chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return None
+
+def pack_crx():
+    """Pack extension into a signed .crx file using headless Chromium."""
+    browser_bin = find_chromium_binary()
+    if not browser_bin:
+        log("Notice: No Chromium binary found to pack CRX. Using directory registration.")
+        return
+
+    key_to_use = str(key_pkcs8_path if key_pkcs8_path.exists() else key_pem_path)
+    cmd = [
+        browser_bin,
+        "--headless=new",
+        f"--pack-extension={ext_dir}",
+        f"--pack-extension-key={key_to_use}"
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if crx_path.exists():
+            log(f"Successfully packed CRX extension: {crx_path} ({crx_path.stat().st_size} bytes)")
+    except Exception as e:
+        log(f"Notice: CRX packing attempt: {e}")
 
 def create_native_host_manifest(ext_id: str):
     """Generate the Native Messaging Host manifest JSON with absolute path to batch launcher."""
@@ -91,8 +137,8 @@ def create_native_host_manifest(ext_id: str):
     host_manifest_path.write_text(json.dumps(host_manifest, indent=2), encoding="utf-8")
     log(f"Generated Native Messaging Host manifest: {host_manifest_path}")
 
-def register_browser_extension(browser_name: str, reg_key_path: str, ext_id: str, ext_path: str):
-    """Write unpacked extension path to HKCU\\Software\\...\\Extensions\\<id>."""
+def register_browser_extension(browser_name: str, reg_key_path: str, ext_id: str, target_path: str):
+    """Write extension path (CRX or folder) to HKCU\\Software\\...\\Extensions\\<id>."""
     try:
         key = winreg.CreateKeyEx(
             winreg.HKEY_CURRENT_USER,
@@ -100,7 +146,7 @@ def register_browser_extension(browser_name: str, reg_key_path: str, ext_id: str
             0,
             winreg.KEY_SET_VALUE
         )
-        winreg.SetValueEx(key, "path", 0, winreg.REG_SZ, ext_path)
+        winreg.SetValueEx(key, "path", 0, winreg.REG_SZ, target_path)
         winreg.SetValueEx(key, "version", 0, winreg.REG_SZ, "1.0")
         winreg.CloseKey(key)
         log(f"Extension registered in {browser_name} registry.")
@@ -125,20 +171,23 @@ def register_native_messaging_host(browser_name: str, reg_key_path: str, host_js
 def main():
     log("Registering MPV Media & Cookie Companion in Chromium browsers...")
     _, ext_id = ensure_key_and_manifest()
+    pack_crx()
     create_native_host_manifest(ext_id)
 
-    ext_folder = str(ext_dir)
+    target_path = str(crx_path) if crx_path.exists() else str(ext_dir)
     host_json = str(host_manifest_path)
 
-    # Browser targets (Brave, Chrome, Edge)
+    # Browser targets (Helium, Brave, Chrome, Edge)
     targets = [
-        ("Brave Browser", "Software\\BraveSoftware\\Brave-Browser"),
+        ("Helium Browser", "Software\\Helium"),
+        ("imput Helium", "Software\\imput\\Helium"),
         ("Google Chrome", "Software\\Google\\Chrome"),
+        ("Brave Browser", "Software\\BraveSoftware\\Brave-Browser"),
         ("Microsoft Edge", "Software\\Microsoft\\Edge"),
     ]
 
     for browser_name, base_key in targets:
-        register_browser_extension(browser_name, f"{base_key}\\Extensions", ext_id, ext_folder)
+        register_browser_extension(browser_name, f"{base_key}\\Extensions", ext_id, target_path)
         register_native_messaging_host(browser_name, f"{base_key}\\NativeMessagingHosts", host_json)
 
     log("MPV Companion registered successfully. Ready for plug-and-play browsing!")
