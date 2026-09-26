@@ -8,9 +8,14 @@ try:
     from Cryptodome.Hash import SHA256
     from Cryptodome.Random import get_random_bytes
 except ImportError:
-    from Crypto.Cipher import AES
-    from Crypto.Hash import SHA256
-    from Crypto.Random import get_random_bytes
+    try:
+        from Crypto.Cipher import AES  # type: ignore
+        from Crypto.Hash import SHA256  # type: ignore
+        from Crypto.Random import get_random_bytes  # type: ignore
+    except ImportError:
+        AES = None
+        SHA256 = None
+        get_random_bytes = None
 
 from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import ExtractorError, urljoin

@@ -45,9 +45,9 @@ try:
     from Cryptodome.Random import get_random_bytes
 except ImportError:
     try:
-        from Crypto.Cipher import AES
-        from Crypto.Hash import SHA256
-        from Crypto.Random import get_random_bytes
+        from Crypto.Cipher import AES  # type: ignore
+        from Crypto.Hash import SHA256  # type: ignore
+        from Crypto.Random import get_random_bytes  # type: ignore
     except ImportError:
         AES = None
         SHA256 = None
