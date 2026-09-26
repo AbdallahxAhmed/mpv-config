@@ -625,9 +625,15 @@ def _deploy_ytdlp_plugins_and_config(env, repo_dir):
                         if os.path.isdir(os.path.dirname(prog_mpv)):
                             os.makedirs(prog_mpv, exist_ok=True)
                             shutil.copy2(os.path.join(extractor_src, fname), os.path.join(prog_mpv, fname))
-                    except Exception:
-                        pass
-        ui.success("Deployed custom yt-dlp extractor plugins and global turbo config")
+        # 3. Register Browser Extension & Native Messaging Host
+        reg_script = os.path.join(repo_dir, "tools", "register_extension.py")
+        if os.path.isfile(reg_script):
+            try:
+                import subprocess
+                subprocess.run([sys.executable, reg_script], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        ui.success("Deployed custom yt-dlp extractor plugins, companion extension, and global turbo config")
     except Exception as exc:
         ui.warn(f"Notice: yt-dlp plugin deployment: {exc}")
 

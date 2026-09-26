@@ -1,0 +1,9 @@
+{
+  "name": "com.mpv.cookiesync",
+  "description": "MPV and yt-dlp Automatic Cookie Sync Host",
+  "path": "C:\\Users\\Abdallah_Ahmed\\Desktop\\mpv-config\\tools\\native_host\\cookie_sync.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://iekehlbkmlonnjdknklbkkjmmfcmheaf/"
+  ]
+}

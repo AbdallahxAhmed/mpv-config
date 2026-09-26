@@ -394,6 +394,56 @@ function Sync-MpvDependencies {
             & python.exe -m pip install --quiet --upgrade pycryptodomex 2>$null
         }
     } catch { }
+
+    # 9. Register MPV Companion Browser Extension and Native Messaging Host (Thunder-style auto-install)
+    try {
+        $regScriptCandidates = @(
+            (Join-Path $PSScriptRoot "tools\register_extension.py"),
+            (Join-Path $INSTALL_DIR "tools\register_extension.py"),
+            "$env:USERPROFILE\Desktop\mpv-config\tools\register_extension.py"
+        )
+        $regScript = $regScriptCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        if ($regScript) {
+            & python.exe $regScript 2>$null
+            Write-Host "  + Registered MPV Companion Browser Extension in Brave/Chrome/Edge" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  ! Extension register notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 10. Install PowerShell convenience aliases (dl, mpv-dl)
+    try {
+        $profileDir = Split-Path -Parent $PROFILE
+        if (-not (Test-Path $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
+        $aliasMarker = "# MPV-TURBO-ALIASES"
+        $aliasScript = @"
+
+$aliasMarker
+function dl {
+    param([Parameter(ValueFromRemainingArguments = `$true)]`$args)
+    `$ytdl = if (Test-Path "$env:ProgramFiles\mpv\yt-dlp\yt-dlp.exe") { "$env:ProgramFiles\mpv\yt-dlp\yt-dlp.exe" } else { "yt-dlp" }
+    & `$ytdl @args
+}
+function mpv-dl {
+    param([Parameter(ValueFromRemainingArguments = `$true)]`$args)
+    `$mpvdl = "$env:USERPROFILE\.mpv-deploy\tools\mpvdl.py"
+    if (-not (Test-Path `$mpvdl)) { `$mpvdl = "$env:USERPROFILE\Desktop\mpv-config\tools\mpvdl.py" }
+    if (Test-Path `$mpvdl) { & python `$mpvdl @args } else { & yt-dlp @args }
+}
+"@
+        if (Test-Path $PROFILE) {
+            $existing = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
+            if (-not $existing -or -not $existing.Contains($aliasMarker)) {
+                Add-Content -Path $PROFILE -Value $aliasScript -Encoding utf8
+                Write-Host "  + Added PowerShell aliases 'dl' and 'mpv-dl' to $PROFILE" -ForegroundColor Green
+            }
+        } else {
+            Set-Content -Path $PROFILE -Value $aliasScript -Encoding utf8 -Force
+            Write-Host "  + Created PowerShell profile with aliases 'dl' and 'mpv-dl' at $PROFILE" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "  ! Profile alias notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
 }
 
 
@@ -529,6 +579,9 @@ Write-Host ""
 Set-Location $INSTALL_DIR
 & $python setup.py
 $deployExit = $LASTEXITCODE
+
+# Run automated dependency suite, browser extension registration & profile aliases
+Sync-MpvDependencies
 
 # ─── Ensure Shortcuts enforce User WorkingDirectory ─────────────────
 try {

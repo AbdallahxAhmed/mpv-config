@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "MPV Media & Cookie Companion",
+  "short_name": "MPV Companion",
+  "version": "1.0",
+  "description": "Seamless plug-and-play stream interception, Cloudflare cookie sync, and 1-click playback for MPV & yt-dlp",
+  "permissions": [
+    "cookies",
+    "contextMenus",
+    "nativeMessaging",
+    "tabs",
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "*://*.hanime.tv/*",
+    "*://*.perverzija.com/*",
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "MPV Companion",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvnul7ecDPOWyUJTYG7B++Y6uO/99Yxsm1OL52mtMk6lOSJ9bs2HBIduA1mJwGlJk8Pi3h7cF8diw6dlEHzIGOSLIYylGJCZ51JF/2K+sldWjPDeZ8oZQ+r8ukYe3qxOrlW14LQj/W+ClIQ2cPZ5qsp6xiYC7OT81/01o7GLpFcS70e9CLMwt4FYBWtvJ80ItAmAEx9rBFuaWvRmaz0n0sN8wsk4eUOI2k5uBfm9v9jGZbIkEj9r0SakuDxZR4jziE5ygmWf/VY9SFXj5USkhk5bQpZxzpPRtbZyl98m7+4WjiosQZTGGARc8NPu3fStnh8x54okOcnx36nXVo9zEZwIDAQAB"
+}
