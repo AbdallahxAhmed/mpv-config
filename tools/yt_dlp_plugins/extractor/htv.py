@@ -1,3 +1,4 @@
+import os
 import json
 import time
 
@@ -125,20 +126,62 @@ class HanimeTVIE(SiteKit, InfoExtractor):
             'directive': 'htv_player_handshake',
             'slug': video_id,
         })
-        _, handle = self._download_webpage_handle("https://auth.hanime.tv/api/v11/handshake", video_id,
-            headers={
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'Origin': 'https://hanime.tv',
-                'Referer': 'https://hanime.tv/',
-                'User-Agent': USER_AGENT,
-                'X-Csrf-Token': 'null',
-                'X-Signature': ssignature,
-                'X-Time': str(stime),
-                'X-Signature-Version': 'web2'
-            },
-            data=json.dumps({'token': payload}).encode('ascii'),
-            note='Downloading video manifest')
+        # Auto-discover local cookie file if not already passed to yt-dlp
+        cookie_header = None
+        candidate_cookies = [
+            os.path.join(os.environ.get("APPDATA", ""), "yt-dlp", "cookies.txt"),
+            os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "cookies", "hanime.tv.txt"),
+            os.path.join(os.environ.get("USERPROFILE", ""), "Desktop", "mpv-config", "cookies.txt"),
+            "cookies.txt",
+        ]
+        for cpath in candidate_cookies:
+            if cpath and os.path.isfile(cpath):
+                try:
+                    c_items = []
+                    with open(cpath, 'r', encoding='utf-8', errors='ignore') as f:
+                        for line in f:
+                            if line.startswith('#') or not line.strip():
+                                continue
+                            parts = line.strip().split('\t')
+                            if len(parts) >= 7 and ('hanime' in parts[0] or 'cloudflare' in parts[0] or 'cf' in parts[5].lower()):
+                                c_items.append(f"{parts[5]}={parts[6]}")
+                    if c_items:
+                        cookie_header = '; '.join(c_items)
+                        break
+                except Exception:
+                    pass
+
+        handshake_headers = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Origin': 'https://hanime.tv',
+            'Referer': 'https://hanime.tv/',
+            'User-Agent': USER_AGENT,
+            'X-Csrf-Token': 'null',
+            'X-Signature': ssignature,
+            'X-Time': str(stime),
+            'X-Signature-Version': 'web2'
+        }
+        if cookie_header:
+            handshake_headers['Cookie'] = cookie_header
+
+        try:
+            _, handle = self._download_webpage_handle(
+                "https://auth.hanime.tv/api/v11/handshake",
+                video_id,
+                headers=handshake_headers,
+                data=json.dumps({'token': payload}).encode('ascii'),
+                note='Downloading video manifest'
+            )
+        except Exception as exc:
+            if '403' in str(exc) or 'Forbidden' in str(exc):
+                raise ExtractorError(
+                    'Cloudflare Turnstile challenge active on hanime.tv (HTTP 403 Forbidden).\n'
+                    'Fix: Export cookies from your browser (using extension "Get cookies.txt LOCALLY") '
+                    'and save to %APPDATA%\\yt-dlp\\cookies.txt or Desktop\\mpv-config\\cookies.txt',
+                    expected=True
+                )
+            raise
 
         # Manifest is transmitted in headers to confuse scrapers; whether or not it is optimal is not important.
         xtoken = handle.headers.get('X-Token') or handle.headers.get('x-token')
