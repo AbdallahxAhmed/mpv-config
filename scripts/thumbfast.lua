@@ -60,10 +60,21 @@ local msg = mp.msg
 mp.options.read_options(options, "thumbfast")
 
 local properties = {}
-local cached_user_agent = nil
-local cached_referer = nil
-local cached_header_fields = nil
-local cached_auth_path = nil
+
+local stream_ctx = {
+    generation_id = 0,
+    original_path = nil,
+    resolved_url = nil,
+    user_agent = nil,
+    referer = nil,
+    header_fields = nil,
+    cookies_file = nil,
+    auth_path = nil,
+    is_ready = false,
+    created_at = nil,
+}
+
+local pending_spawn_target = nil
 
 local function get_formatted_headers()
     local fields = properties["http-header-fields"]
@@ -77,13 +88,28 @@ local function get_formatted_headers()
     elseif type(fields) == "string" and fields ~= "" then
         table.insert(list, fields)
     end
-    if #list == 0 and cached_header_fields and cached_header_fields ~= "" then
-        table.insert(list, cached_header_fields)
+    local ctx_auth_ok = (not stream_ctx.auth_path) or (stream_ctx.auth_path == properties["path"])
+    if #list == 0 and stream_ctx.header_fields and stream_ctx.header_fields ~= "" and ctx_auth_ok then
+        table.insert(list, stream_ctx.header_fields)
     end
     if #list > 0 then
         return table.concat(list, ",")
     end
     return nil
+end
+
+local function reset_stream_ctx()
+    stream_ctx.generation_id = stream_ctx.generation_id + 1
+    stream_ctx.original_path = nil
+    stream_ctx.resolved_url = nil
+    stream_ctx.user_agent = nil
+    stream_ctx.referer = nil
+    stream_ctx.header_fields = nil
+    stream_ctx.cookies_file = nil
+    stream_ctx.auth_path = nil
+    stream_ctx.is_ready = false
+    stream_ctx.created_at = nil
+    pending_spawn_target = nil
 end
 local pre_0_30_0 = mp.command_native_async == nil
 local pre_0_33_0 = true
@@ -585,7 +611,16 @@ local function info(w, h)
     end
 
     local is_available = not disabled
-    local is_ready = not disabled and (has_valid_frame or (using_storyboards == true))
+    local storyboard_ready = false
+    if using_storyboards == true then
+        for _, sb_path in pairs(storyboard_thumbnails) do
+            if sb_path and mp.utils.file_info(sb_path .. ".bgra") then
+                storyboard_ready = true
+                break
+            end
+        end
+    end
+    local is_ready = not disabled and (has_valid_frame or storyboard_ready)
     local json, err = mp.utils.format_json({width=w * options.scale_factor, height=h * options.scale_factor, scale_factor=options.scale_factor, disabled=disabled, available=is_available, ready=is_ready, socket=options.socket, thumbnail=options.thumbnail, overlay_id=options.overlay_id}) -- TODO: add storyboard info
     if pre_0_30_0 then
         mp.command_native({"script-message", "thumbfast-info", json})
@@ -608,6 +643,12 @@ local function remove_thumbnail_files()
     os.remove(options.thumbnail..".bgra")
     for i = 1, 3 do
         os.remove(options.thumbnail.."."..i..".bgra")
+    end
+    for seq = 0, file_seq do
+        for slot = 1, 3 do
+            os.remove(base_thumbnail.."_"..seq.."."..seq.."."..slot..".bgra")
+            os.remove(base_thumbnail.."_"..seq.."."..slot..".bgra")
+        end
     end
     active_bgra_path = nil
     frame_slot = 0
@@ -643,6 +684,7 @@ local function spawn(time)
     if is_net and type(path) == "string" and path:find("^https?://") then
         local is_raw_webpage = (open_fn == nil or open_fn == path or open_fn == "") and not path:find("%.mp4[%?#]?") and not path:find("%.mkv[%?#]?") and not path:find("%.webm[%?#]?") and not path:find("%.m3u8[%?#]?")
         if is_raw_webpage then
+            pending_spawn_target = time
             return
         end
     end
@@ -667,7 +709,7 @@ local function spawn(time)
     has_vid = vid or 0
 
     local args = {
-        mpv_path, "--no-config", "--msg-level=all=error", "--idle", "--pause", "--keep-open=always", "--really-quiet", "--no-terminal",
+        mpv_path, "--no-config", "--msg-level=all=warn", "--idle", "--pause", "--keep-open=always", "--no-terminal",
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
         "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
         "--start="..time, seek_mode,
@@ -681,20 +723,20 @@ local function spawn(time)
         "--ovc=rawvideo", "--of=image2", "--ofopts=update=1", "--o="..thumbnail_path
     }
 
-    local is_same_path = (not cached_auth_path) or (cached_auth_path == path)
-    local user_agent = properties["user-agent"] or (is_same_path and cached_user_agent)
+    local ctx_auth_ok = (not stream_ctx.auth_path) or (stream_ctx.auth_path == path)
+    local user_agent = properties["user-agent"] or (ctx_auth_ok and stream_ctx.user_agent)
     if user_agent and user_agent ~= "" then
         table.insert(args, "--user-agent="..user_agent)
     end
 
-    local referer = properties["referrer"] or (is_same_path and cached_referer)
+    local referer = properties["referrer"] or (ctx_auth_ok and stream_ctx.referer)
     if referer and referer ~= "" then
         table.insert(args, "--referrer="..referer)
     end
 
     local header_fields = get_formatted_headers()
-    if (not header_fields or header_fields == "") and is_same_path and cached_header_fields and cached_header_fields ~= "" then
-        header_fields = cached_header_fields
+    if (not header_fields or header_fields == "") and ctx_auth_ok and stream_ctx.header_fields and stream_ctx.header_fields ~= "" then
+        header_fields = stream_ctx.header_fields
     end
     if header_fields and header_fields ~= "" then
         table.insert(args, "--http-header-fields="..header_fields)
@@ -747,6 +789,7 @@ local function spawn(time)
 
     spawned = true
     spawn_waiting = true
+    pending_spawn_target = nil
 
     subprocess(args, true,
         function(success, result)
@@ -880,7 +923,7 @@ local function respawn_thumbnailer(seek_time)
     if winapi then
         winapi.update_socket(options.socket)
     end
-    spawn(seek_time or mp.get_property_number("time-pos", 0))
+    spawn(seek_time or pending_spawn_target or last_seek_time or mp.get_property_number("time-pos", 0))
     file_timer:resume()
 end
 
@@ -894,12 +937,12 @@ local max_add_retries = 2
 local function pump_overlay()
     if overlay_busy then return end
     local desired = desired_overlay
-    if desired == nil then return end  -- no pending change
+    if desired == nil then return end
     desired_overlay = nil
     overlay_busy = true
+    local captured_generation = overlay_generation
 
     if desired == false then
-        -- Want hidden
         if pre_0_30_0 then
             mp.command_native({"overlay-remove", options.overlay_id})
             overlay_busy = false
@@ -915,12 +958,11 @@ local function pump_overlay()
             end)
         end
     else
-        -- Want visible: desired is the overlay-add command table
-        mp.msg.trace("OVERLAY ADD path=" .. tostring(desired[5]))
+        mp.msg.trace("OVERLAY ADD path=" .. tostring(desired[5]) .. " gen=" .. tostring(captured_generation))
         if pre_0_30_0 then
             local res = mp.command_native(desired)
             overlay_busy = false
-            if res then
+            if res and captured_generation == overlay_generation then
                 overlay_visible = true
                 add_retry_count = 0
             else
@@ -929,17 +971,22 @@ local function pump_overlay()
             if desired_overlay ~= nil then pump_overlay() end
         else
             mp.command_native_async(desired, function(success, result, error)
-                mp.msg.trace("OVERLAY RESULT success=" .. tostring(success) .. " error=" .. tostring(error))
+                mp.msg.trace("OVERLAY RESULT success=" .. tostring(success) .. " error=" .. tostring(error) .. " captured_gen=" .. tostring(captured_generation) .. " current_gen=" .. tostring(overlay_generation))
                 overlay_busy = false
-                if success then
+                if success and captured_generation == overlay_generation then
                     overlay_visible = true
                     add_retry_count = 0
                 else
                     overlay_visible = false
-                    mp.msg.warn("thumbfast: overlay-add failed: " .. tostring(error))
-                    if show_thumbnail and desired_overlay == nil and add_retry_count < max_add_retries then
-                        add_retry_count = add_retry_count + 1
-                        desired_overlay = desired
+                    if success and captured_generation ~= overlay_generation then
+                        mp.msg.trace("OVERLAY RESULT discarded (stale generation): captured=" .. tostring(captured_generation) .. " current=" .. tostring(overlay_generation))
+                    end
+                    if not success then
+                        mp.msg.warn("thumbfast: overlay-add failed: " .. tostring(error))
+                        if show_thumbnail and desired_overlay == nil and add_retry_count < max_add_retries and captured_generation == overlay_generation then
+                            add_retry_count = add_retry_count + 1
+                            desired_overlay = desired
+                        end
                     end
                 end
                 if desired_overlay ~= nil then pump_overlay() end
@@ -948,15 +995,25 @@ local function pump_overlay()
     end
 end
 
+local overlay_generation = 0
+
 local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end
     local frame_file = active_bgra_path or (thumbnail_path..".bgra")
     if not mp.utils.file_info(frame_file) then return end
+    if active_bgra_path then
+        local prefix = thumbnail_path .. "." .. file_seq .. "."
+        if not string.find(active_bgra_path, prefix, 1, true) then
+            mp.msg.trace("DRAW: discarding stale bgra path (wrong file_seq): " .. tostring(active_bgra_path) .. " expected_prefix=" .. tostring(prefix))
+            return
+        end
+    end
     if x ~= nil then
         local scale_w = options.scale_factor ~= 1 and (w * options.scale_factor) or nil
         local scale_h = options.scale_factor ~= 1 and (h * options.scale_factor) or nil
         desired_overlay = {"overlay-add", options.overlay_id, x, y,
             frame_file, 0, "bgra", w, h, (4*w), scale_w, scale_h}
+        overlay_generation = stream_ctx.generation_id
         pump_overlay()
     elseif script then
         local json, err = mp.utils.format_json({width=w, height=h, scale_factor=options.scale_factor, x=x, y=y, socket=options.socket, thumbnail=thumbnail_path, overlay_id=options.overlay_id})
@@ -1000,20 +1057,22 @@ local function move_file(from, to)
     os.rename(from, to)
 end
 
-local seek_in_flight = false
-local current_seek_target = nil
-local last_seek_sent_time = 0
-local pending_seek_target = nil
-
-local seek_watchdog = nil
-local seek_retry_count = 0
-local max_seek_retries = 2
-local pipe_fail_count = 0
+local seek_pipeline = {
+    in_flight = false,
+    in_flight_target = nil,
+    in_flight_generation = 0,
+    last_seek_sent_time = 0,
+    pending_target = nil,
+    watchdog_timer = nil,
+    retry_count = 0,
+    max_retries = 2,
+    pipe_fail_count = 0,
+}
 
 local function stop_seek_watchdog()
-    if seek_watchdog then
-        seek_watchdog:kill()
-        seek_watchdog = nil
+    if seek_pipeline.watchdog_timer then
+        seek_pipeline.watchdog_timer:kill()
+        seek_pipeline.watchdog_timer = nil
     end
 end
 
@@ -1023,23 +1082,21 @@ local function arm_seek_watchdog()
     stop_seek_watchdog()
     local is_net = properties["demuxer-via-network"] or (type(properties["path"]) == "string" and properties["path"]:find("^https?://") ~= nil)
     local timeout = is_net and 6.0 or 0.4
-    seek_watchdog = mp.add_timeout(timeout, function()
-        seek_watchdog = nil
-        if not seek_in_flight or not show_thumbnail then return end
-        mp.msg.warn("SEEK WATCHDOG FIRED target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
-        seek_in_flight = false
-        current_seek_target = nil
-        local retry_target = pending_seek_target or last_seek_time
-        pending_seek_target = nil
-        if retry_target and seek_retry_count < max_seek_retries then
-            seek_retry_count = seek_retry_count + 1
+    seek_pipeline.watchdog_timer = mp.add_timeout(timeout, function()
+        seek_pipeline.watchdog_timer = nil
+        if not seek_pipeline.in_flight or not show_thumbnail then return end
+        mp.msg.warn("SEEK WATCHDOG FIRED target=" .. tostring(seek_pipeline.in_flight_target) .. " pending=" .. tostring(seek_pipeline.pending_target))
+        seek_pipeline.in_flight = false
+        seek_pipeline.in_flight_target = nil
+        seek_pipeline.in_flight_generation = 0
+        local retry_target = seek_pipeline.pending_target or last_seek_time
+        seek_pipeline.pending_target = nil
+        if retry_target and seek_pipeline.retry_count < seek_pipeline.max_retries then
+            seek_pipeline.retry_count = seek_pipeline.retry_count + 1
             do_raw_seek(retry_target, true)
         elseif retry_target and respawn_thumbnailer then
-            seek_retry_count = 0
+            seek_pipeline.retry_count = 0
             if is_net then
-                -- On network streams, NEVER kill the worker process on a slow seek!
-                -- Subprocess teardown destroys TLS sessions and the demuxer cache,
-                -- creating repeated multi-second stalls and stuck frames.
                 do_raw_seek(retry_target, true)
             else
                 respawn_thumbnailer(retry_target)
@@ -1055,38 +1112,38 @@ do_raw_seek = function(target_time, fast)
     local use_fast = fast or is_net or allow_fast_seek
     local sent = run("async seek " .. target_time .. (use_fast and " absolute+keyframes" or " absolute+exact"))
     if sent then
-        pipe_fail_count = 0
-        seek_in_flight = true
-        current_seek_target = target_time
-        last_seek_sent_time = mp.get_time()
+        seek_pipeline.pipe_fail_count = 0
+        seek_pipeline.in_flight = true
+        seek_pipeline.in_flight_target = target_time
+        seek_pipeline.in_flight_generation = stream_ctx.generation_id
+        seek_pipeline.last_seek_sent_time = mp.get_time()
         arm_seek_watchdog()
     else
         if not spawn_waiting then
             if spawned then
                 mp.msg.warn("SEEK TRANSMISSION FAILED target=" .. tostring(target_time))
-                seek_in_flight = false
-                current_seek_target = nil
-                pending_seek_target = target_time
-                -- Do NOT immediately kill the process on a single failed pipe write!
-                -- The background worker might be temporarily busy demuxing network packets.
+                seek_pipeline.in_flight = false
+                seek_pipeline.in_flight_target = nil
+                seek_pipeline.in_flight_generation = 0
+                seek_pipeline.pending_target = target_time
                 if not is_net and respawn_thumbnailer then
-                    pipe_fail_count = pipe_fail_count + 1
-                    if pipe_fail_count >= 3 then
-                        pipe_fail_count = 0
+                    seek_pipeline.pipe_fail_count = seek_pipeline.pipe_fail_count + 1
+                    if seek_pipeline.pipe_fail_count >= 3 then
+                        seek_pipeline.pipe_fail_count = 0
                         respawn_thumbnailer(target_time)
                     end
                 end
             end
         else
-            pending_seek_target = target_time
+            seek_pipeline.pending_target = target_time
         end
     end
 end
 
 local function seek(fast)
     if not last_seek_time then return end
-    if seek_in_flight then
-        pending_seek_target = last_seek_time
+    if seek_pipeline.in_flight then
+        seek_pipeline.pending_target = last_seek_time
         return
     end
     do_raw_seek(last_seek_time, fast)
@@ -1142,26 +1199,34 @@ local function check_new_thumb()
     if not finfo or finfo.size == 0 then return false end
     spawn_waiting = false
     local w, h = real_res(effective_w, effective_h, finfo.size)
-    if w then -- only accept valid thumbnails
-        mp.msg.trace("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(current_seek_target) .. " pending=" .. tostring(pending_seek_target))
-        stop_seek_watchdog()
-        seek_retry_count = 0
-        pipe_fail_count = 0
-        seek_in_flight = false
-        local completed_target = current_seek_target
-        current_seek_target = nil
+    if w then
+        if seek_pipeline.in_flight and seek_pipeline.in_flight_generation ~= stream_ctx.generation_id then
+            mp.msg.trace("FRAME DISCARDED (stale generation): path=" .. tostring(thumbnail_path) .. " in_flight_gen=" .. tostring(seek_pipeline.in_flight_generation) .. " current_gen=" .. tostring(stream_ctx.generation_id))
+            seek_pipeline.in_flight = false
+            seek_pipeline.in_flight_target = nil
+            seek_pipeline.in_flight_generation = 0
+            os.remove(tmp)
+            return false
+        end
 
-        -- Triple-buffered rotating frame slot to prevent Windows file-read/lock races
+        mp.msg.trace("FRAME ACCEPTED path=" .. tostring(thumbnail_path) .. " target=" .. tostring(seek_pipeline.in_flight_target) .. " pending=" .. tostring(seek_pipeline.pending_target) .. " gen=" .. tostring(stream_ctx.generation_id))
+        stop_seek_watchdog()
+        seek_pipeline.retry_count = 0
+        seek_pipeline.pipe_fail_count = 0
+        seek_pipeline.in_flight = false
+        local completed_target = seek_pipeline.in_flight_target
+        seek_pipeline.in_flight_target = nil
+        seek_pipeline.in_flight_generation = 0
+
         frame_slot = (frame_slot % 3) + 1
-        local target_bgra = thumbnail_path .. "." .. frame_slot .. ".bgra"
+        local target_bgra = thumbnail_path .. "." .. file_seq .. "." .. frame_slot .. ".bgra"
         move_file(tmp, target_bgra)
         active_bgra_path = target_bgra
 
         real_w, real_h = w, h
 
-        -- If user moved cursor while seek was in flight, dispatch next seek immediately
-        local next_target = pending_seek_target
-        pending_seek_target = nil
+        local next_target = seek_pipeline.pending_target
+        seek_pipeline.pending_target = nil
         if next_target and show_thumbnail then
             if not completed_target or math.abs(next_target - completed_target) > 0.05 then
                 do_raw_seek(next_target, true)
@@ -1182,10 +1247,11 @@ local function check_new_thumb()
         return true
     else
         mp.msg.warn("FRAME REJECTED path=" .. tostring(tmp) .. " size=" .. tostring(finfo.size) .. " req=" .. tostring(effective_w) .. "x" .. tostring(effective_h))
-        seek_in_flight = false
-        current_seek_target = nil
-        local next_target = pending_seek_target
-        pending_seek_target = nil
+        seek_pipeline.in_flight = false
+        seek_pipeline.in_flight_target = nil
+        seek_pipeline.in_flight_generation = 0
+        local next_target = seek_pipeline.pending_target
+        seek_pipeline.pending_target = nil
         if next_target and show_thumbnail then
             do_raw_seek(next_target, true)
         end
@@ -1202,9 +1268,10 @@ end)
 file_timer:kill()
 
 local function clear()
-    mp.msg.trace("CLEAR received show=" .. tostring(show_thumbnail) .. " x=" .. tostring(last_x) .. " y=" .. tostring(last_y))
+    mp.msg.trace("CLEAR received show=" .. tostring(show_thumbnail) .. " x=" .. tostring(last_x) .. " y=" .. tostring(last_y) .. " last_seek=" .. tostring(last_seek_time))
     stop_seek_watchdog()
-    seek_retry_count = 0
+    seek_pipeline.retry_count = 0
+    seek_pipeline.pipe_fail_count = 0
     file_timer:kill()
     seek_timer:kill()
     if options.quit_after_inactivity > 0 then
@@ -1213,10 +1280,10 @@ local function clear()
         end
         activity_timer:resume()
     end
-    last_seek_time = nil
-    seek_in_flight = false
-    current_seek_target = nil
-    pending_seek_target = nil
+    seek_pipeline.in_flight = false
+    seek_pipeline.in_flight_target = nil
+    seek_pipeline.in_flight_generation = 0
+    seek_pipeline.pending_target = nil
     show_thumbnail = false
     last_x = nil
     last_y = nil
@@ -1227,13 +1294,13 @@ local function clear()
         local seek_time = pending_respawn_time
         pending_respawn = false
         pending_respawn_time = nil
-        respawn_thumbnailer(seek_time)
+        respawn_thumbnailer(seek_time or last_seek_time)
     end
 end
 
 local function quit()
     stop_seek_watchdog()
-    seek_retry_count = 0
+    seek_pipeline.retry_count = 0
     activity_timer:kill()
     if show_thumbnail then
         activity_timer:resume()
@@ -1403,7 +1470,7 @@ local function watch_changes()
     last_has_vid = has_vid
 
     if not spawned and not disabled and (show_thumbnail or options.spawn_first) and effective_w and effective_h then
-        spawn(mp.get_property_number("time-pos", 0))
+        spawn(pending_spawn_target or last_seek_time or mp.get_property_number("time-pos", 0))
         if file_timer and not file_timer:is_enabled() then file_timer:resume() end
     end
 end
@@ -1416,32 +1483,52 @@ local function update_property(name, value)
         if is_net then
             if spawned then
                 clear()
-                respawn_thumbnailer(last_seek_time or 0)
+                respawn_thumbnailer(pending_spawn_target or last_seek_time or 0)
             elseif show_thumbnail or options.spawn_first then
                 calc_dimensions()
                 if effective_w and effective_h then
-                    spawn(mp.get_property_number("time-pos", 0))
+                    local desired_time = pending_spawn_target or last_seek_time or mp.get_property_number("time-pos", 0)
+                    spawn(desired_time)
                     if file_timer and not file_timer:is_enabled() then file_timer:resume() end
                 end
             end
         end
     end
     if name == "user-data/mpv/ytdl/json-subprocess-result" then
+        local sb_j = nil
         if value and type(value) == "table" and value.stdout and value.stdout ~= "" then
-            local sb_j = mp.utils.parse_json(value.stdout)
-            if sb_j and sb_j.http_headers then
-                cached_auth_path = properties["path"]
-                cached_user_agent = sb_j.http_headers["User-Agent"]
-                cached_referer = sb_j.http_headers["Referer"] or sb_j.webpage_url
-                local h_list = {}
-                for k, v in pairs(sb_j.http_headers) do
-                    table.insert(h_list, k .. ": " .. tostring(v))
-                end
-                if #h_list > 0 then
-                    cached_header_fields = table.concat(h_list, ",")
-                end
+            sb_j = mp.utils.parse_json(value.stdout)
+        end
+
+        if sb_j and sb_j.http_headers then
+            stream_ctx.generation_id = stream_ctx.generation_id + 1
+            stream_ctx.original_path = properties["path"]
+            stream_ctx.resolved_url = properties["stream-open-filename"]
+            stream_ctx.auth_path = properties["path"]
+            stream_ctx.user_agent = sb_j.http_headers["User-Agent"]
+            stream_ctx.referer = sb_j.http_headers["Referer"] or sb_j.webpage_url
+            local h_list = {}
+            for k, v in pairs(sb_j.http_headers) do
+                table.insert(h_list, k .. ": " .. tostring(v))
+            end
+            if #h_list > 0 then
+                stream_ctx.header_fields = table.concat(h_list, ",")
+            end
+            stream_ctx.cookies_file = properties["cookies-file"]
+            stream_ctx.created_at = mp.get_time()
+            stream_ctx.is_ready = true
+            overlay_generation = stream_ctx.generation_id
+
+            if spawned and not spawn_working then
+                mp.msg.trace("AUTH ARRIVED: worker spawned with partial context, respawning with full auth. gen=" .. tostring(stream_ctx.generation_id))
+                clear()
+                respawn_thumbnailer(last_seek_time or pending_spawn_target or 0)
+            elseif spawned and spawn_working then
+                seek_pipeline.in_flight_generation = stream_ctx.generation_id
+                mp.msg.trace("AUTH ARRIVED: worker running, bumped in_flight_generation. gen=" .. tostring(stream_ctx.generation_id))
             end
         end
+
         if not using_storyboards then
             dirty = true
             setup_storyboards()
@@ -1970,13 +2057,13 @@ local function file_load()
     last_has_vid = 0
     force_disabled = false
     last_tone_mapping = nil
-    last_seek_time = nil
-    last_decoded_time = nil
     stop_seek_watchdog()
-    seek_retry_count = 0
-    seek_in_flight = false
-    pending_seek_target = nil
-    current_seek_target = nil
+    seek_pipeline.retry_count = 0
+    seek_pipeline.pipe_fail_count = 0
+    seek_pipeline.in_flight = false
+    seek_pipeline.in_flight_target = nil
+    seek_pipeline.in_flight_generation = 0
+    seek_pipeline.pending_target = nil
     active_bgra_path = nil
     frame_slot = 0
     if info_timer then
@@ -1988,6 +2075,8 @@ local function file_load()
     has_valid_frame = false
     pending_respawn = false
     pending_respawn_time = nil
+
+    reset_stream_ctx()
 
     run("quit")
     if winapi then
@@ -2019,7 +2108,8 @@ local function file_load()
         last_crop = properties["video-crop"]
         info(effective_w, effective_h)
         if options.spawn_first and not disabled then
-            spawn(mp.get_property_number("time-pos", 0))
+            local desired_time = last_seek_time or mp.get_property_number("time-pos", 0)
+            spawn(desired_time)
             file_timer:resume()
             dirty = false
         end
@@ -2028,7 +2118,7 @@ end
 
 local function shutdown()
     stop_seek_watchdog()
-    seek_retry_count = 0
+    seek_pipeline.retry_count = 0
     run("quit")
     if winapi then
         winapi.close_pipe()
@@ -2088,10 +2178,7 @@ mp.register_script_message("thumb", thumb)
 mp.register_script_message("clear", clear)
 
 local function reset_network_auth()
-    cached_user_agent = nil
-    cached_referer = nil
-    cached_header_fields = nil
-    cached_auth_path = nil
+    reset_stream_ctx()
     worker_retry_count = 0
 end
 

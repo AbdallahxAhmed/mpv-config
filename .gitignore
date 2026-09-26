@@ -30,3 +30,5 @@ dist/
 .idea/
 .agent/skills/brainstorming/scripts/node_modules/
 scratch/
+cookies.txt
+*cookies*.txt

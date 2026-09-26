@@ -9,8 +9,9 @@ local options = require 'mp.options'
 
 local o = {
     exclude = "",
-    include = "^%w+%.youtube%.com/|^youtube%.com/|^youtu%.be/|^%w+%.twitch%.tv/|^twitch%.tv/",
+    include = "^%w+%.youtube%.com/|^youtube%.com/|^youtu%.be/|^%w+%.twitch%.tv/|^twitch%.tv/|^tube%.perverzija%.com/|^%w+%.tube%.perverzija%.com/|^perverzija%.com/|^hanime%.tv/|^%w+%.hanime%.tv/",
     try_ytdl_first = false,
+
     use_manifests = false,
     all_formats = true,
     force_all_formats = true,

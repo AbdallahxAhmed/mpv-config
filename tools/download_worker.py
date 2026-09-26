@@ -99,7 +99,7 @@ def atomic_write_state(state_file, data):
         sys.stderr.write(f"Warning: failed to write state file: {e}\n")
 
 def build_ytdl_args(url, output, aria2c_path=None, ytdl_format=None, is_audio_only=False,
-                    user_agent=None, referer=None, cookies=None, concurrent_fragments=6):
+                    user_agent=None, referer=None, cookies=None, concurrent_fragments=16):
     """Build the command line arguments for yt-dlp."""
     ytdl_bin = find_ytdlp()
     args = [ytdl_bin, "--no-playlist", "--continue", "--no-overwrites", "--windows-filenames", "--no-mtime"]
@@ -249,7 +249,7 @@ def main():
     parser.add_argument("--user-agent", default=None, help="User agent string")
     parser.add_argument("--referer", default=None, help="Referer header string")
     parser.add_argument("--cookies", default=None, help="Cookies header or cookies.txt file path")
-    parser.add_argument("--fragments", type=int, default=6, help="Concurrent fragments for HLS/DASH (default: 6)")
+    parser.add_argument("--fragments", type=int, default=16, help="Concurrent fragments for HLS/DASH (default: 16)")
 
     args = parser.parse_args()
     if not args.url and args.url_pos:

@@ -571,6 +571,61 @@ def _normalize_line_endings(directory, env):
         ui.success(f"Normalized line endings for {count} file(s)")
 
 
+def _deploy_ytdlp_plugins_and_config(env, repo_dir):
+    """Deploy custom yt-dlp extractors and global turbo configuration on Windows."""
+    try:
+        appdata = os.environ.get("APPDATA")
+        if not appdata:
+            return
+
+        ytdl_dir = os.path.join(appdata, "yt-dlp")
+        os.makedirs(ytdl_dir, exist_ok=True)
+
+        # 1. Global yt-dlp config (16 connections, 1080p cap)
+        conf_file = os.path.join(ytdl_dir, "config")
+        config_text = (
+            "# Turbo Multi-Connection Downloader (bypasses server per-connection rate limits)\n"
+            "--downloader http:aria2c\n"
+            "--downloader https:aria2c\n"
+            '--downloader-args "aria2c:-x 16 -s 16 -k 1M --file-allocation=none --check-certificate=false"\n'
+            "\n"
+            "# Concurrent fragments for HLS / DASH streams\n"
+            "--concurrent-fragments 16\n"
+            "\n"
+            "# Quality Ceiling: Best quality up to 1080p (prevents 4K / 2160p bloat)\n"
+            '-f "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"\n'
+            "\n"
+            "# File naming & safety\n"
+            "--windows-filenames\n"
+            "--no-mtime\n"
+        )
+        with open(conf_file, "w", encoding="utf-8") as f:
+            f.write(config_text)
+
+        # 2. Extractors
+        extractor_src = os.path.join(repo_dir, "tools", "yt_dlp_plugins", "extractor")
+        if os.path.isdir(extractor_src):
+            for fname in os.listdir(extractor_src):
+                if fname.endswith(".py"):
+                    base = os.path.splitext(fname)[0]
+                    namespace = "hanime" if base == "htv" else base
+                    target_plugin_dir = os.path.join(ytdl_dir, "plugins", namespace, "yt_dlp_plugins", "extractor")
+                    os.makedirs(target_plugin_dir, exist_ok=True)
+                    shutil.copy2(os.path.join(extractor_src, fname), os.path.join(target_plugin_dir, fname))
+
+                    # Also copy to Program Files\\mpv if present
+                    prog_mpv = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "mpv", "yt_dlp_plugins", "extractor")
+                    try:
+                        if os.path.isdir(os.path.dirname(prog_mpv)):
+                            os.makedirs(prog_mpv, exist_ok=True)
+                            shutil.copy2(os.path.join(extractor_src, fname), os.path.join(prog_mpv, fname))
+                    except Exception:
+                        pass
+        ui.success("Deployed custom yt-dlp extractor plugins and global turbo config")
+    except Exception as exc:
+        ui.warn(f"Notice: yt-dlp plugin deployment: {exc}")
+
+
 def deploy(
     staging_dir, env, repo_dir, dry_run=False, audit_log=None,
     mpv_profile=MPV_PROFILE_DEFAULT, anime_preset="A", scaler_tier="balanced",
@@ -680,4 +735,5 @@ def deploy(
             results.append({"name": "uosc-timeline-thumb-patch", "status": "warn", "detail": str(exc)})
     if env.os == "windows":
         ensure_windows_shortcuts(env, audit_log=audit_log)
+        _deploy_ytdlp_plugins_and_config(env, repo_dir)
     return results

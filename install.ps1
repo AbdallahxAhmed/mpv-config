@@ -80,7 +80,7 @@ if (-not $isAdmin) {
     Write-Host "╚════════════════════════════════════════════════════════════════╝" -ForegroundColor Yellow
     Write-Host ""
 
-    $choice = Read-Host "Continue with auto-elevation? (Y/n)"
+    $choice = if ($env:MPV_NO_PAUSE) { "y" } else { Read-Host -Prompt "Continue with auto-elevation? [Y/n]" }
     if ($choice -eq "n" -or $choice -eq "N") {
         Write-Host "Cancelled. Please run from an elevated Windows Terminal." -ForegroundColor Yellow
         exit 0
@@ -264,17 +264,47 @@ function Sync-MpvDependencies {
         Write-Host "  ! alass fetch notice: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 
-    # 4. ffsubsync (Python/pip/uv)
-    Write-Host "  > Provisioning ffsubsync..." -ForegroundColor Gray
+    # 4. aria2 (multi-connection turbo accelerator)
+    Write-Host "  > Provisioning aria2 (16-stream acceleration)..." -ForegroundColor Gray
+    $aria2DestDir = if ($isAdmin) { Join-Path $TargetDir "aria2" } else { $TargetDir }
+    if (-not (Test-Path $aria2DestDir)) { New-Item -ItemType Directory -Path $aria2DestDir -Force | Out-Null }
+    $aria2Exe = Join-Path $aria2DestDir "aria2c.exe"
+    if (-not (Test-Path $aria2Exe)) {
+        try {
+            $ariaZip = "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+            $tempAriaZip = Join-Path $env:TEMP "aria2-release.zip"
+            Invoke-WebRequest -Uri $ariaZip -OutFile $tempAriaZip -UseBasicParsing
+            $tempAriaExtract = Join-Path $env:TEMP "aria2-extract"
+            if (Test-Path $tempAriaExtract) { Remove-Item -Recurse -Force $tempAriaExtract }
+            Expand-Archive -LiteralPath $tempAriaZip -DestinationPath $tempAriaExtract -Force
+            $ariaBin = Get-ChildItem -Path $tempAriaExtract -Recurse -Filter "aria2c.exe" | Select-Object -First 1
+            if ($ariaBin) {
+                Copy-Item -LiteralPath $ariaBin.FullName -Destination $aria2Exe -Force
+                Copy-Item -LiteralPath $ariaBin.FullName -Destination (Join-Path $TargetDir "aria2c.exe") -Force
+                Unblock-File -LiteralPath $aria2Exe -ErrorAction SilentlyContinue
+                Write-Host "  + aria2c verified in: $aria2DestDir" -ForegroundColor Green
+            }
+            Remove-Item -Force $tempAriaZip -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $tempAriaExtract -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "  ! aria2 fetch notice: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  + aria2c verified in: $aria2DestDir" -ForegroundColor Green
+    }
+
+    # 5. ffsubsync & Python dependencies (pycryptodomex, rich)
+    Write-Host "  > Provisioning ffsubsync & Python dependencies..." -ForegroundColor Gray
     try {
         if (Get-Command uv.exe -ErrorAction SilentlyContinue) {
             & uv tool install --upgrade ffsubsync 2>$null
+            & uv pip install --upgrade rich pycryptodomex 2>$null
         } elseif (Get-Command python.exe -ErrorAction SilentlyContinue) {
-            & python -m pip install --upgrade ffsubsync 2>$null
+            & python -m pip install --upgrade ffsubsync rich pycryptodomex 2>$null
         } elseif (Get-Command pip.exe -ErrorAction SilentlyContinue) {
-            & pip install --upgrade ffsubsync 2>$null
+            & pip install --upgrade ffsubsync rich pycryptodomex 2>$null
         }
-        Write-Host "  + ffsubsync verified" -ForegroundColor Green
+        Write-Host "  + ffsubsync & Python dependencies verified" -ForegroundColor Green
     } catch {
         Write-Host "  ! ffsubsync notice: $($_.Exception.Message)" -ForegroundColor Yellow
     }
@@ -290,7 +320,75 @@ function Sync-MpvDependencies {
     } catch {
         Write-Host "  ! ytdl_hook.conf notice: $($_.Exception.Message)" -ForegroundColor Yellow
     }
+
+    # 6. yt-dlp plugins: deploy all custom extractors (perverzija, hanime, etc.)
+    try {
+        $extractorDirs = @(
+            (Join-Path $PSScriptRoot "tools\yt_dlp_plugins\extractor"),
+            (Join-Path $INSTALL_DIR "tools\yt_dlp_plugins\extractor"),
+            "$env:USERPROFILE\Desktop\mpv-config\tools\yt_dlp_plugins\extractor"
+        )
+        $pluginSrcDir = $extractorDirs | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+        if ($pluginSrcDir) {
+            $plugins = Get-ChildItem -Path $pluginSrcDir -Filter "*.py"
+            foreach ($p in $plugins) {
+                $baseName = $p.BaseName
+                $pluginNamespace = if ($baseName -eq "htv") { "hanime" } else { $baseName }
+                
+                # Deploy to APPDATA/yt-dlp/plugins/<namespace>/yt_dlp_plugins/extractor/<file>.py
+                $dstDir = "$env:APPDATA\yt-dlp\plugins\$pluginNamespace\yt_dlp_plugins\extractor"
+                if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Path $dstDir -Force | Out-Null }
+                Copy-Item -LiteralPath $p.FullName -Destination (Join-Path $dstDir $p.Name) -Force
+                Write-Host "  + Deployed yt-dlp plugin [$pluginNamespace]: $dstDir\$($p.Name)" -ForegroundColor Green
+
+                # Also deploy to MPV bundled directory if present
+                if (Test-Path $ytdlpExe) {
+                    $mpvPluginDir = Join-Path (Split-Path -Parent $ytdlpExe) "yt_dlp_plugins\extractor"
+                    if (-not (Test-Path $mpvPluginDir)) { New-Item -ItemType Directory -Path $mpvPluginDir -Force | Out-Null }
+                    Copy-Item -LiteralPath $p.FullName -Destination (Join-Path $mpvPluginDir $p.Name) -Force
+                }
+            }
+        }
+    } catch {
+        Write-Host "  ! yt-dlp plugin notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 7. Global yt-dlp config: deploy aria2c 16-connection turbo & 1080p quality cap
+    try {
+        $ytdlpConfigDir = "$env:APPDATA\yt-dlp"
+        if (-not (Test-Path $ytdlpConfigDir)) { New-Item -ItemType Directory -Path $ytdlpConfigDir -Force | Out-Null }
+        $ytdlpConfigFile = Join-Path $ytdlpConfigDir "config"
+        $configContent = @'
+# Turbo Multi-Connection Downloader (bypasses server per-connection rate limits)
+--downloader http:aria2c
+--downloader https:aria2c
+--downloader-args "aria2c:-x 16 -s 16 -k 1M --file-allocation=none --check-certificate=false"
+
+# Concurrent fragments for HLS / DASH streams
+--concurrent-fragments 16
+
+# Quality Ceiling: Best quality up to 1080p (prevents 4K / 2160p bloat)
+-f "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+
+# File naming & safety
+--windows-filenames
+--no-mtime
+'@
+        Set-Content -Path $ytdlpConfigFile -Value $configContent -Encoding utf8 -Force
+        Write-Host "  + Deployed global yt-dlp turbo config: $ytdlpConfigFile" -ForegroundColor Green
+    } catch {
+        Write-Host "  ! yt-dlp config notice: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    # 8. Ensure plugin crypto dependencies are available
+    try {
+        if (Get-Command python.exe -ErrorAction SilentlyContinue) {
+            & python.exe -m pip install --quiet --upgrade pycryptodomex 2>$null
+        }
+    } catch { }
 }
+
 
 if ($SyncDeps) {
     Sync-MpvDependencies
@@ -393,8 +491,8 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 Write-Host "  > Upgrading pip and pinning setuptools..." -ForegroundColor Gray
 & $python -m pip install --quiet --upgrade "pip>=23.0" "setuptools<74.0" wheel 2>$null
 
-Write-Host "  > Installing CLI UI dependencies (rich)..." -ForegroundColor Gray
-& $python -m pip install --quiet "rich>=13.0.0" 2>$null
+Write-Host "  > Installing CLI UI and extractor dependencies (rich, pycryptodomex)..." -ForegroundColor Gray
+& $python -m pip install --quiet "rich>=13.0.0" "pycryptodomex>=3.20.0" 2>$null
 
 $forceBuild = $env:MPV_FFSUBSYNC_BUILD -eq "1"
 if ($forceBuild) {
