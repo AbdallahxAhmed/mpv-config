@@ -146,13 +146,17 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         # 1. Check if direct M3U8 stream manifest was intercepted by browser companion
         cached_m3u8 = self._get_cached_m3u8(video_id)
         if cached_m3u8:
-            self.to_screen(f'[hanime] Using intercepted high-speed stream manifest from browser companion: {video_id}')
-            formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p')
-            return {
-                'id': video_id,
-                'title': video_id.replace('-', ' ').title(),
-                'formats': formats
-            }
+            self.to_screen(f'[hanime] Using intercepted stream manifest: {video_id}')
+            try:
+                formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p', fatal=False)
+                if formats:
+                    return {
+                        'id': video_id,
+                        'title': video_id.replace('-', ' ').title(),
+                        'formats': formats
+                    }
+            except Exception as e:
+                self.to_screen(f'[hanime] Intercepted stream unavailable ({e}), trying live extraction...')
 
         try:
             page = self._download_webpage(url, video_id, fatal=False, headers={'User-Agent': USER_AGENT})
