@@ -4,8 +4,31 @@ from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import remove_end, remove_start, ExtractorError
 
 
-class TubePerverzijaIE(InfoExtractor):
+try:
+    from ._sitekit import SiteKit
+except ImportError:
+    try:
+        from _sitekit import SiteKit
+    except ImportError:
+        class SiteKit:
+            SITE_NAME = "tube.perverzija.com"
+            ENGINE = "native"
+            QUALITY_CEILING = 1080
+            REQUIRES_COOKIES = False
+            PREFERRED_BROWSERS = ("brave", "chrome", "edge", "firefox")
+            EXTRA_YTDL_OPTS = {}
+            @classmethod
+            def ytdl_opts(cls):
+                return {
+                    "format": f"bestvideo[height<=?{cls.QUALITY_CEILING}]+bestaudio/best[height<=?{cls.QUALITY_CEILING}]/best",
+                    "concurrent_fragment_downloads": 16,
+                }
+
+
+class TubePerverzijaIE(SiteKit, InfoExtractor):
     IE_NAME = 'perverzija'
+    SITE_NAME = 'tube.perverzija.com'
+    ENGINE = 'native'
     _VALID_URL = r'https?://(?:www\.)?tube\.perverzija\.com/(?P<id>[a-zA-Z0-9_-]+)/?'
     _TESTS = [{
         'url': 'https://tube.perverzija.com/manyvids-xev-bellringer-hooker-sister-gives-blow-job-in-car/',

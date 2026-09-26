@@ -29,12 +29,47 @@ def from_base64(o):
     return urlsafe_b64decode(o.ljust((len(o) // 4 + 1) * 4, b'='))
 
 
-class HanimeTVIE(InfoExtractor):
+try:
+    from ._sitekit import SiteKit
+except ImportError:
+    try:
+        from _sitekit import SiteKit
+    except ImportError:
+        class SiteKit:
+            SITE_NAME = "hanime.tv"
+            ENGINE = "native"
+            QUALITY_CEILING = 1080
+            REQUIRES_COOKIES = True
+            PREFERRED_BROWSERS = ("brave", "chrome", "edge", "firefox")
+            EXTRA_YTDL_OPTS = {}
+            @classmethod
+            def ytdl_opts(cls):
+                return {
+                    "format": f"bestvideo[height<=?{cls.QUALITY_CEILING}]+bestaudio/best[height<=?{cls.QUALITY_CEILING}]/best",
+                    "concurrent_fragment_downloads": 16,
+                }
+
+
+class HanimeTVIE(SiteKit, InfoExtractor):
+    IE_NAME = 'hanime'
+    SITE_NAME = 'hanime.tv'
+    ENGINE = 'native'
+    REQUIRES_COOKIES = True
     _VALID_URL = r'https?://(?:www\.)?hanime\.tv/(?:videos/hentai|hentai/video|playlists/[0-9a-z]+/video)/(?P<id>[0-9a-z\-]+)'
     _AES_KEY = bytes.fromhex("5d657a4dcb0bad1c637ff2e221059b10ff17ae39fe855003e846918941f4ebe3")
     _AES_HEADER = bytes.fromhex("6874762d696e7365637572652d7631")
     
-    # TODO add _TESTS
+    _TESTS = [{
+        'url': 'https://hanime.tv/videos/hentai/itadaki-seieki',
+        'info_dict': {
+            'id': 'itadaki-seieki',
+            'ext': 'mp4',
+            'title': 'Itadaki! Seieki',
+        },
+        'params': {
+            'skip_download': True,
+        }
+    }]
 
     # This is not an AEAD scheme as much as it is a method of obscuring messages as the KEY and TAG for AES-256 GCM are known
     # beforehand. Note that, IV could be safely transmitted in the public without breaching the security.

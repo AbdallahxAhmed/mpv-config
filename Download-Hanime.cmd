@@ -5,6 +5,6 @@ title Hanime.tv Fast Downloader (16-Stream Turbo Speed)
 set "REPO_DIR=%~dp0"
 cd /d "%REPO_DIR%"
 
-python "%REPO_DIR%tools\hanime_downloader.py" %*
+python "%REPO_DIR%tools\mpvdl.py" %*
 
 if errorlevel 1 pause

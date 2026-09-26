@@ -514,8 +514,13 @@ local function start_download(is_audio_only)
                 worker_script,
                 '--state-file', state_file,
                 '--output', template,
-                '--fragments', '6',
+                '--fragments', '16',
             }
+            local ipc_server = mp.get_property('input-ipc-server')
+            if ipc_server and ipc_server ~= '' then
+                table.insert(w_args, '--ipc-pipe')
+                table.insert(w_args, ipc_server)
+            end
             if is_audio_only then table.insert(w_args, '--audio-only') end
             if ytdl_format and ytdl_format ~= '' then
                 table.insert(w_args, '--format')
@@ -713,6 +718,22 @@ mp.register_script_message('start-download', function() start_download(false) en
 mp.register_script_message('download-video', function() start_download(false) end)
 mp.register_script_message('download-audio', function() start_download(true) end)
 mp.register_script_message('open-download-folder', open_download_folder)
+
+-- Real-time IPC telemetry push from download_worker.py
+mp.register_script_message('download-progress', function(payload_str)
+    local ok, data = pcall(function() return utils.parse_json(payload_str) end)
+    if ok and type(data) == 'table' then
+        if data.percent_int ~= nil then
+            download_badge = tostring(data.percent_int) .. '%'
+            download_progress = (data.percent or 0) / 100
+        end
+        if data.speed and data.eta then
+            download_tooltip = string.format('Downloading: %s%% (%s • ETA %s • %s threads)',
+                tostring(data.percent_int or 0), tostring(data.speed), tostring(data.eta), tostring(data.threads or 16))
+        end
+        publish_download(true)
+    end
+end)
 
 -- uosc broadcasts on startup; also publish now if uosc started first.
 mp.register_script_message('uosc-version', function()

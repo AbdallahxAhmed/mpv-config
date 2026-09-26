@@ -98,6 +98,29 @@ def atomic_write_state(state_file, data):
     except Exception as e:
         sys.stderr.write(f"Warning: failed to write state file: {e}\n")
 
+def emit_to_mpv(pipe_name, payload):
+    """Push telemetry directly into MPV over its JSON-IPC named pipe without polling."""
+    if not pipe_name:
+        return
+    try:
+        line = json.dumps({
+            "command": ["script-message-to", "toolbar", "download-progress", json.dumps(payload)]
+        }) + "\n"
+        if sys.platform == "win32":
+            pipe_path = pipe_name
+            if not pipe_path.startswith(r"\\.\pipe\\"):
+                pipe_path = r"\\.\pipe\\" + pipe_path
+            with open(pipe_path, "wb", buffering=0) as p:
+                p.write(line.encode("utf-8"))
+        else:
+            import socket
+            sock = socket.socket(socket.AF_UNIX)
+            sock.connect(pipe_name)
+            sock.sendall(line.encode("utf-8"))
+            sock.close()
+    except Exception:
+        pass
+
 def build_ytdl_args(url, output, aria2c_path=None, ytdl_format=None, is_audio_only=False,
                     user_agent=None, referer=None, cookies=None, concurrent_fragments=16):
     """Build the command line arguments for yt-dlp."""
@@ -115,7 +138,7 @@ def build_ytdl_args(url, output, aria2c_path=None, ytdl_format=None, is_audio_on
     # 16-Thread Acceleration
     # Use aria2c for single/progressive streams when available
     # HLS/DASH or fallback uses concurrent_fragments (default 6 to prevent HTTP 429)
-    is_manifest = ".m3u8" in url or "manifest" in url or "/hls/" in url
+    is_manifest = ".m3u8" in url or "manifest" in url or "/hls/" in url or "hanime.tv" in url or "perverzija.com" in url
     if aria2c_path and not is_audio_only and not is_manifest:
         args.extend([
             "--downloader", "aria2c",
@@ -158,6 +181,7 @@ def run_worker(args):
         concurrent_fragments=args.fragments,
     )
 
+    ipc_pipe = getattr(args, "ipc_pipe", None)
     state = {
         "status": "starting",
         "percent": 0.0,
@@ -168,6 +192,7 @@ def run_worker(args):
         "engine": "aria2c" if aria2c_bin else "native",
     }
     atomic_write_state(args.state_file, state)
+    emit_to_mpv(ipc_pipe, state)
 
     last_error = None
     last_write_time = 0.0
@@ -213,6 +238,7 @@ def run_worker(args):
                     state["speed"] = prog["speed"]
                     state["eta"] = prog["eta"]
                     atomic_write_state(args.state_file, state)
+                    emit_to_mpv(ipc_pipe, state)
 
         proc.wait()
         exit_code = proc.returncode
@@ -223,12 +249,14 @@ def run_worker(args):
             state["percent_int"] = 100
             state["code"] = 0
             atomic_write_state(args.state_file, state)
+            emit_to_mpv(ipc_pipe, state)
             return 0
         else:
             state["status"] = "error"
             state["code"] = exit_code
             state["message"] = last_error or f"yt-dlp exited with status {exit_code}"
             atomic_write_state(args.state_file, state)
+            emit_to_mpv(ipc_pipe, state)
             return exit_code
 
     except Exception as e:
@@ -236,6 +264,7 @@ def run_worker(args):
         state["code"] = -1
         state["message"] = str(e)
         atomic_write_state(args.state_file, state)
+        emit_to_mpv(ipc_pipe, state)
         return -1
 
 def main():
@@ -244,6 +273,7 @@ def main():
     parser.add_argument("url_pos", nargs="?", default=None, help="Positional stream URL")
     parser.add_argument("--output", required=True, help="Output filename template")
     parser.add_argument("--state-file", required=True, help="Path to write JSON progress updates")
+    parser.add_argument("--ipc-pipe", default=None, help="MPV JSON-IPC named pipe or socket")
     parser.add_argument("--format", default=None, help="yt-dlp format selector")
     parser.add_argument("--audio-only", action="store_true", help="Download audio only as MP3")
     parser.add_argument("--user-agent", default=None, help="User agent string")

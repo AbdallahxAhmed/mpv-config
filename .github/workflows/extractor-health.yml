@@ -1,0 +1,28 @@
+name: Extractor Health Checks
+
+on:
+  schedule:
+    - cron: '17 4 * * *' # Daily at 04:17 UTC
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe Custom Extractors
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt yt-dlp
+
+      - name: Run Core & Extractor Unit Tests
+        run: |
+          python -m unittest tests/test_core_architecture.py tests/test_hanime_downloader.py tests/test_perverzija_downloader.py
