@@ -461,6 +461,12 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
                 os.path.join(ffsubsync_bin_dir, "ffsubsync.cmd"),
                 os.path.join(ffsubsync_bin_dir, "ffsubsync"),
             ])
+        appdata = os.environ.get("APPDATA", "")
+        if appdata:
+            ffsubsync_candidates.append(os.path.join(appdata, "uv", "tools", "ffsubsync", "Scripts", "ffsubsync.exe"))
+        userprofile = os.environ.get("USERPROFILE", "")
+        if userprofile:
+            ffsubsync_candidates.append(os.path.join(userprofile, ".local", "bin", "ffsubsync.exe"))
         alass_candidates = []
         if alass_dir:
             alass_candidates.extend([

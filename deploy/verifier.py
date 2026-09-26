@@ -69,7 +69,18 @@ def verify(config_dir, env):
     check_binary("python", [env.python_cmd, "--version"])
     # uv is an installer convenience, not a required mpv runtime dependency.
     check_binary("uv", ["uv", "--version"], optional=True)
-    check_binary("ffsubsync", ["ffsubsync", "--version"], optional=True)
+    ffsubsync_bin = "ffsubsync"
+    if env.os == "windows":
+        candidates = [
+            os.path.join(os.environ.get("APPDATA", ""), "uv", "tools", "ffsubsync", "Scripts", "ffsubsync.exe"),
+            os.path.join(os.environ.get("USERPROFILE", ""), ".local", "bin", "ffsubsync.exe"),
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "mpv", "ffsubsync", "ffsubsync.exe"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                ffsubsync_bin = c
+                break
+    check_binary("ffsubsync", [ffsubsync_bin, "--version"], optional=True)
     if _run_check(["alass", "--version"]) or _run_check(["alass-cli", "--version"]):
         check("alass binary", True)
     else:

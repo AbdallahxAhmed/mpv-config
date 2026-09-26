@@ -301,6 +301,11 @@ function Sync-MpvDependencies {
         if (Get-Command uv.exe -ErrorAction SilentlyContinue) {
             & uv tool install --upgrade ffsubsync 2>$null
             & uv pip install --upgrade rich pycryptodomex 2>$null
+            $uvFfsubsync = "$env:APPDATA\uv\tools\ffsubsync\Scripts\ffsubsync.exe"
+            $mpvFfsubsyncDir = "C:\Program Files\mpv\ffsubsync"
+            if (Test-Path $uvFfsubsync -and (Test-Path $mpvFfsubsyncDir)) {
+                Copy-Item -Path $uvFfsubsync -Destination "$mpvFfsubsyncDir\ffsubsync.exe" -Force -ErrorAction SilentlyContinue
+            }
         } elseif (Get-Command python.exe -ErrorAction SilentlyContinue) {
             & python -m pip install --upgrade ffsubsync rich pycryptodomex 2>$null
         } elseif (Get-Command pip.exe -ErrorAction SilentlyContinue) {

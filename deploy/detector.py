@@ -292,6 +292,13 @@ def _check_installed(dep_name, dep_info):
                 launcher = _find_windows_bin_in_dir(bin_names, ensure_dir)
                 if launcher:
                     return _check_ffsubsync_installed(launcher)
+            # Check uv tool installation path
+            uv_bin = os.path.join(os.environ.get("APPDATA", ""), "uv", "tools", "ffsubsync", "Scripts", "ffsubsync.exe")
+            if os.path.isfile(uv_bin):
+                return _check_ffsubsync_installed(uv_bin)
+            local_bin = os.path.join(os.environ.get("USERPROFILE", ""), ".local", "bin", "ffsubsync.exe")
+            if os.path.isfile(local_bin):
+                return _check_ffsubsync_installed(local_bin)
         return _check_ffsubsync_installed()
 
     if sys.platform == "win32" and dep_name != "ffsubsync":
