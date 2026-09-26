@@ -61,6 +61,49 @@ except ImportError:
                 }
 
 
+def _get_clipboard_stream(video_id):
+    """Retrieve direct M3U8 stream URL from Windows clipboard if captured by browser helper."""
+    if sys.platform != 'win32':
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.CloseClipboard.argtypes = []
+        user32.CloseClipboard.restype = wintypes.BOOL
+        user32.GetClipboardData.argtypes = [wintypes.UINT]
+        user32.GetClipboardData.restype = wintypes.HANDLE
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalLock.restype = wintypes.LPVOID
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.restype = wintypes.BOOL
+
+        CF_UNICODETEXT = 13
+        if not user32.OpenClipboard(None):
+            return None
+        try:
+            handle = user32.GetClipboardData(CF_UNICODETEXT)
+            if not handle:
+                return None
+            ptr = kernel32.GlobalLock(handle)
+            if not ptr:
+                return None
+            try:
+                text = ctypes.wstring_at(ptr).strip()
+                if '.m3u8' in text and ('http://' in text or 'https://' in text):
+                    return text
+            finally:
+                kernel32.GlobalUnlock(handle)
+        finally:
+            user32.CloseClipboard()
+    except Exception:
+        pass
+    return None
+
+
 class HanimeTVIE(SiteKit, InfoExtractor):
     IE_NAME = 'hanime'
     SITE_NAME = 'hanime.tv'
@@ -116,18 +159,23 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         return digest, ts
 
     def _get_cached_m3u8(self, video_id):
-        """Query local MPV sync daemon and active streams file for intercepted M3U8 manifest."""
-        # 1. Local HTTP Daemon
+        """Query clipboard, local MPV sync daemon, and active streams file for intercepted M3U8 manifest."""
+        # 1. Immediate clipboard check (zero network dependency)
+        clip_stream = _get_clipboard_stream(video_id)
+        if clip_stream:
+            return clip_stream
+
+        # 2. Local HTTP Daemon
         try:
             req = urllib.request.Request(f'http://127.0.0.1:8765/stream?slug={video_id}')
-            with urllib.request.urlopen(req, timeout=1.0) as r:
+            with urllib.request.urlopen(req, timeout=0.5) as r:
                 data = json.loads(r.read().decode('utf-8'))
                 if data.get('status') == 'ok' and data.get('stream', {}).get('url'):
                     return data['stream']['url']
         except Exception:
             pass
 
-        # 2. Local disk cache
+        # 3. Local disk cache
         try:
             cache_file = os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "active_streams.json")
             if os.path.isfile(cache_file):
@@ -143,10 +191,10 @@ class HanimeTVIE(SiteKit, InfoExtractor):
     def _real_extract(self, url):
         video_id = self._match_id(url)
 
-        # 1. Check if direct M3U8 stream manifest was intercepted by browser companion
+        # 1. Check if direct M3U8 stream manifest is in clipboard or cache
         cached_m3u8 = self._get_cached_m3u8(video_id)
         if cached_m3u8:
-            self.to_screen(f'[hanime] Using intercepted stream manifest: {video_id}')
+            self.to_screen(f'[hanime] Using stream manifest from browser companion / clipboard: {video_id}')
             try:
                 formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p', fatal=False)
                 if formats:
