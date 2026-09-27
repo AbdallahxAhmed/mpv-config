@@ -348,7 +348,14 @@ class HanimeTVIE(SiteKit, InfoExtractor):
                                 continue
                             parts = line.strip().split('\t')
                             if len(parts) >= 7 and ('hanime' in parts[0] or 'cloudflare' in parts[0] or 'cf' in parts[5].lower()):
-                                c_items.append(f"{parts[5]}={parts[6]}")
+                                c_domain = parts[0]
+                                c_name = parts[5]
+                                c_val = parts[6]
+                                c_items.append(f"{c_name}={c_val}")
+                                try:
+                                    self._set_cookie(c_domain, c_name, c_val)
+                                except Exception:
+                                    pass
                     if c_items:
                         cookie_header = '; '.join(c_items)
                         break
@@ -491,10 +498,8 @@ class HanimeTVIE(SiteKit, InfoExtractor):
             'Referer': 'https://hanime.tv/',
             'Origin': 'https://hanime.tv',
         }
-
-        m3u8_fetch_headers = dict(cdn_headers)
         if 'Cookie' in handshake_headers:
-            m3u8_fetch_headers['Cookie'] = handshake_headers['Cookie']
+            cdn_headers['Cookie'] = handshake_headers['Cookie']
 
         formats = []
         for source in manifest.get('sources', []):
@@ -503,7 +508,7 @@ class HanimeTVIE(SiteKit, InfoExtractor):
                 if '.m3u8' in src_url or '/hls/' in src_url:
                     result = self._extract_m3u8_formats(
                         src_url, video_id, ext='mp4', m3u8_id=source.get('label', 'default'),
-                        headers=m3u8_fetch_headers, fatal=False
+                        headers=cdn_headers, fatal=False
                     )
                     for f in (result or []):
                         f.setdefault('http_headers', {}).update(cdn_headers)
@@ -521,5 +526,6 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         return {
             'id': video_id,
             'title': video_title,
-            'formats': formats
+            'formats': formats,
+            'http_headers': cdn_headers,
         }
