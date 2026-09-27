@@ -430,6 +430,16 @@ function mpv-dl {
     if (-not (Test-Path `$mpvdl)) { `$mpvdl = "$env:USERPROFILE\Desktop\mpv-config\tools\mpvdl.py" }
     if (Test-Path `$mpvdl) { & python `$mpvdl @args } else { & yt-dlp @args }
 }
+function hsearch {
+    param([Parameter(ValueFromRemainingArguments = `$true)]`$args)
+    `$hsearch = "$env:USERPROFILE\.mpv-deploy\tools\hsearch.py"
+    if (-not (Test-Path `$hsearch)) { `$hsearch = "$env:USERPROFILE\Desktop\mpv-config\tools\hsearch.py" }
+    if (Test-Path `$hsearch) { & python `$hsearch @args } else { Write-Host "hsearch.py not found" -ForegroundColor Red }
+}
+function h-search {
+    param([Parameter(ValueFromRemainingArguments = `$true)]`$args)
+    & hsearch @args
+}
 "@
         if (Test-Path $PROFILE) {
             $existing = Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue
