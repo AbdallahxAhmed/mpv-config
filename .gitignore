@@ -32,3 +32,5 @@ dist/
 scratch/
 cookies.txt
 *cookies*.txt
+cache/
+tools/media-tui/target/
