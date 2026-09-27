@@ -39,8 +39,8 @@ def find_chafa() -> Optional[str]:
     return None
 
 
-def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, height: int = 22) -> str:
-    """Download and decode thumbnail image to smooth high-density sub-pixel terminal graphics via Chafa or ffmpeg."""
+def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 54, height: int = 24) -> str:
+    """Download and decode thumbnail/poster image to smooth high-density sub-pixel terminal graphics via Chafa or ffmpeg."""
     if not image_url:
         return ""
 
@@ -49,7 +49,7 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, heigh
     url_hash = hashlib.md5(f"{image_url}_{width}_{height}".encode("utf-8")).hexdigest()
     cache_dir = os.path.join(tempfile.gettempdir(), "mpv-hsearch-thumbs")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, f"{url_hash}_chafa_v3.ansi")
+    cache_file = os.path.join(cache_dir, f"{url_hash}_chafa_v4.ansi")
 
     if os.path.isfile(cache_file):
         try:
@@ -66,22 +66,23 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, heigh
                 image_url,
                 headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             )
-            with urllib.request.urlopen(req, timeout=4) as r:
+            with urllib.request.urlopen(req, timeout=5) as r:
                 data = r.read()
             with open(img_temp, "wb") as f:
                 f.write(data)
         except Exception:
             return ""
 
-    # 1. Use Chafa if available (MovieBox-TUI grade rendering with sextants & quadrants)
+    # 1. Use Chafa (MovieBox-TUI grade rendering with sextants, quadrants, braille & din99d color)
     chafa_exe = find_chafa()
     if chafa_exe and os.path.isfile(img_temp):
         try:
             cmd = [
                 chafa_exe,
                 f"--size={width}x{height}",
-                "--symbols=vhalf+quad+sextant+braille",
-                "--color-space=rgb",
+                "--symbols=all",
+                "-w", "9",
+                "--color-space=din99d",
                 img_temp
             ]
             proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=3)
@@ -144,19 +145,50 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, heigh
 
 
 def format_preview_text(result: SearchResult) -> str:
-    """Generate colorized rich terminal preview for a search item."""
+    """Generate MovieBox-TUI styled rich terminal preview for a search item with AniList metadata."""
     from io import StringIO
     sio = StringIO()
     p_console = Console(file=sio, color_system="truecolor", width=65, force_terminal=True)
 
-    best_indicator = "🏆 TOP PICK (RECOMMENDED)" if result.is_best else "SEARCH RESULT"
-    panel_title = f"[bold cyan]{best_indicator}[/bold cyan]"
+    # 1. High-Resolution Poster Art (prioritize AniList official cover over video thumbnail)
+    poster_source = result.poster_url or result.thumbnail
+    ansi_poster = _render_ascii_art_thumbnail(poster_source, width=54, height=24) if poster_source else ""
+    if ansi_poster:
+        sio.write(ansi_poster + "\n")
 
+    # 2. Series Header (Official Database Metadata)
+    main_title = result.official_title or result.title
+    p_console.print(f"[bold cyan]🎬 {main_title}[/bold cyan]")
+    if result.official_title and result.title != result.official_title:
+        p_console.print(f"[dim]Release: {result.title}[/dim]")
+
+    # 3. AniList Score, Year, Studio & Episodes (MovieBox-TUI style tags)
+    meta_badges = []
+    if result.rating:
+        meta_badges.append(f"[bold yellow]⭐ {result.rating / 10:.1f}/10 (AniList)[/bold yellow]")
+    if result.year:
+        meta_badges.append(f"[cyan]📅 {result.year}[/cyan]")
+    if result.episodes_count:
+        meta_badges.append(f"[green]🎞 {result.episodes_count} Ep[/green]")
+    if result.studio:
+        meta_badges.append(f"[dim white]🏢 {result.studio}[/dim white]")
+    if meta_badges:
+        p_console.print("  ".join(meta_badges))
+
+    if result.genres:
+        genre_tags = " ".join([f"[dim cyan]#{g}[/dim cyan]" for g in result.genres])
+        p_console.print(genre_tags)
+
+    # 4. Official Synopsis (if available)
+    if result.synopsis:
+        p_console.print(f"\n[italic dim white]“{result.synopsis}”[/italic dim white]\n")
+
+    # 5. Technical Stream Specifications Table
+    best_indicator = "🏆 TOP PICK (RECOMMENDED)" if result.is_best else "STREAM OPTION"
     grid = Table.grid(padding=(0, 2))
     grid.add_column(style="bold yellow", justify="right")
     grid.add_column(style="white")
 
-    grid.add_row("Title:", f"[bold white]{result.title}[/bold white]")
     grid.add_row("Provider:", f"[bold magenta]{result.provider}[/bold magenta]")
     grid.add_row("Quality:", f"[bold green]{result.resolution}[/bold green] ({result.quality_type})")
     grid.add_row("Codec:", result.codec)
@@ -169,17 +201,15 @@ def format_preview_text(result: SearchResult) -> str:
         grid.add_row("File Size:", result.size)
     if result.seeders is not None:
         grid.add_row("Seeders:", f"[bold green]{result.seeders}[/bold green]")
-    if result.thumbnail:
-        grid.add_row("Thumbnail:", f"[dim cyan]{result.thumbnail}[/dim cyan]")
-
     grid.add_row("Score:", f"[bold cyan]{result.score:.1f}[/bold cyan] / 100")
 
-    # Render ANSI graphic thumbnail if available
-    ansi_thumb = _render_ascii_art_thumbnail(result.thumbnail) if result.thumbnail else ""
+    p_console.print(Panel(grid, title=f"[bold cyan]{best_indicator}[/bold cyan]", border_style="cyan"))
 
-    # Badges row
+    # 6. Badges Row
     badge_str = " ".join([f"[reverse]{b}[/reverse]" for b in result.badges])
+    p_console.print(f"[bold]Badges:[/bold] {badge_str}")
 
+    # 7. Hotkeys Footer
     footer = Text.from_markup(
         "\n[bold green]⌨ Keybindings:[/bold green]\n"
         " • [bold yellow]Enter[/bold yellow]   : 🎬 Stream instantly in MPV\n"
@@ -188,15 +218,10 @@ def format_preview_text(result: SearchResult) -> str:
         " • [bold magenta]Ctrl+Y[/bold magenta]  : 📋 Copy Stream / Magnet URL\n"
         " • [bold red]Esc / q[/bold red] : Exit"
     )
-
-    if ansi_thumb:
-        sio.write(ansi_thumb + "\n")
-
-    p_console.print(Panel(grid, title=panel_title, border_style="cyan"))
-    p_console.print(f"[bold]Badges:[/bold] {badge_str}")
     p_console.print(footer)
 
     return sio.getvalue()
+
 
 
 def render_preview_cli(results_json_path: str, index: int):

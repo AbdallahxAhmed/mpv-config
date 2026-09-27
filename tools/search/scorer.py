@@ -101,6 +101,10 @@ def score_and_badge_results(results: List[SearchResult]) -> List[SearchResult]:
         if r.provider == "HentaiMama":
             score += 12.0
 
+        # 8. AniList Rating Badge
+        if r.rating and r.rating >= 50:
+            badges.append(f"[⭐ {r.rating/10:.1f} AniList]")
+
         r.score = score
         r.badges = badges
 

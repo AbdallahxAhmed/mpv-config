@@ -113,7 +113,48 @@ class TestHSearchQualityScorer(unittest.TestCase):
         self.assertIsNotNone(chafa_path)
         self.assertTrue(chafa_path.endswith("chafa.exe") or "chafa" in chafa_path.lower())
 
+    def test_clean_series_title(self):
+        from tools.search.metadata import clean_series_title
+        self.assertEqual(clean_series_title("Imaria Episode 6 English Subbed"), "Imaria")
+        self.assertEqual(clean_series_title("Imaria Ova Episode 1"), "Imaria")
+        self.assertEqual(clean_series_title("[1080p] Bible Black - 02 [Decensored]"), "Bible Black")
+
+    def test_anilist_metadata_mock(self):
+        from unittest.mock import patch, MagicMock
+        from tools.search.metadata import fetch_series_metadata
+        import json
+
+        mock_payload = {
+            "data": {
+                "Media": {
+                    "id": 12345,
+                    "title": {"romaji": "Test Anime", "english": "Test Anime EN"},
+                    "coverImage": {"extraLarge": "https://example.com/cover.png"},
+                    "description": "<p>Test synopsis</p>",
+                    "averageScore": 85,
+                    "genres": ["Ecchi", "Comedy"],
+                    "episodes": 4,
+                    "status": "FINISHED",
+                    "startDate": {"year": 2023},
+                    "studios": {"nodes": [{"name": "Passione"}]}
+                }
+            }
+        }
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(mock_payload).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            meta = fetch_series_metadata("Test Unique Mock Title")
+            self.assertIsNotNone(meta)
+            self.assertEqual(meta["romaji_title"], "Test Anime")
+            self.assertEqual(meta["cover_url"], "https://example.com/cover.png")
+            self.assertEqual(meta["score"], 85)
+            self.assertEqual(meta["year"], 2023)
+            self.assertIn("Test synopsis", meta["synopsis"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

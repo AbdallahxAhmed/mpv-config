@@ -26,3 +26,12 @@ class SearchResult:
     badges: List[str] = field(default_factory=list)
     is_best: bool = False
     episode: Optional[str] = None
+    poster_url: Optional[str] = None
+    official_title: Optional[str] = None
+    rating: Optional[float] = None
+    genres: List[str] = field(default_factory=list)
+    year: Optional[int] = None
+    synopsis: Optional[str] = None
+    studio: Optional[str] = None
+    episodes_count: Optional[int] = None
+
