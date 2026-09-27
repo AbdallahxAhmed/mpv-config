@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -9,7 +9,7 @@ use ratatui::{
 };
 use ratatui_image::StatefulImage;
 use ratatui_image::protocol::StatefulProtocol;
-use crate::app::{App, ArtworkMode};
+use crate::app::{App, ArtworkMode, ViewMode};
 use crate::models::ProviderFilter;
 
 // MovieBox Catppuccin Mocha Color Palette
@@ -31,15 +31,150 @@ const COLOR_RED: Color = Color::Rgb(243, 139, 168);     // #F38BA8
 pub fn render_ui(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
-    // MovieBox Vertical Layout Hierarchy:
-    // 1. Unified Search & Brand Header (3 rows)
-    // 2. Clean Provider Filter Pills (1 row)
-    // 3. MovieBox Master Media Showcase (Top Deck: 2:3 Artwork + Rich Badges + Synopsis)
-    // 4. Episodes & Streams Catalog Deck (Bottom Deck: Full Width)
-    // 5. Clean Footer Keybindings (1 row)
-    let showcase_height = if size.height >= 38 {
+    match app.view_mode() {
+        ViewMode::Landing => render_landing_screen(frame, app, size),
+        ViewMode::Results => render_results_screen(frame, app, size),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. LANDING SCREEN (MovieBox-TUI Home Screen)
+// ─────────────────────────────────────────────────────────────────────────────
+fn render_landing_screen(frame: &mut Frame, app: &App, area: Rect) {
+    // Center column layout
+    let target_width = 72.min(area.width.saturating_sub(4)).max(30);
+    let horiz_pad = (area.width.saturating_sub(target_width)) / 2;
+
+    let col_area = Rect {
+        x: area.x + horiz_pad,
+        y: area.y,
+        width: target_width,
+        height: area.height,
+    };
+
+    let top_pad = if area.height >= 34 { 3 } else { 1 };
+    let logo_height = 5;
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(top_pad),        // Top padding
+            Constraint::Length(logo_height),    // MOVIEBOX 3D ASCII Banner
+            Constraint::Length(1),              // Subtitle v0.1.24
+            Constraint::Length(1),              // Gap
+            Constraint::Length(3),              // Centered Search Box
+            Constraint::Length(1),              // Gap
+            Constraint::Length(7),              // Discover Categories
+            Constraint::Min(1),                 // Fill
+            Constraint::Length(1),              // Footer
+        ])
+        .split(col_area);
+
+    // 1. ASCII 3D Banner
+    let logo_lines = vec![
+        Line::from(Span::styled("███    ███  ██████  ██    ██ ██ ███████ ██████   ██████  ██   ██", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("████  ████ ██    ██ ██    ██ ██ ██      ██   ██ ██    ██  ██ ██ ", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("██ ████ ██ ██    ██ ██    ██ ██ █████   ██████  ██    ██   ███  ", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("██  ██  ██ ██    ██  ██  ██  ██ ██      ██   ██ ██    ██  ██ ██ ", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("██      ██  ██████    ████   ██ ███████ ██████   ██████  ██   ██", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD))),
+    ];
+    let logo_p = Paragraph::new(logo_lines).alignment(Alignment::Center);
+    frame.render_widget(logo_p, rows[1]);
+
+    // 2. Version
+    let ver_p = Paragraph::new(Line::from(Span::styled("v0.1.24", Style::default().fg(COLOR_SUBTEXT0))))
+        .alignment(Alignment::Center);
+    frame.render_widget(ver_p, rows[2]);
+
+    // 3. Search Box
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_BLUE));
+
+    let prompt = Span::styled("❯ ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD));
+    let query_span = if app.query_input.is_empty() {
+        Span::styled("Search movies, series & anime...", Style::default().fg(COLOR_SURFACE2))
+    } else {
+        Span::styled(&app.query_input, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+    };
+    let cursor_span = Span::styled("▋", Style::default().fg(COLOR_BLUE));
+
+    let active_provider_tag = match app.active_filter {
+        ProviderFilter::All => "MovieBox • Tab",
+        ProviderFilter::HentaiMama => "Mama • Tab",
+        ProviderFilter::MuchoHentai => "Mucho • Tab",
+        ProviderFilter::Nyaa => "Nyaa • Tab",
+        ProviderFilter::Hanime => "Hanime • Tab",
+        ProviderFilter::HentaiWorld => "World • Tab",
+        ProviderFilter::HentaiHaven => "Haven • Tab",
+    };
+    let tag_span = Span::styled(format!("  [{}]", active_provider_tag), Style::default().fg(COLOR_BLUE));
+
+    let search_line = Line::from(vec![
+        Span::raw(" "),
+        prompt,
+        query_span,
+        cursor_span,
+        Span::raw("  "),
+        tag_span,
+    ]);
+    let search_p = Paragraph::new(search_line).block(search_block);
+    frame.render_widget(search_p, rows[4]);
+
+    // 4. Discover Categories Card
+    let disc_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_SURFACE1))
+        .title(Line::from(vec![
+            Span::styled(" ✦ Discover Categories ", Style::default().fg(COLOR_TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled("──────────────────────── [ /browse ] ", Style::default().fg(COLOR_SURFACE1)),
+        ]));
+
+    let cat_lines = vec![
+        Line::from(vec![
+            Span::styled("  • Trending Now            ", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
+            Span::styled("Popular & In-Theaters", Style::default().fg(COLOR_SUBTEXT0)),
+        ]),
+        Line::from(vec![
+            Span::styled("  • Top Rated Series        ", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
+            Span::styled("Critically Acclaimed TV", Style::default().fg(COLOR_SUBTEXT0)),
+        ]),
+        Line::from(vec![
+            Span::styled("  • Latest Releases         ", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
+            Span::styled("Recent 4K & HD Additions", Style::default().fg(COLOR_SUBTEXT0)),
+        ]),
+        Line::from(vec![
+            Span::styled("  • Most Watched            ", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
+            Span::styled("Community Favorites", Style::default().fg(COLOR_SUBTEXT0)),
+        ]),
+    ];
+    let disc_p = Paragraph::new(cat_lines).block(disc_block);
+    frame.render_widget(disc_p, rows[6]);
+
+    // 5. Landing Footer
+    let footer_line = Line::from(vec![
+        Span::styled("[Tab]", Style::default().fg(COLOR_PEACH).add_modifier(Modifier::BOLD)),
+        Span::styled(" Provider   ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled("[Enter]", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
+        Span::styled(" Search   ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled("[?]", Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
+        Span::styled(" Help   ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled("[q]", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
+        Span::styled(" Quit", Style::default().fg(COLOR_SUBTEXT0)),
+    ]);
+    let footer_p = Paragraph::new(footer_line).alignment(Alignment::Center);
+    frame.render_widget(footer_p, rows[8]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. RESULTS SCREEN (MovieBox-TUI Search & Details Deck)
+// ─────────────────────────────────────────────────────────────────────────────
+fn render_results_screen(frame: &mut Frame, app: &mut App, area: Rect) {
+    let showcase_height = if area.height >= 38 {
         16
-    } else if size.height >= 30 {
+    } else if area.height >= 30 {
         14
     } else {
         11
@@ -54,39 +189,30 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
             Constraint::Min(8),                  // Episodes & Streams Catalog
             Constraint::Length(1),               // Footer Shortcuts
         ])
-        .split(size);
+        .split(area);
 
-    render_header(frame, app, chunks[0]);
+    render_results_header(frame, app, chunks[0]);
     render_provider_pills(frame, app, chunks[1]);
     render_details_showcase(frame, app, chunks[2]);
     render_catalog_table(frame, app, chunks[3]);
     render_footer(frame, app, chunks[4]);
 }
 
-fn render_header(frame: &mut Frame, app: &App, area: Rect) {
+fn render_results_header(frame: &mut Frame, app: &App, area: Rect) {
     let border_color = if app.is_editing_search {
         COLOR_BLUE
     } else {
         COLOR_SURFACE2
     };
 
-    let brand_span = Span::styled(
-        " 🎞 MOVIEBOX-TUI ",
-        Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD),
-    );
-
     let prompt_span = if app.is_editing_search {
-        Span::styled(" ❯ Search: ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD))
+        Span::styled(" ❯ ", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD))
     } else {
-        Span::styled(" ❯ Search: ", Style::default().fg(COLOR_SUBTEXT0))
+        Span::styled(" ❯ ", Style::default().fg(COLOR_SUBTEXT0))
     };
 
     let query_span = if app.query_input.is_empty() {
-        if app.is_editing_search {
-            Span::styled("Type a title to search (e.g. imaria, overflow)...", Style::default().fg(COLOR_SURFACE2))
-        } else {
-            Span::styled("Press '/' or Enter to search", Style::default().fg(COLOR_SURFACE2))
-        }
+        Span::styled("Type a title to search...", Style::default().fg(COLOR_SURFACE2))
     } else {
         Span::styled(&app.query_input, Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
     };
@@ -97,37 +223,35 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw("")
     };
 
-    let status_badge = if app.is_searching {
-        Span::styled(
-            " [ ⏳ Querying 6 Providers... ] ",
-            Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD),
-        )
-    } else if !app.all_results.is_empty() {
-        Span::styled(
-            format!(" [ {} Streams Ready ] ", app.all_results.len()),
-            Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
-        )
+    let result_text = if app.is_searching {
+        "⏳ Querying 6 Providers...".to_string()
     } else {
-        Span::raw("")
+        let count = app.all_results.len();
+        if count == 1 {
+            "1 result".to_string()
+        } else {
+            format!("{} results", count)
+        }
     };
+
+    let status_badge = Span::styled(
+        result_text,
+        Style::default().fg(if app.is_searching { COLOR_YELLOW } else { COLOR_SUBTEXT0 }).add_modifier(Modifier::BOLD),
+    );
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(border_color));
 
-    let header_line = Line::from(vec![
-        brand_span,
-        Span::styled("│", Style::default().fg(COLOR_SURFACE2)),
-        prompt_span,
-        query_span,
-        cursor_span,
-        Span::raw("  "),
-        status_badge,
-    ]);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    let paragraph = Paragraph::new(header_line).block(block);
-    frame.render_widget(paragraph, area);
+    let left_para = Paragraph::new(Line::from(vec![prompt_span, query_span, cursor_span]));
+    let right_para = Paragraph::new(Line::from(status_badge)).alignment(Alignment::Right);
+
+    frame.render_widget(left_para, inner);
+    frame.render_widget(right_para, inner);
 }
 
 fn render_provider_pills(frame: &mut Frame, app: &App, area: Rect) {
@@ -198,7 +322,7 @@ fn render_details_showcase(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Split showcase horizontally:
-    // Left: Artwork Card (~26 width)
+    // Left: Artwork Card (~28 width)
     // Right: MovieBox Metadata & Synopsis (remaining)
     let showcase_split = Layout::default()
         .direction(Direction::Horizontal)
@@ -287,11 +411,10 @@ fn render_details_showcase(frame: &mut Frame, app: &mut App, area: Rect) {
         .unwrap_or("No plot overview available for this title.");
 
     let mut meta_lines = vec![
-        // Row 1: Title
-        Line::from(Span::styled(
-            official_title,
-            Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD),
-        )),
+        // Row 1: Title (MovieBox highlighted style)
+        Line::from(vec![
+            Span::styled(format!(" {} ", official_title), Style::default().fg(Color::White).bg(COLOR_SURFACE1).add_modifier(Modifier::BOLD)),
+        ]),
         // Row 2: Badges
         Line::from(vec![
             Span::styled(format!(" {} ", rating_str), Style::default().fg(COLOR_MANTLE).bg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
@@ -389,7 +512,6 @@ fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(source_color).add_modifier(Modifier::BOLD),
             ));
 
-            // Format episode / title cleanly
             let title_display = if let Some(ref ep) = r.episode {
                 format!("Ep {:>02} • {}", ep, r.title)
             } else {
@@ -486,6 +608,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(" Search ", Style::default().fg(COLOR_SUBTEXT0)),
         Span::styled("<Tab>", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
         Span::styled(" Filter ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled("<Esc>", Style::default().fg(COLOR_TEXT).add_modifier(Modifier::BOLD)),
+        Span::styled(" Home ", Style::default().fg(COLOR_SUBTEXT0)),
         Span::styled("<q>", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)),
         Span::styled(" Quit", Style::default().fg(COLOR_SUBTEXT0)),
     ];
@@ -493,8 +617,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(38),
-            Constraint::Percentage(62),
+            Constraint::Percentage(34),
+            Constraint::Percentage(66),
         ])
         .split(area);
 

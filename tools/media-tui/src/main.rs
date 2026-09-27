@@ -83,8 +83,20 @@ async fn main() -> Result<()> {
                             }
                         } else {
                             match key.code {
-                                KeyCode::Char('q') | KeyCode::Esc => {
+                                KeyCode::Char('q') => {
                                     app.should_quit = true;
+                                }
+                                KeyCode::Esc => {
+                                    if !app.all_results.is_empty() {
+                                        app.all_results.clear();
+                                        app.filtered_indices.clear();
+                                        app.query_input.clear();
+                                        app.image_protocol = None;
+                                        app.current_image_url = None;
+                                        app.is_editing_search = true;
+                                    } else {
+                                        app.should_quit = true;
+                                    }
                                 }
                                 KeyCode::Char('/') | KeyCode::Char('s') => {
                                     app.is_editing_search = true;

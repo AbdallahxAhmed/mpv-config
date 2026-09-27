@@ -15,6 +15,13 @@ pub enum ArtworkMode {
     SeriesPoster,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ViewMode {
+    #[default]
+    Landing,
+    Results,
+}
+
 #[derive(Debug)]
 pub enum AppAction {
     SearchCompleted(anyhow::Result<Vec<SearchResult>>),
@@ -66,6 +73,14 @@ impl App {
         };
         app.table_state.select(Some(0));
         app
+    }
+
+    pub fn view_mode(&self) -> ViewMode {
+        if self.all_results.is_empty() && !self.is_searching && self.query_input.trim().is_empty() {
+            ViewMode::Landing
+        } else {
+            ViewMode::Results
+        }
     }
 
     pub fn selected_result(&self) -> Option<&SearchResult> {
