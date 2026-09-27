@@ -161,6 +161,31 @@ def download_item(result: SearchResult):
         subprocess.run(cmd)
 
 
+def preview_item(result: SearchResult):
+    """Launch lightweight floating MPV window to preview stream/image."""
+    mpv_exe = find_mpv()
+    console.print(f"\n[bold cyan]👁 Launching Floating Live Preview:[/bold cyan] [white]{result.title}[/white]")
+    target = result.url if result.delivery != "Torrent (P2P)" else (result.thumbnail or result.url)
+    cmd = [
+        mpv_exe,
+        "--geometry=540x300-30-30",
+        "--ontop",
+        "--no-border",
+        "--autofit=540x300",
+        f"--title=Preview: {result.title}",
+        target
+    ]
+    if result.provider == "HentaiMama":
+        cmd.extend(["--http-header-fields=Referer: https://hentaimama.io/"])
+    elif result.provider == "Hanime":
+        cmd.extend(["--http-header-fields=Referer: https://hanime.tv/"])
+
+    try:
+        subprocess.Popen(cmd)
+    except Exception as e:
+        console.print(f"[red]Preview error:[/red] {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Site Anime/Hentai Search & Streaming TUI")
     parser.add_argument("query", nargs="*", help="Title to search")
@@ -207,26 +232,33 @@ def main():
 
     console.print(f"[bold green]Found and ranked {len(results)} sources![/bold green]\n")
 
-    # Launch FZF selector or fallback
-    if not args.no_fzf and shutil.which("fzf"):
-        selected, action = run_fzf_selector(results)
-    else:
-        selected, action = run_rich_fallback(results)
-
-    if not selected or action == "exit":
-        console.print("[yellow]Cancelled.[/yellow]")
-        return
-
-    if action == "play":
-        play_in_mpv(selected)
-    elif action == "download":
-        download_item(selected)
-    elif action == "copy":
-        copy_url = selected.download_url or selected.url
-        if copy_to_clipboard(copy_url):
-            console.print(f"\n[bold green]✔ Copied to clipboard:[/bold green] [white]{copy_url}[/white]")
+    # Interactive selector loop
+    while True:
+        if not args.no_fzf and shutil.which("fzf"):
+            selected, action = run_fzf_selector(results)
         else:
-            console.print(f"\n[yellow]Stream URL:[/yellow] {copy_url}")
+            selected, action = run_rich_fallback(results)
+
+        if not selected or action == "exit":
+            console.print("[yellow]Exited search.[/yellow]")
+            return
+
+        if action == "preview":
+            preview_item(selected)
+            continue
+        elif action == "play":
+            play_in_mpv(selected)
+            break
+        elif action == "download":
+            download_item(selected)
+            break
+        elif action == "copy":
+            copy_url = selected.download_url or selected.url
+            if copy_to_clipboard(copy_url):
+                console.print(f"\n[bold green]✔ Copied to clipboard:[/bold green] [white]{copy_url}[/white]")
+            else:
+                console.print(f"\n[yellow]Stream URL:[/yellow] {copy_url}")
+            break
 
 
 if __name__ == "__main__":

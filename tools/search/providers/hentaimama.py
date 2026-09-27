@@ -16,78 +16,117 @@ HEADERS = {
 }
 
 
-def _resolve_direct_stream(episode_url: str) -> Optional[str]:
-    """Extract direct MP4 video link from HentaiMama episode page via player AJAX."""
+import urllib.request
+import urllib.parse
+import re
+import json
+import base64
+import html
+from typing import List, Tuple, Optional
+from ..models import SearchResult
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
+
+
+def _resolve_direct_stream(episode_url: str) -> Tuple[Optional[str], str, Optional[str]]:
+    """Extract direct 1080p/720p MP4 stream and thumbnail from HentaiMama episode page."""
+    direct_url = None
+    res = "720p"
+    thumb = None
+
     try:
         req = urllib.request.Request(episode_url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=6) as r:
-            html = r.read().decode("utf-8", errors="ignore")
+            page_html = r.read().decode("utf-8", errors="ignore")
 
-        # Find post id (e.g. data-post-id="14274" or a: '14274')
-        pid_match = re.search(r"data-post-id=[\"'](\d+)[\"']", html) or re.search(r"a:\s*[\"'](\d+)[\"']", html)
+        # 1. Extract snapshot / poster thumbnail
+        og_img = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', page_html)
+        snap = re.search(r'src=["\']([^"\']*snapshot[^"\']*)["\']', page_html)
+        thumb = (og_img.group(1) if og_img else None) or (snap.group(1) if snap else None)
+
+        # 2. Extract post id
+        pid_match = re.search(r"data-post-id=[\"'](\d+)[\"']", page_html) or re.search(r"a:\s*[\"'](\d+)[\"']", page_html)
         if not pid_match:
-            return None
+            return None, "720p", thumb
         post_id = pid_match.group(1)
 
         ajax_url = "https://hentaimama.io/wp-admin/admin-ajax.php"
-        data = urllib.parse.urlencode({
-            "action": "get_player_contents",
-            "a": post_id,
-            "i": "1"
-        }).encode("utf-8")
 
-        ajax_req = urllib.request.Request(
-            ajax_url,
-            data=data,
-            headers={
-                **HEADERS,
-                "Referer": episode_url,
-                "X-Requested-With": "XMLHttpRequest",
-            }
-        )
-        with urllib.request.urlopen(ajax_req, timeout=6) as ar:
-            res_text = ar.read().decode("utf-8", errors="ignore")
-            res_json = json.loads(res_text)
-
-        if not res_json or not isinstance(res_json, list):
-            return None
-
-        iframe_html = res_json[0]
-        src_match = re.search(r'src=["\']([^"\']+)["\']', iframe_html)
-        if not src_match:
-            return None
-
-        embed_url = src_match.group(1).replace("&amp;", "&")
-        if not embed_url.startswith("http"):
-            embed_url = urllib.parse.urljoin("https://hentaimama.io", embed_url)
-
-        # Check embed URL for direct stream
-        p_param = re.search(r"[?&]p=([a-zA-Z0-9+/=]+)", embed_url)
-        if p_param:
+        # Try player options in priority: 4 (1080p MP4), 3 (HLS Master), 1 (GDVid MP4)
+        for opt in [4, 3, 1]:
             try:
-                decoded_path = base64.b64decode(p_param.group(1)).decode("utf-8", errors="ignore")
-                if decoded_path:
-                    clean_path = decoded_path.lstrip("/")
-                    direct_mp4 = f"https://gdvid.info/{clean_path}"
-                    return direct_mp4
+                data = urllib.parse.urlencode({
+                    "action": "get_player_contents",
+                    "a": post_id,
+                    "i": str(opt)
+                }).encode("utf-8")
+
+                ajax_req = urllib.request.Request(
+                    ajax_url,
+                    data=data,
+                    headers={
+                        **HEADERS,
+                        "Referer": episode_url,
+                        "X-Requested-With": "XMLHttpRequest",
+                    }
+                )
+                with urllib.request.urlopen(ajax_req, timeout=5) as ar:
+                    res_json = json.loads(ar.read().decode("utf-8", errors="ignore"))
+
+                if not res_json or not isinstance(res_json, list) or opt - 1 >= len(res_json):
+                    continue
+
+                iframe_html = res_json[opt - 1]
+                src_match = re.search(r'src=["\']([^"\']+)["\']', iframe_html)
+                if not src_match:
+                    continue
+
+                embed_url = html.unescape(src_match.group(1))
+                if not embed_url.startswith("http"):
+                    embed_url = urllib.parse.urljoin("https://hentaimama.io", embed_url)
+
+                # Fetch embed page to resolve direct stream URLs
+                embed_req = urllib.request.Request(embed_url, headers={**HEADERS, "Referer": episode_url})
+                with urllib.request.urlopen(embed_req, timeout=5) as er:
+                    e_html = er.read().decode("utf-8", errors="ignore")
+
+                # Check JWPlayer sources JSON array (e.g. 1080p, 720p, 480p)
+                sm = re.search(r'sources:\s*(\[[^\]]+\])', e_html)
+                if sm:
+                    try:
+                        arr = json.loads(sm.group(1))
+                        # Look for 1080p first
+                        for item in arr:
+                            if item.get("label") == "1080p" and item.get("file"):
+                                return item["file"], "1080p", thumb
+                        # Otherwise first valid stream
+                        for item in arr:
+                            if item.get("file"):
+                                lbl = item.get("label", "720p")
+                                return item["file"], lbl, thumb
+                    except Exception:
+                        pass
+
+                # Fallback: check file: "..."
+                f_match = re.search(r'["\']?file["\']?\s*:\s*["\']([^"\']+)["\']', e_html)
+                if f_match:
+                    clean_f = f_match.group(1).replace(r"\/", "/")
+                    f_res = "1080p" if "1080" in clean_f else "720p"
+                    return clean_f, f_res, thumb
+
             except Exception:
                 pass
 
-        # Alternatively inspect embed HTML
-        embed_req = urllib.request.Request(embed_url, headers={**HEADERS, "Referer": episode_url})
-        with urllib.request.urlopen(embed_req, timeout=6) as er:
-            e_html = er.read().decode("utf-8", errors="ignore")
-            f_match = re.search(r'["\']?file["\']?\s*:\s*["\']([^"\']+)["\']', e_html)
-            if f_match:
-                return f_match.group(1).replace(r"\/", "/")
-
     except Exception:
         pass
-    return None
+
+    return direct_url, res, thumb
 
 
 def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
-    """Search HentaiMama for series and episodes."""
+    """Search HentaiMama for series, episodes, and direct 1080p/720p streams."""
     results = []
     encoded_q = urllib.parse.quote_plus(query)
     search_url = f"https://hentaimama.io/?s={encoded_q}"
@@ -95,12 +134,12 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
     try:
         req = urllib.request.Request(search_url, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=8) as r:
-            html = r.read().decode("utf-8", errors="ignore")
+            html_text = r.read().decode("utf-8", errors="ignore")
 
         # Find series cards
-        series_links = re.findall(r'<h[23][^>]*>\s*<a\s+href="([^"]*tvshows/[^"]*)"[^>]*>([^<]+)</a>', html)
+        series_links = re.findall(r'<h[23][^>]*>\s*<a\s+href="([^"]*tvshows/[^"]*)"[^>]*>([^<]+)</a>', html_text)
         if not series_links:
-            series_links = re.findall(r'<a\s+href="([^"]*tvshows/[^"]*)"[^>]*title="([^"]+)"', html)
+            series_links = re.findall(r'<a\s+href="([^"]*tvshows/[^"]*)"[^>]*title="([^"]+)"', html_text)
 
         for show_url, show_title in series_links[:4]:
             try:
@@ -121,14 +160,11 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                     ep_slug = clean_ep_url.rstrip("/").split("/")[-1]
                     title_name = ep_slug.replace("-", " ").title()
 
-                    # Try resolving direct high speed stream link
-                    direct_url = _resolve_direct_stream(clean_ep_url)
+                    # Resolve direct high speed stream link, resolution, and thumbnail
+                    direct_url, res, thumb = _resolve_direct_stream(clean_ep_url)
 
-                    # Default to direct stream if found, else episode page
                     play_url = direct_url if direct_url else clean_ep_url
-
-                    # Check resolution
-                    res = "1080p" if ("1080" in title_name.lower()) else "720p"
+                    q_type = f"Direct MP4 ({res})" if direct_url else "Web Stream"
 
                     results.append(
                         SearchResult(
@@ -137,13 +173,14 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                             url=play_url,
                             download_url=direct_url or clean_ep_url,
                             resolution=res,
-                            quality_type="Direct MP4" if direct_url else "Web Stream",
+                            quality_type=q_type,
                             codec="H.264",
-                            size="~110 MiB - 350 MiB",
+                            size="~350 MiB - 850 MiB" if res == "1080p" else "~110 MiB - 350 MiB",
                             censorship="Censored",
                             subtitles="English Subs",
                             audio="Japanese (Original)",
                             delivery="Instant CDN",
+                            thumbnail=thumb,
                         )
                     )
                     if len(results) >= max_results:

@@ -19,6 +19,74 @@ from .models import SearchResult
 console = Console()
 
 
+def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 44, height: int = 18) -> str:
+    """Download and decode thumbnail image to ANSI 24-bit color half-blocks via ffmpeg."""
+    if not image_url:
+        return ""
+
+    import hashlib
+    url_hash = hashlib.md5(image_url.encode("utf-8")).hexdigest()
+    cache_dir = os.path.join(tempfile.gettempdir(), "mpv-hsearch-thumbs")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_file = os.path.join(cache_dir, f"{url_hash}.ansi")
+
+    if os.path.isfile(cache_file):
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            pass
+
+    ffmpeg_exe = shutil.which("ffmpeg")
+    if not ffmpeg_exe:
+        candidates = [
+            r"C:\Program Files\mpv\ffmpeg\bin\ffmpeg.EXE",
+            r"C:\Program Files\mpv\ffmpeg.exe",
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                ffmpeg_exe = c
+                break
+
+    if not ffmpeg_exe:
+        return ""
+
+    try:
+        cmd = [
+            ffmpeg_exe,
+            "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://hentaimama.io/\r\n",
+            "-i", image_url,
+            "-v", "error",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-s", f"{width}x{height}",
+            "-"
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=3)
+        data = proc.stdout
+        if len(data) != width * height * 3:
+            return ""
+
+        lines = []
+        for y in range(0, height, 2):
+            line = ""
+            for x in range(width):
+                idx_top = (y * width + x) * 3
+                idx_bot = ((y + 1) * width + x) * 3 if (y + 1) < height else idx_top
+                r1, g1, b1 = data[idx_top], data[idx_top + 1], data[idx_top + 2]
+                r2, g2, b2 = data[idx_bot], data[idx_bot + 1], data[idx_bot + 2]
+                line += f"\033[38;2;{r1};{g1};{b1};48;2;{r2};{g2};{b2}m▀"
+            line += "\033[0m"
+            lines.append(line)
+
+        ansi_block = "\n".join(lines) + "\n"
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write(ansi_block)
+        return ansi_block
+    except Exception:
+        return ""
+
+
 def format_preview_text(result: SearchResult) -> str:
     """Generate colorized rich terminal preview for a search item."""
     from io import StringIO
@@ -45,8 +113,13 @@ def format_preview_text(result: SearchResult) -> str:
         grid.add_row("File Size:", result.size)
     if result.seeders is not None:
         grid.add_row("Seeders:", f"[bold green]{result.seeders}[/bold green]")
+    if result.thumbnail:
+        grid.add_row("Thumbnail:", f"[dim cyan]{result.thumbnail}[/dim cyan]")
 
     grid.add_row("Score:", f"[bold cyan]{result.score:.1f}[/bold cyan] / 100")
+
+    # Render ANSI graphic thumbnail if available
+    ansi_thumb = _render_ascii_art_thumbnail(result.thumbnail) if result.thumbnail else ""
 
     # Badges row
     badge_str = " ".join([f"[reverse]{b}[/reverse]" for b in result.badges])
@@ -54,10 +127,14 @@ def format_preview_text(result: SearchResult) -> str:
     footer = Text.from_markup(
         "\n[bold green]⌨ Keybindings:[/bold green]\n"
         " • [bold yellow]Enter[/bold yellow]   : 🎬 Stream instantly in MPV\n"
+        " • [bold cyan]Ctrl+P[/bold cyan]  : 👁 Floating Live Preview (MPV Window)\n"
         " • [bold cyan]Ctrl+D[/bold cyan]  : ⚡ Turbo Download (aria2c / yt-dlp)\n"
         " • [bold magenta]Ctrl+Y[/bold magenta]  : 📋 Copy Stream / Magnet URL\n"
         " • [bold red]Esc / q[/bold red] : Exit"
     )
+
+    if ansi_thumb:
+        sio.write(ansi_thumb + "\n")
 
     p_console.print(Panel(grid, title=panel_title, border_style="cyan"))
     p_console.print(f"[bold]Badges:[/bold] {badge_str}")
@@ -113,12 +190,12 @@ def run_fzf_selector(results: List[SearchResult]) -> tuple[Optional[SearchResult
         fzf_exe,
         "--ansi",
         "--prompt=🔎 Anime/Hentai Search > ",
-        "--header=Enter: Play in MPV | Ctrl-D: Download | Ctrl-Y: Copy Link | Esc: Exit",
+        "--header=Enter: Play in MPV | Ctrl-D: Download | Ctrl-P: Floating Preview | Ctrl-Y: Copy Link | Esc: Exit",
         "--header-first",
         "--delimiter=\\|",
         "--preview", preview_cmd,
         "--preview-window=right:55%:wrap",
-        "--expect=ctrl-d,ctrl-y",
+        "--expect=ctrl-d,ctrl-y,ctrl-p",
     ]
 
     try:
@@ -143,6 +220,8 @@ def run_fzf_selector(results: List[SearchResult]) -> tuple[Optional[SearchResult
                 action = "download"
             elif key == "ctrl-y":
                 action = "copy"
+            elif key == "ctrl-p":
+                action = "preview"
             else:
                 action = "play"
         else:
@@ -187,7 +266,7 @@ def run_rich_fallback(results: List[SearchResult]) -> tuple[Optional[SearchResul
         )
 
     console.print(table)
-    console.print("[bold yellow]Actions:[/bold yellow] Enter number (e.g. [cyan]1[/cyan]) to play, [cyan]d 1[/cyan] to download, [cyan]c 1[/cyan] to copy link, or [red]q[/red] to exit.")
+    console.print("[bold yellow]Actions:[/bold yellow] [cyan]<num>[/cyan] play | [cyan]d <num>[/cyan] download | [cyan]p <num>[/cyan] preview | [cyan]c <num>[/cyan] copy link | [red]q[/red] exit.")
 
     while True:
         try:
@@ -201,6 +280,9 @@ def run_rich_fallback(results: List[SearchResult]) -> tuple[Optional[SearchResul
                 choice = choice[2:].strip()
             elif choice.lower().startswith("c "):
                 action = "copy"
+                choice = choice[2:].strip()
+            elif choice.lower().startswith("p "):
+                action = "preview"
                 choice = choice[2:].strip()
 
             if choice.isdigit():
