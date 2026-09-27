@@ -28,7 +28,20 @@ from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.utils import ExtractorError, urljoin
 
 
-USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+def _get_default_user_agent():
+    ua_file = os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "flaresolverr_ua.txt")
+    if os.path.isfile(ua_file):
+        try:
+            with open(ua_file, "r", encoding="utf-8") as f:
+                ua = f.read().strip()
+                if ua:
+                    return ua
+        except Exception:
+            pass
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+
+
+USER_AGENT = _get_default_user_agent()
 
 
 def into_base64(o):
@@ -102,6 +115,92 @@ def _get_clipboard_stream(video_id):
                 kernel32.GlobalUnlock(handle)
         finally:
             user32.CloseClipboard()
+    except Exception:
+        pass
+    return None
+
+
+def _solve_via_flaresolverr(url):
+    """Query local FlareSolverr instance to solve Cloudflare Turnstile automatically."""
+    endpoint = "http://localhost:8191/v1"
+
+    # Check if running; if not, try to start from C:\Tools\FlareSolverr\flaresolverr.exe
+    is_running = False
+    try:
+        req_health = urllib.request.Request("http://localhost:8191", headers={"User-Agent": "mpv-config/1.0"})
+        with urllib.request.urlopen(req_health, timeout=1.0) as r:
+            is_running = True
+    except Exception:
+        is_running = False
+
+    if not is_running:
+        exe_candidates = [
+            r"C:\Tools\FlareSolverr\flaresolverr.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\FlareSolverr\flaresolverr.exe"),
+            os.environ.get("FLARESOLVERR_PATH", ""),
+        ]
+        for exe in exe_candidates:
+            if exe and os.path.isfile(exe):
+                try:
+                    import subprocess
+                    flags = 0
+                    if sys.platform == "win32":
+                        flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                    subprocess.Popen([exe], cwd=os.path.dirname(exe), creationflags=flags, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    for _ in range(15):
+                        time.sleep(0.5)
+                        try:
+                            with urllib.request.urlopen("http://localhost:8191", timeout=1.0) as r:
+                                is_running = True
+                                break
+                        except Exception:
+                            pass
+                    if is_running:
+                        break
+                except Exception:
+                    pass
+
+    try:
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps({"cmd": "request.get", "url": url, "maxTimeout": 60000}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=70) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") == "ok":
+                sol = data.get("solution", {})
+                cookies = sol.get("cookies", [])
+                ua = sol.get("userAgent", "")
+                cstr = "; ".join(f"{c['name']}={c['value']}" for c in cookies if c.get("name"))
+
+                # Auto-save fresh cookies to disk for future yt-dlp runs
+                try:
+                    lines = ["# Netscape HTTP Cookie File", "# Exported by FlareSolverr", ""]
+                    for c in cookies:
+                        dom = c.get("domain", ".hanime.tv")
+                        sec = "TRUE" if c.get("secure") else "FALSE"
+                        lines.append(f"{dom}\tTRUE\t/\t{sec}\t{int(c.get('expiry') or 0)}\t{c.get('name')}\t{c.get('value')}")
+                    netscape_text = "\n".join(lines) + "\n"
+                    save_targets = [
+                        os.path.join(os.environ.get("APPDATA", ""), "yt-dlp", "cookies.txt"),
+                        os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "cookies", "hanime.tv.txt"),
+                    ]
+                    for st in save_targets:
+                        os.makedirs(os.path.dirname(st), exist_ok=True)
+                        with open(st, "w", encoding="utf-8") as f:
+                            f.write(netscape_text)
+
+                    if ua:
+                        ua_file = os.path.join(os.environ.get("APPDATA", ""), "mpv-config", "flaresolverr_ua.txt")
+                        os.makedirs(os.path.dirname(ua_file), exist_ok=True)
+                        with open(ua_file, "w", encoding="utf-8") as f:
+                            f.write(ua)
+                except Exception:
+                    pass
+
+                return {"cookie_str": cstr, "user_agent": ua, "cookies": cookies}
     except Exception:
         pass
     return None
@@ -323,27 +422,100 @@ class HanimeTVIE(SiteKit, InfoExtractor):
                         }
 
                 if '403' in str(exc) or 'Forbidden' in str(exc):
-                    raise ExtractorError(
-                        f'Cloudflare Turnstile challenge active on hanime.tv (HTTP 403 Forbidden).\n'
-                        f'Plug & Play Auto-Fix:\n'
-                        f'1. Open this video once in your browser (Helium / Brave / Chrome):\n'
-                        f'   {url}\n'
-                        f'2. The MPV Companion extension & userscript will automatically sync the fresh clearance\n'
-                        f'   and stream manifest to yt-dlp / MPV in real time (zero manual export needed!).\n'
-                        f'3. Or click "🎬 Play in MPV" or "⚡ Turbo Download" on the floating player pill.',
-                        expected=True
-                    )
-                raise
+                    self.to_screen(f'[hanime] Cloudflare challenge detected. Engaging FlareSolverr automated solver...')
+                    solution = _solve_via_flaresolverr(url)
+                    if solution and solution.get('cookie_str'):
+                        self.to_screen(f'[hanime] Successfully bypassed Cloudflare Turnstile via FlareSolverr!')
+                        handshake_headers['Cookie'] = solution['cookie_str']
+                        if solution.get('user_agent'):
+                            handshake_headers['User-Agent'] = solution['user_agent']
+
+                        # Propagate cookies to yt-dlp cookiejar
+                        if solution.get('cookies'):
+                            for c in solution['cookies']:
+                                try:
+                                    self._set_cookie(c.get('domain', '.hanime.tv'), c.get('name', ''), c.get('value', ''))
+                                except Exception:
+                                    pass
+
+                        if cffi_requests:
+                            try:
+                                resp = cffi_requests.post(
+                                    "https://auth.hanime.tv/api/v11/handshake",
+                                    headers=handshake_headers,
+                                    data=json.dumps({'token': payload}),
+                                    impersonate="chrome124",
+                                    timeout=15
+                                )
+                                if resp.status_code == 200:
+                                    xt = resp.headers.get('X-Token') or resp.headers.get('x-token')
+                                    if xt:
+                                        manifest = self._parse_token(xt)
+                            except Exception as e_cffi:
+                                self.to_screen(f'[hanime] FlareSolverr cffi handshake notice: {e_cffi}')
+
+                        if not manifest:
+                            try:
+                                req = urllib.request.Request(
+                                    "https://auth.hanime.tv/api/v11/handshake",
+                                    data=json.dumps({'token': payload}).encode('ascii'),
+                                    headers=handshake_headers,
+                                    method='POST'
+                                )
+                                with urllib.request.urlopen(req, timeout=15) as r2:
+                                    xt = r2.headers.get('X-Token') or r2.headers.get('x-token')
+                                    if xt:
+                                        manifest = self._parse_token(xt)
+                            except Exception as e2:
+                                self.to_screen(f'[hanime] FlareSolverr clearance handshake notice: {e2}')
+
+                    if not manifest:
+                        raise ExtractorError(
+                            f'Cloudflare Turnstile challenge active on hanime.tv (HTTP 403 Forbidden).\n'
+                            f'Plug & Play Auto-Fix:\n'
+                            f'1. Launch FlareSolverr (C:\\Tools\\FlareSolverr\\flaresolverr.exe) or open video once in Helium:\n'
+                            f'   {url}\n'
+                            f'2. The MPV Companion extension & userscript will automatically sync the fresh clearance\n'
+                            f'   and stream manifest to yt-dlp / MPV in real time (zero manual export needed!).\n'
+                            f'3. Or click "🎬 Play in MPV" or "⚡ Turbo Download" on the floating player pill.',
+                            expected=True
+                        )
+                else:
+                    raise
 
         if not manifest:
             raise ExtractorError('No X-Token found in response headers from auth.hanime.tv. Cloudflare challenge or auth error.', expected=True)
 
+        cdn_headers = {
+            'User-Agent': handshake_headers.get('User-Agent', USER_AGENT),
+            'Referer': 'https://hanime.tv/',
+            'Origin': 'https://hanime.tv',
+        }
+
+        m3u8_fetch_headers = dict(cdn_headers)
+        if 'Cookie' in handshake_headers:
+            m3u8_fetch_headers['Cookie'] = handshake_headers['Cookie']
+
         formats = []
-        for source in manifest['sources']:
-            if source['kind'] == 'normal':
-                result = self._extract_m3u8_formats(
-                    urljoin('https://hanime.tv', source['src']), video_id, ext='mp4', m3u8_id=source['label'])
-                formats.extend(result)
+        for source in manifest.get('sources', []):
+            if source.get('kind') == 'normal' and source.get('src'):
+                src_url = urljoin('https://hanime.tv', source['src'])
+                if '.m3u8' in src_url or '/hls/' in src_url:
+                    result = self._extract_m3u8_formats(
+                        src_url, video_id, ext='mp4', m3u8_id=source.get('label', 'default'),
+                        headers=m3u8_fetch_headers, fatal=False
+                    )
+                    for f in (result or []):
+                        f.setdefault('http_headers', {}).update(cdn_headers)
+                    if result:
+                        formats.extend(result)
+                elif '.mp4' in src_url:
+                    formats.append({
+                        'url': src_url,
+                        'ext': 'mp4',
+                        'format_id': source.get('label', 'direct-mp4'),
+                        'http_headers': cdn_headers,
+                    })
 
         video_title = (self._html_search_regex(r'<h1[^>]+?>([^<]+)', page, 'Video title', default=None) if page else None) or video_id.replace('-', ' ').title()
         return {

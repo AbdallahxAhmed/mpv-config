@@ -351,7 +351,20 @@ def fetch_hanime_manifest_direct(slug: str, cookie_file: Optional[str] = None) -
                 return manifest
     except Exception as e:
         # Handshake encountered an error (e.g. Cloudflare challenge on direct socket)
-        pass
+        try:
+            from tools.core.flaresolverr import solve_cloudflare
+            sol = solve_cloudflare(f"https://hanime.tv/videos/hentai/{slug}")
+            if sol and sol.get('cookie_str'):
+                headers['Cookie'] = sol['cookie_str']
+                if sol.get('user_agent'):
+                    headers['User-Agent'] = sol['user_agent']
+                req = urllib.request.Request(f"{AUTH_API_URL}/api/v11/handshake", data=data, headers=headers, method='POST')
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    xtoken = resp.headers.get('X-Token')
+                    if xtoken:
+                        return parse_token(xtoken)
+        except Exception:
+            pass
     return None
 
 def parse_m3u8_formats(m3u8_text: str, base_url: str) -> List[Dict[str, Any]]:
