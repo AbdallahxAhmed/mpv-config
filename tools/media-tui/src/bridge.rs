@@ -3,7 +3,7 @@ use tokio::process::Command;
 use crate::models::{BridgeResponse, SearchResult};
 use anyhow::{Result, Context};
 
-fn find_repo_root() -> PathBuf {
+pub fn find_repo_root() -> PathBuf {
     // 1. Walk up from CWD
     if let Ok(cwd) = std::env::current_dir() {
         let mut curr = cwd;

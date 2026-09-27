@@ -64,33 +64,80 @@ pub fn preview_floating(result: &SearchResult) -> std::io::Result<Child> {
     cmd.spawn()
 }
 
+use crate::bridge::find_repo_root;
+
 pub fn download_item(result: &SearchResult) -> std::io::Result<Child> {
     let dl_url = result.download_url.as_ref().unwrap_or(&result.url);
     let downloads_dir = std::env::var("USERPROFILE")
         .map(|p| format!("{}\\Downloads", p))
         .unwrap_or_else(|_| ".".to_string());
 
+    let repo_root = find_repo_root();
+    let script = repo_root.join("tools").join("universal_downloader.py");
+
+    let clean_title = result.title.replace(['"', '\'', '`', '\\', '/'], "");
+
+    // Determine site-specific referer if needed
+    let referer = if result.provider == "HentaiMama" {
+        Some("https://hentaimama.io/")
+    } else if result.provider == "MuchoHentai" {
+        Some("https://muchohentai.com/")
+    } else if result.provider == "Hanime" {
+        Some("https://hanime.tv/")
+    } else {
+        None
+    };
+
     if result.delivery == "Torrent (P2P)" || dl_url.ends_with(".torrent") || dl_url.starts_with("magnet:") {
-        // Try aria2c
-        let mut cmd = Command::new("aria2c");
-        cmd.arg(dl_url)
-            .arg(format!("--dir={}", downloads_dir))
-            .arg("--seed-time=0")
-            .arg("--max-connection-per-server=16")
-            .arg("--split=16");
-
-        if let Ok(child) = cmd.spawn() {
-            return Ok(child);
-        }
+        // Spawn aria2c in a separate window so user sees progress
+        Command::new("cmd")
+            .args([
+                "/c",
+                "start",
+                &format!("Torrent Turbo Download - {}", clean_title),
+                "aria2c",
+                dl_url,
+                &format!("--dir={}", downloads_dir),
+                "--seed-time=0",
+                "--max-connection-per-server=16",
+                "--split=16",
+            ])
+            .spawn()
+    } else if let Some(ref_url) = referer {
+        // Direct yt-dlp with aria2c turbo downloader and referer header in a separate window
+        Command::new("cmd")
+            .args([
+                "/c",
+                "start",
+                &format!("Turbo Download - {}", clean_title),
+                "yt-dlp",
+                "--downloader",
+                "aria2c",
+                "--downloader-args",
+                "aria2c:-s 16 -x 16 -k 1M",
+                "--add-header",
+                &format!("Referer: {}", ref_url),
+                "-P",
+                &downloads_dir,
+                dl_url,
+            ])
+            .spawn()
+    } else {
+        // Use universal_downloader.py with absolute path in a separate window
+        Command::new("cmd")
+            .args([
+                "/c",
+                "start",
+                &format!("Turbo Download - {}", clean_title),
+                "python",
+                script.to_str().unwrap_or("tools/universal_downloader.py"),
+                dl_url,
+                "-o",
+                &downloads_dir,
+            ])
+            .current_dir(&repo_root)
+            .spawn()
     }
-
-    // Default to universal downloader / yt-dlp
-    let mut cmd = Command::new("python");
-    cmd.arg("tools/universal_downloader.py")
-        .arg(dl_url)
-        .current_dir(downloads_dir);
-
-    cmd.spawn()
 }
 
 pub fn copy_to_clipboard(text: &str) {
