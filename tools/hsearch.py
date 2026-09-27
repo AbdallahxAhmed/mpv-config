@@ -209,7 +209,7 @@ def main():
         console.print(
             Panel(
                 "[bold cyan]🔍 Multi-Site Media Search & Quality Comparator[/bold cyan]\n"
-                "[dim]Searches HentaiMama, Sukebei Nyaa, Hanime, HentaiWorld & HentaiHaven[/dim]",
+                "[dim]Searches HentaiMama, MuchoHentai, Sukebei Nyaa, Hanime, HentaiWorld & HentaiHaven[/dim]",
                 border_style="cyan"
             )
         )

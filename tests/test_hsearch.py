@@ -85,5 +85,35 @@ class TestHSearchQualityScorer(unittest.TestCase):
         self.assertIn("Enter", preview_text)
 
 
+    def test_muchohentai_stream_resolution_logic(self):
+        from unittest.mock import patch, MagicMock
+        from tools.search.providers.muchohentai import _resolve_mucho_stream
+
+        mock_html = """
+        <html>
+        <meta property="og:image" content="https://muchohentai.com/thumb.jpg">
+        <script>
+        var servers = ["va01"];
+        var files = [{"file":"\\/wp-content\\/uploads\\/test\\/ja.m3u8"}];
+        </script>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = mock_html.encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            stream_url, thumb = _resolve_mucho_stream("https://muchohentai.com/test-episode")
+            self.assertEqual(stream_url, "https://va01.edge.tmncdn.io/wp-content/uploads/test/ja.m3u8")
+            self.assertEqual(thumb, "https://muchohentai.com/thumb.jpg")
+
+    def test_chafa_engine_discovery(self):
+        from tools.search.ui import find_chafa
+        chafa_path = find_chafa()
+        self.assertIsNotNone(chafa_path)
+        self.assertTrue(chafa_path.endswith("chafa.exe") or "chafa" in chafa_path.lower())
+
+
 if __name__ == "__main__":
     unittest.main()
+

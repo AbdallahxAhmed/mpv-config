@@ -19,16 +19,37 @@ from .models import SearchResult
 console = Console()
 
 
-def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, height: int = 30) -> str:
-    """Download and decode thumbnail image to high-density ANSI 24-bit color half-blocks via ffmpeg."""
+def find_chafa() -> Optional[str]:
+    """Find installed Chafa graphics engine."""
+    which = shutil.which("chafa")
+    if which:
+        return which
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\hpjansson.Chafa_Microsoft.Winget.Source_8wekyb3d8bbwe\chafa-1.18.3-1-x86_64-win\chafa.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\chafa.exe"),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    root = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages")
+    if os.path.isdir(root):
+        for r, _, files in os.walk(root):
+            if "chafa.exe" in [f.lower() for f in files]:
+                return os.path.join(r, "chafa.exe")
+    return None
+
+
+def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, height: int = 22) -> str:
+    """Download and decode thumbnail image to smooth high-density sub-pixel terminal graphics via Chafa or ffmpeg."""
     if not image_url:
         return ""
 
     import hashlib
+    import urllib.request
     url_hash = hashlib.md5(f"{image_url}_{width}_{height}".encode("utf-8")).hexdigest()
     cache_dir = os.path.join(tempfile.gettempdir(), "mpv-hsearch-thumbs")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, f"{url_hash}_hd.ansi")
+    cache_file = os.path.join(cache_dir, f"{url_hash}_chafa_v3.ansi")
 
     if os.path.isfile(cache_file):
         try:
@@ -37,6 +58,42 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, heigh
         except Exception:
             pass
 
+    # Download image file
+    img_temp = os.path.join(cache_dir, f"{url_hash}_raw.webp")
+    if not os.path.isfile(img_temp):
+        try:
+            req = urllib.request.Request(
+                image_url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            with urllib.request.urlopen(req, timeout=4) as r:
+                data = r.read()
+            with open(img_temp, "wb") as f:
+                f.write(data)
+        except Exception:
+            return ""
+
+    # 1. Use Chafa if available (MovieBox-TUI grade rendering with sextants & quadrants)
+    chafa_exe = find_chafa()
+    if chafa_exe and os.path.isfile(img_temp):
+        try:
+            cmd = [
+                chafa_exe,
+                f"--size={width}x{height}",
+                "--symbols=vhalf+quad+sextant+braille",
+                "--color-space=rgb",
+                img_temp
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", timeout=3)
+            if proc.returncode == 0 and proc.stdout.strip():
+                ansi_block = proc.stdout
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    f.write(ansi_block)
+                return ansi_block
+        except Exception:
+            pass
+
+    # 2. Fallback to ffmpeg lanczos + unsharp half-blocks
     ffmpeg_exe = shutil.which("ffmpeg")
     if not ffmpeg_exe:
         candidates = [
@@ -48,14 +105,13 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, heigh
                 ffmpeg_exe = c
                 break
 
-    if not ffmpeg_exe:
+    if not ffmpeg_exe or not os.path.isfile(img_temp):
         return ""
 
     try:
         cmd = [
             ffmpeg_exe,
-            "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://hentaimama.io/\r\n",
-            "-i", image_url,
+            "-i", img_temp,
             "-vf", f"scale={width}:{height}:flags=lanczos,unsharp=3:3:1.5",
             "-v", "error",
             "-f", "rawvideo",
