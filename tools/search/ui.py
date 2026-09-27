@@ -19,16 +19,16 @@ from .models import SearchResult
 console = Console()
 
 
-def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 44, height: int = 18) -> str:
-    """Download and decode thumbnail image to ANSI 24-bit color half-blocks via ffmpeg."""
+def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 66, height: int = 30) -> str:
+    """Download and decode thumbnail image to high-density ANSI 24-bit color half-blocks via ffmpeg."""
     if not image_url:
         return ""
 
     import hashlib
-    url_hash = hashlib.md5(image_url.encode("utf-8")).hexdigest()
+    url_hash = hashlib.md5(f"{image_url}_{width}_{height}".encode("utf-8")).hexdigest()
     cache_dir = os.path.join(tempfile.gettempdir(), "mpv-hsearch-thumbs")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, f"{url_hash}.ansi")
+    cache_file = os.path.join(cache_dir, f"{url_hash}_hd.ansi")
 
     if os.path.isfile(cache_file):
         try:
@@ -56,10 +56,10 @@ def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 44, heigh
             ffmpeg_exe,
             "-headers", "User-Agent: Mozilla/5.0\r\nReferer: https://hentaimama.io/\r\n",
             "-i", image_url,
+            "-vf", f"scale={width}:{height}:flags=lanczos,unsharp=3:3:1.5",
             "-v", "error",
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
-            "-s", f"{width}x{height}",
             "-"
         ]
         proc = subprocess.run(cmd, capture_output=True, timeout=3)
