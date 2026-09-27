@@ -522,10 +522,20 @@ class HanimeTVIE(SiteKit, InfoExtractor):
                         'http_headers': cdn_headers,
                     })
 
+        has_1080p_locked = any(s.get('height') == 1080 and not s.get('src') for s in manifest.get('sources', []))
+        if has_1080p_locked:
+            self.to_screen('Note: 1080p is locked to Hanime.tv Premium members (server returned empty stream). Highest free stream is 720p.')
+
+        top_headers = {
+            'User-Agent': handshake_headers.get('User-Agent', USER_AGENT),
+            'Referer': 'https://hanime.tv/',
+            'Origin': 'https://hanime.tv',
+        }
+
         video_title = (self._html_search_regex(r'<h1[^>]+?>([^<]+)', page, 'Video title', default=None) if page else None) or video_id.replace('-', ' ').title()
         return {
             'id': video_id,
             'title': video_title,
             'formats': formats,
-            'http_headers': cdn_headers,
+            'http_headers': top_headers,
         }
