@@ -12,6 +12,7 @@ use crate::mpv;
 pub enum AppAction {
     SearchCompleted(anyhow::Result<Vec<SearchResult>>),
     ImageLoaded { url: String, path: PathBuf },
+    #[allow(dead_code)]
     SetStatus(String),
 }
 
@@ -152,7 +153,8 @@ impl App {
 
     pub fn trigger_image_load_for_selected(&mut self, action_tx: mpsc::Sender<AppAction>) {
         let target_url = if let Some(r) = self.selected_result() {
-            r.poster_url.as_ref().or(r.thumbnail.as_ref()).cloned()
+            // Prioritize episode-specific thumbnail snapshot, fallback to series cover
+            r.thumbnail.as_ref().or(r.poster_url.as_ref()).cloned()
         } else {
             None
         };
@@ -168,6 +170,8 @@ impl App {
         }
 
         self.current_image_url = Some(url.clone());
+        self.image_protocol = None; // Reset so previous episode's image does not linger
+
         let tx = action_tx.clone();
         let url_clone = url.clone();
 

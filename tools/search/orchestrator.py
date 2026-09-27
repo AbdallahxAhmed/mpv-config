@@ -50,8 +50,11 @@ def multi_search(query: str, progress_callback: Optional[Callable[[str], None]] 
 
     # Attach official metadata & HD poster to results
     if series_meta:
+        cover = series_meta.get("cover_url")
         for r in all_results:
-            r.poster_url = series_meta.get("cover_url")
+            r.poster_url = cover
+            if not r.thumbnail:
+                r.thumbnail = cover
             r.official_title = series_meta.get("romaji_title") or series_meta.get("english_title")
             r.rating = series_meta.get("score")
             r.genres = series_meta.get("genres", [])

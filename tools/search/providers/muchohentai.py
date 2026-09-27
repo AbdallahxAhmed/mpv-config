@@ -87,6 +87,8 @@ def search_muchohentai(query: str, max_results: int = 10) -> List[SearchResult]:
             def _resolve_one(item):
                 u, t = item
                 stream_url, thumb = _resolve_mucho_stream(u)
+                ep_match = re.search(r'(?:episode|ep|ova)[ -]*(\d+)', t, re.IGNORECASE)
+                ep_num = ep_match.group(1) if ep_match else None
                 return SearchResult(
                     title=t,
                     provider="MuchoHentai",
@@ -101,6 +103,7 @@ def search_muchohentai(query: str, max_results: int = 10) -> List[SearchResult]:
                     audio="Japanese (Original)",
                     delivery="Instant CDN",
                     thumbnail=thumb,
+                    episode=ep_num,
                 )
 
             with ThreadPoolExecutor(max_workers=min(len(candidate_links), 6)) as pool:

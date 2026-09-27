@@ -100,6 +100,7 @@ pub enum ProviderFilter {
 }
 
 impl ProviderFilter {
+    #[allow(dead_code)]
     pub fn name(&self) -> &'static str {
         match self {
             Self::All => "All Sources",

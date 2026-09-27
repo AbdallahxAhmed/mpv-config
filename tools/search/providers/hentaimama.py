@@ -172,6 +172,8 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                         direct_url, res, thumb = _resolve_direct_stream(u)
                         play_url = direct_url if direct_url else u
                         q_type = f"Direct MP4 ({res})" if direct_url else "Web Stream"
+                        ep_match = re.search(r'(?:episode|ep|ova)[ -]*(\d+)', t, re.IGNORECASE)
+                        ep_num = ep_match.group(1) if ep_match else None
                         return SearchResult(
                             title=t,
                             provider="HentaiMama",
@@ -186,6 +188,7 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                             audio="Japanese (Original)",
                             delivery="Instant CDN",
                             thumbnail=thumb,
+                            episode=ep_num,
                         )
 
                     with ThreadPoolExecutor(max_workers=min(len(candidate_eps), 6)) as pool:
