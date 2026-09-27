@@ -34,3 +34,5 @@ cookies.txt
 *cookies*.txt
 cache/
 tools/media-tui/target/
+media-tui.exe
+*.exe

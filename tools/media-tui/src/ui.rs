@@ -191,6 +191,47 @@ fn render_results_screen(frame: &mut Frame, app: &mut App, area: Rect) {
         ])
         .split(area);
 
+    if app.all_results.is_empty() && !app.is_searching && app.status_message.starts_with("Search failed") {
+        render_results_header(frame, app, chunks[0]);
+        render_provider_pills(frame, app, chunks[1]);
+
+        let err_box_w = 70.min(area.width.saturating_sub(4));
+        let err_box_h = 7.min(area.height.saturating_sub(6));
+        let err_area = Rect {
+            x: area.x + (area.width.saturating_sub(err_box_w)) / 2,
+            y: chunks[2].y + 2,
+            width: err_box_w,
+            height: err_box_h,
+        };
+
+        let err_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(COLOR_RED))
+            .title(Span::styled(" × Search Request Error ", Style::default().fg(COLOR_RED).add_modifier(Modifier::BOLD)));
+
+        let err_lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(&app.status_message, Style::default().fg(COLOR_TEXT))),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("[Enter]", Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
+                Span::styled(" Retry   ", Style::default().fg(COLOR_SUBTEXT0)),
+                Span::styled("[Tab]", Style::default().fg(COLOR_TEAL).add_modifier(Modifier::BOLD)),
+                Span::styled(" Switch Provider   ", Style::default().fg(COLOR_SUBTEXT0)),
+                Span::styled("[Esc]", Style::default().fg(COLOR_TEXT).add_modifier(Modifier::BOLD)),
+                Span::styled(" Back to Home", Style::default().fg(COLOR_SUBTEXT0)),
+            ]),
+        ];
+        let err_p = Paragraph::new(err_lines)
+            .block(err_block)
+            .alignment(Alignment::Center);
+
+        frame.render_widget(err_p, err_area);
+        render_footer(frame, app, chunks[4]);
+        return;
+    }
+
     render_results_header(frame, app, chunks[0]);
     render_provider_pills(frame, app, chunks[1]);
     render_details_showcase(frame, app, chunks[2]);

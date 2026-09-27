@@ -3,37 +3,40 @@ use tokio::process::Command;
 use crate::models::{BridgeResponse, SearchResult};
 use anyhow::{Result, Context};
 
-fn find_script(relative_path: &str) -> PathBuf {
-    let p = PathBuf::from(relative_path);
-    if p.exists() {
-        return p;
-    }
-    let p_up = PathBuf::from("..").join(relative_path);
-    if p_up.exists() {
-        return p_up;
-    }
-    let p_up2 = PathBuf::from("../..").join(relative_path);
-    if p_up2.exists() {
-        return p_up2;
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate1 = dir.join("../../").join(relative_path);
-            if candidate1.exists() {
-                return candidate1;
+fn find_repo_root() -> PathBuf {
+    // 1. Walk up from CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut curr = cwd;
+        for _ in 0..8 {
+            if curr.join("tools").join("search").join("json_bridge.py").exists() {
+                return curr;
             }
-            let candidate2 = dir.join("../../../").join(relative_path);
-            if candidate2.exists() {
-                return candidate2;
+            if !curr.pop() {
+                break;
             }
         }
     }
-    PathBuf::from(relative_path)
+    // 2. Walk up from current exe location
+    if let Ok(exe) = std::env::current_exe() {
+        let mut curr = exe;
+        for _ in 0..8 {
+            if curr.join("tools").join("search").join("json_bridge.py").exists() {
+                return curr;
+            }
+            if !curr.pop() {
+                break;
+            }
+        }
+    }
+    PathBuf::from(".")
 }
 
 pub async fn run_search_bridge(query: &str) -> Result<Vec<SearchResult>> {
-    let script = find_script("tools/search/json_bridge.py");
+    let repo_root = find_repo_root();
+    let script = repo_root.join("tools").join("search").join("json_bridge.py");
+
     let output = Command::new("python")
+        .current_dir(&repo_root)
         .arg(&script)
         .arg(query)
         .output()
@@ -52,8 +55,11 @@ pub async fn run_search_bridge(query: &str) -> Result<Vec<SearchResult>> {
 }
 
 pub async fn download_image_to_cache(url: &str) -> Option<PathBuf> {
-    let script = find_script("tools/search/fetch_image.py");
+    let repo_root = find_repo_root();
+    let script = repo_root.join("tools").join("search").join("fetch_image.py");
+
     let output = Command::new("python")
+        .current_dir(&repo_root)
         .arg(&script)
         .arg(url)
         .output()
