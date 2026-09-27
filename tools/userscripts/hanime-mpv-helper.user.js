@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         Hanime MPV Stream Grabber & Turbo Downloader
 // @namespace    https://github.com/AbdallahxAhmed/mpv-config
-// @version      3.5
+// @version      4.0
 // @description  Captures Hanime video stream manifests, auto-copies to Windows clipboard, and provides full 1-click MPV playback & turbo download controls
 // @author       mpv-config
 // @match        https://hanime.tv/*
+// @match        https://*.hanime.tv/*
 // @grant        GM_setClipboard
 // @grant        unsafeWindow
 // @run-at       document-start
@@ -24,7 +25,7 @@
 
     function isVideoPage() {
         const path = window.location.pathname;
-        return path.includes('/videos/hentai/') || path.includes('/hentai/video/');
+        return path.includes('/videos/hentai/') || path.includes('/hentai/video/') || path.includes('/playlists/');
     }
 
     function copyToClipboard(text) {
@@ -45,6 +46,7 @@
             const ta = document.createElement('textarea');
             ta.value = text;
             ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
             ta.style.opacity = '0';
             document.body.appendChild(ta);
             ta.select();
@@ -55,33 +57,99 @@
         return false;
     }
 
-    // ─── Core Stream Interception ────────────────────────────────────────
+    // ─── AES-256-GCM Handshake Token Decryption (Web Crypto API) ─────────
+
+    async function decryptXToken(tokenB64) {
+        if (!tokenB64 || typeof tokenB64 !== 'string') return;
+        try {
+            const b64clean = tokenB64.replace(/-/g, '+').replace(/_/g, '/');
+            const pad = b64clean.padEnd(b64clean.length + (4 - b64clean.length % 4) % 4, '=');
+            const rawJson = JSON.parse(atob(pad));
+
+            const b64toBuf = (s) => {
+                const sc = s.replace(/-/g, '+').replace(/_/g, '/');
+                const p = sc.padEnd(sc.length + (4 - sc.length % 4) % 4, '=');
+                const bin = atob(p);
+                const bytes = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+                return bytes;
+            };
+
+            const hexToBuf = (hex) => {
+                const bytes = new Uint8Array(hex.length / 2);
+                for (let i = 0; i < hex.length; i += 2) bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+                return bytes;
+            };
+
+            const keyBytes = hexToBuf('5d657a4dcb0bad1c637ff2e221059b10ff17ae39fe855003e846918941f4ebe3');
+            const iv = b64toBuf(rawJson.iv);
+            const tag = b64toBuf(rawJson.tag);
+            const data = b64toBuf(rawJson.data);
+            const header = new TextEncoder().encode('htv-insecure-v1');
+
+            // Web Crypto AES-GCM takes ciphertext concatenated with auth tag
+            const combined = new Uint8Array(data.length + tag.length);
+            combined.set(data, 0);
+            combined.set(tag, data.length);
+
+            const cryptoObj = (typeof window !== 'undefined' && window.crypto) || (typeof unsafeWindow !== 'undefined' && unsafeWindow.crypto);
+            if (!cryptoObj || !cryptoObj.subtle) return;
+
+            const cryptoKey = await cryptoObj.subtle.importKey(
+                'raw', keyBytes, 'AES-GCM', false, ['decrypt']
+            );
+
+            const decrypted = await cryptoObj.subtle.decrypt(
+                { name: 'AES-GCM', iv: iv, additionalData: header, tagLength: 128 },
+                cryptoKey,
+                combined
+            );
+
+            const manifest = JSON.parse(new TextDecoder().decode(decrypted));
+            if (manifest && manifest.sources && Array.isArray(manifest.sources)) {
+                for (const s of manifest.sources) {
+                    if (s && s.src) {
+                        const fullUrl = s.src.startsWith('http') ? s.src : `https://hanime.tv${s.src}`;
+                        console.log('[Hanime MPV Grabber] Decrypted stream manifest from X-Token:', fullUrl);
+                        onStreamCaptured(fullUrl);
+                        break;
+                    }
+                }
+            }
+        } catch (err) {
+            console.debug('[Hanime MPV Grabber] X-Token decryption notice:', err);
+        }
+    }
+
+    // ─── Stream Capture Handler ──────────────────────────────────────────
 
     function onStreamCaptured(url) {
         if (!url || typeof url !== 'string') return;
-        if (!url.includes('.m3u8') && !url.includes('/manifest') && !url.includes('.mp4')) return;
+        const lower = url.toLowerCase();
+        const isMatch = lower.includes('.m3u8') || lower.includes('/manifest') || lower.includes('.mp4') ||
+                        lower.includes('vids.hanime.tv') || lower.includes('weeb.hanime.tv');
+        if (!isMatch) return;
         if (capturedStreamUrl === url) return;
 
         capturedStreamUrl = url;
         streamSlug = getSlug();
-        console.log('[Hanime MPV Grabber] Successfully intercepted stream manifest:', url);
+        console.log('[Hanime MPV Grabber] Stream Captured:', url);
 
         // 1. Immediately copy to Windows clipboard for MPV / terminal dl
         copyToClipboard(url);
 
         // 2. Silently dispatch to local daemon if running
         try {
-            const payload = JSON.stringify({
-                slug: streamSlug,
-                url: url,
-                title: document.title || streamSlug,
-                page_url: window.location.href,
-                cookies: document.cookie || ''
-            });
             fetch(`${DAEMON_URL}/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: payload,
+                body: JSON.stringify({
+                    slug: streamSlug,
+                    url: url,
+                    title: document.title || streamSlug,
+                    page_url: window.location.href,
+                    cookies: document.cookie || ''
+                }),
                 mode: 'cors'
             }).catch(() => {});
         } catch (_) {}
@@ -89,98 +157,189 @@
         updatePillUI(true);
     }
 
-    // ─── Injection into MAIN World (Bypasses Tampermonkey Sandbox) ────────
+    // ─── Main World Interception (Bypasses Sandbox & CSP) ────────────────
 
-    function injectMainWorldHooks() {
-        const code = `
-        (function() {
-            function report(u) {
-                if (!u || typeof u !== 'string') return;
-                if (u.includes('.m3u8') || u.includes('/manifest') || u.includes('.mp4') || u.includes('vids.hanime.tv') || u.includes('weeb.hanime.tv')) {
-                    window.dispatchEvent(new CustomEvent('HANIME_MPV_STREAM', { detail: { url: u } }));
-                }
+    const mainWorldCode = `
+    (function() {
+        if (window.__HANIME_MPV_HOOKED__) return;
+        window.__HANIME_MPV_HOOKED__ = true;
+
+        function notify(u) {
+            if (!u || typeof u !== 'string') return;
+            const l = u.toLowerCase();
+            if (l.includes('.m3u8') || l.includes('/manifest') || l.includes('.mp4') || l.includes('vids.hanime.tv') || l.includes('weeb.hanime.tv')) {
+                window.dispatchEvent(new CustomEvent('__MPV_STREAM_URL__', { detail: { url: u } }));
             }
+        }
 
-            // Hook window.fetch in Main Page World
-            const _fetch = window.fetch;
-            if (_fetch) {
-                window.fetch = async function(...args) {
+        function checkXToken(token) {
+            if (token && typeof token === 'string' && token.length > 20) {
+                window.dispatchEvent(new CustomEvent('__MPV_XTOKEN__', { detail: { token: token } }));
+            }
+        }
+
+        // 1. Hook Fetch
+        const _fetch = window.fetch;
+        if (_fetch) {
+            window.fetch = async function(...args) {
+                try {
+                    const reqUrl = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+                    notify(reqUrl);
+                } catch (_) {}
+
+                const response = await _fetch.apply(this, args);
+                try {
+                    if (response && response.url) notify(response.url);
+                    if (response && response.headers) {
+                        const token = response.headers.get('x-token') || response.headers.get('X-Token');
+                        if (token) checkXToken(token);
+                    }
+                } catch (_) {}
+                return response;
+            };
+        }
+
+        // 2. Hook XMLHttpRequest
+        const _open = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
+        const _send = window.XMLHttpRequest && window.XMLHttpRequest.prototype.send;
+        if (_open) {
+            window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                try {
+                    const u = typeof url === 'string' ? url : (url && url.href ? url.href : String(url));
+                    this.__mpvUrl = u;
+                    notify(u);
+                } catch (_) {}
+                return _open.apply(this, [method, url, ...rest]);
+            };
+        }
+        if (_send) {
+            window.XMLHttpRequest.prototype.send = function(...args) {
+                this.addEventListener('load', function() {
                     try {
-                        const target = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
-                        report(target);
+                        const token = this.getResponseHeader('x-token') || this.getResponseHeader('X-Token');
+                        if (token) checkXToken(token);
+                        if (this.responseURL) notify(this.responseURL);
                     } catch (_) {}
-                    return _fetch.apply(this, args);
-                };
-            }
+                });
+                return _send.apply(this, args);
+            };
+        }
 
-            // Hook XMLHttpRequest in Main Page World
-            const _open = window.XMLHttpRequest && window.XMLHttpRequest.prototype.open;
-            if (_open) {
-                window.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-                    try { report(url); } catch (_) {}
-                    return _open.apply(this, [method, url, ...rest]);
+        // 3. Hook HTMLMediaElement prototype
+        const _play = HTMLMediaElement.prototype.play;
+        if (_play) {
+            HTMLMediaElement.prototype.play = function() {
+                try {
+                    if (this.src && !this.src.startsWith('blob:')) notify(this.src);
+                    if (this.currentSrc && !this.currentSrc.startsWith('blob:')) notify(this.currentSrc);
+                } catch (_) {}
+                return _play.apply(this, arguments);
+            };
+        }
+
+        // 4. Hook HTMLMediaElement src setter
+        try {
+            const desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+            if (desc && desc.set) {
+                const origSet = desc.set;
+                desc.set = function(val) {
+                    if (val && typeof val === 'string' && !val.startsWith('blob:')) notify(val);
+                    return origSet.call(this, val);
                 };
+                Object.defineProperty(HTMLMediaElement.prototype, 'src', desc);
             }
-        })();
-        `;
+        } catch (_) {}
+    })();
+    `;
+
+    // Strategy A: Evaluate directly via unsafeWindow.eval (CSP 'unsafe-eval' compliant)
+    try {
+        const uWin = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+        if (uWin && uWin.eval) {
+            uWin.eval(mainWorldCode);
+        }
+    } catch (_) {}
+
+    // Strategy B: Inject script tag with nonce if available
+    try {
         const script = document.createElement('script');
-        script.textContent = code;
+        const existingNonce = document.querySelector('script[nonce]');
+        if (existingNonce) {
+            const nonce = existingNonce.nonce || existingNonce.getAttribute('nonce');
+            if (nonce) script.setAttribute('nonce', nonce);
+        }
+        script.textContent = mainWorldCode;
         (document.head || document.documentElement).appendChild(script);
         script.remove();
-    }
+    } catch (_) {}
 
-    // Listen for custom event from MAIN page world
-    window.addEventListener('HANIME_MPV_STREAM', (e) => {
-        if (e.detail && e.detail.url) {
-            onStreamCaptured(e.detail.url);
-        }
-    });
-
-    // Also hook unsafeWindow directly if accessible
-    function hookUnsafeWindow() {
+    // Strategy C: Direct hook on unsafeWindow / window
+    try {
         const target = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-        if (!target) return;
-
-        try {
-            const f = target.fetch;
-            if (f) {
+        if (target && !target.__HANIME_MPV_DIRECT_HOOK__) {
+            target.__HANIME_MPV_DIRECT_HOOK__ = true;
+            const tf = target.fetch;
+            if (tf) {
                 target.fetch = async function(...args) {
                     try {
                         const u = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
                         onStreamCaptured(u);
                     } catch (_) {}
-                    return f.apply(this, args);
+                    const resp = await tf.apply(this, args);
+                    try {
+                        const tok = resp && resp.headers && (resp.headers.get('x-token') || resp.headers.get('X-Token'));
+                        if (tok) decryptXToken(tok);
+                    } catch (_) {}
+                    return resp;
                 };
             }
-            const o = target.XMLHttpRequest && target.XMLHttpRequest.prototype.open;
-            if (o) {
+            const to = target.XMLHttpRequest && target.XMLHttpRequest.prototype.open;
+            if (to) {
                 target.XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-                    try { onStreamCaptured(url); } catch (_) {}
-                    return o.apply(this, [method, url, ...rest]);
+                    try { onStreamCaptured(typeof url === 'string' ? url : String(url)); } catch (_) {}
+                    return to.apply(this, [method, url, ...rest]);
                 };
             }
-        } catch (_) {}
-    }
+        }
+    } catch (_) {}
 
-    // Check Nuxt.js preloaded state
-    function scanNuxtState() {
+    // Listen for custom events from MAIN world hooks
+    window.addEventListener('__MPV_STREAM_URL__', (e) => {
+        if (e.detail && e.detail.url) onStreamCaptured(e.detail.url);
+    });
+
+    window.addEventListener('__MPV_XTOKEN__', (e) => {
+        if (e.detail && e.detail.token) decryptXToken(e.detail.token);
+    });
+
+    // ─── DOM Scanner Fallback ─────────────────────────────────────────────
+
+    function scanDOMForStreams() {
+        // 1. Check video elements
+        const videos = document.querySelectorAll('video');
+        for (const v of videos) {
+            if (v.src && !v.src.startsWith('blob:')) onStreamCaptured(v.src);
+            if (v.currentSrc && !v.currentSrc.startsWith('blob:')) onStreamCaptured(v.currentSrc);
+        }
+
+        // 2. Check download links (e.g. MP4 download buttons/anchors)
+        const downloadLinks = document.querySelectorAll('a[href*=".mp4"], a[href*=".m3u8"], a[download]');
+        for (const a of downloadLinks) {
+            if (a.href) onStreamCaptured(a.href);
+        }
+
+        // 3. Check Nuxt preloaded data if present
         try {
             const target = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-            if (!target || !target.__NUXT__) return;
-            const str = JSON.stringify(target.__NUXT__);
-            const matches = str.match(/https?:\/\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*/gi);
-            if (matches && matches.length > 0) {
-                for (const m of matches) {
-                    if (m.includes('.m3u8') || m.includes('.mp4')) {
-                        onStreamCaptured(m);
-                        break;
-                    }
-                }
+            if (target && target.__NUXT__) {
+                const str = JSON.stringify(target.__NUXT__);
+                const match = str.match(/https?:\/\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*/i);
+                if (match && match[0]) onStreamCaptured(match[0]);
             }
         } catch (_) {}
     }
 
-    // ─── Full Control Pill UI ─────────────────────────────────────────────
+    // ─── Floating Player Pill UI ──────────────────────────────────────────
 
     function updatePillUI(isReady) {
         const pill = document.getElementById('mpv-grabber-pill');
@@ -193,7 +352,7 @@
 
         if (isReady && capturedStreamUrl) {
             pill.style.border = '2px solid #10b981';
-            pill.style.boxShadow = '0 0 30px rgba(16, 185, 129, 0.7)';
+            pill.style.boxShadow = '0 0 35px rgba(16, 185, 129, 0.75)';
             if (badge) {
                 badge.innerHTML = '⚡ Stream Ready (Copied)';
                 badge.style.color = '#34d399';
@@ -261,7 +420,7 @@
         const playBtn = document.createElement('button');
         playBtn.id = 'mpv-play-btn';
         playBtn.innerHTML = '🎬 Play in MPV';
-        playBtn.title = 'Copies stream & plays in MPV player';
+        playBtn.title = 'Copies direct stream & launches MPV player';
         playBtn.style.cssText = `
             padding: 7px 13px !important;
             background: linear-gradient(135deg, #7c3aed, #4f46e5) !important;
@@ -278,7 +437,12 @@
             const url = capturedStreamUrl || window.location.href;
             copyToClipboard(url);
 
-            // Silent request to local daemon if present
+            if (!capturedStreamUrl) {
+                playBtn.innerHTML = '▶ Play Video 1s First!';
+                setTimeout(() => { playBtn.innerHTML = '🎬 Play in MPV'; }, 2200);
+                return;
+            }
+
             fetch(`${DAEMON_URL}/play`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -287,8 +451,7 @@
                 playBtn.innerHTML = '✓ Playing in MPV!';
                 setTimeout(() => { playBtn.innerHTML = '🎬 Play in MPV'; }, 2500);
             }).catch(() => {
-                // Daemon not running - inform user cleanly on the button
-                playBtn.innerHTML = '✓ Copied! (Ctrl+V in MPV)';
+                playBtn.innerHTML = '✓ Copied! (Open MPV & Ctrl+V)';
                 setTimeout(() => { playBtn.innerHTML = '🎬 Play in MPV'; }, 2500);
             });
         };
@@ -297,7 +460,7 @@
         const dlBtn = document.createElement('button');
         dlBtn.id = 'mpv-dl-btn';
         dlBtn.innerHTML = '⚡ Turbo Download';
-        dlBtn.title = 'Copies stream link for turbo downloading';
+        dlBtn.title = 'Copies direct stream link for terminal turbo downloading';
         dlBtn.style.cssText = `
             padding: 7px 13px !important;
             background: linear-gradient(135deg, #059669, #10b981) !important;
@@ -313,6 +476,12 @@
         dlBtn.onclick = () => {
             const url = capturedStreamUrl || window.location.href;
             copyToClipboard(url);
+
+            if (!capturedStreamUrl) {
+                dlBtn.innerHTML = '▶ Play Video 1s First!';
+                setTimeout(() => { dlBtn.innerHTML = '⚡ Turbo Download'; }, 2200);
+                return;
+            }
 
             fetch(`${DAEMON_URL}/download`, {
                 method: 'POST',
@@ -331,7 +500,7 @@
         const copyBtn = document.createElement('button');
         copyBtn.id = 'mpv-copy-btn';
         copyBtn.innerHTML = '📋 Copy Link';
-        copyBtn.title = 'Copy direct stream URL to clipboard';
+        copyBtn.title = 'Copy stream or page URL to clipboard';
         copyBtn.style.cssText = `
             padding: 7px 11px !important;
             background: rgba(255, 255, 255, 0.1) !important;
@@ -358,28 +527,20 @@
         targetRoot.appendChild(pill);
     }
 
-    // Initialize injection
-    injectMainWorldHooks();
-    hookUnsafeWindow();
+    // ─── Polling & Lifecycle ─────────────────────────────────────────────
 
-    // Polling loop: checks DOM elements, Nuxt state, and ensures UI remains visible
     setInterval(() => {
         createFullPill();
-        scanNuxtState();
-
-        // Check HTML5 video tag
-        const v = document.querySelector('video');
-        if (v && v.src && !v.src.startsWith('blob:')) {
-            onStreamCaptured(v.src);
-        }
-    }, 1000);
+        scanDOMForStreams();
+    }, 800);
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            injectMainWorldHooks();
             createFullPill();
+            scanDOMForStreams();
         });
     } else {
         createFullPill();
+        scanDOMForStreams();
     }
 })();

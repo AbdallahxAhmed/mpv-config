@@ -94,7 +94,9 @@ def _get_clipboard_stream(video_id):
                 return None
             try:
                 text = ctypes.wstring_at(ptr).strip()
-                if '.m3u8' in text and ('http://' in text or 'https://' in text):
+                if ('http://' in text or 'https://' in text) and (
+                    '.m3u8' in text or '.mp4' in text or '/manifest' in text or 'vids.hanime.tv' in text or 'weeb.hanime.tv' in text
+                ):
                     return text
             finally:
                 kernel32.GlobalUnlock(handle)
@@ -196,16 +198,26 @@ class HanimeTVIE(SiteKit, InfoExtractor):
         cached_m3u8 = self._get_cached_m3u8(video_id)
         if cached_m3u8:
             self.to_screen(f'[hanime] Using stream manifest from browser companion / clipboard: {video_id}')
-            try:
-                formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p', fatal=False)
-                if formats:
-                    return {
-                        'id': video_id,
-                        'title': video_id.replace('-', ' ').title(),
-                        'formats': formats
-                    }
-            except Exception as e:
-                self.to_screen(f'[hanime] Intercepted stream unavailable ({e}), trying live extraction...')
+            formats = []
+            if '.mp4' in cached_m3u8 and '.m3u8' not in cached_m3u8:
+                formats = [{
+                    'url': cached_m3u8,
+                    'ext': 'mp4',
+                    'format_id': 'direct-mp4',
+                    'quality': 1080,
+                }]
+            else:
+                try:
+                    formats = self._extract_m3u8_formats(cached_m3u8, video_id, ext='mp4', m3u8_id='1080p', fatal=False)
+                except Exception as e:
+                    self.to_screen(f'[hanime] Intercepted stream unavailable ({e}), trying live extraction...')
+            if formats:
+                video_title = video_id.replace('-', ' ').title()
+                return {
+                    'id': video_id,
+                    'title': video_title,
+                    'formats': formats
+                }
 
         try:
             page = self._download_webpage(url, video_id, fatal=False, headers={'User-Agent': USER_AGENT})
@@ -294,12 +306,21 @@ class HanimeTVIE(SiteKit, InfoExtractor):
                 # Check one more time if browser captured stream during request
                 stream = self._get_cached_m3u8(video_id)
                 if stream:
-                    formats = self._extract_m3u8_formats(stream, video_id, ext='mp4', m3u8_id='1080p')
-                    return {
-                        'id': video_id,
-                        'title': video_id.replace('-', ' ').title(),
-                        'formats': formats
-                    }
+                    if '.mp4' in stream and '.m3u8' not in stream:
+                        formats = [{
+                            'url': stream,
+                            'ext': 'mp4',
+                            'format_id': 'direct-mp4',
+                            'quality': 1080,
+                        }]
+                    else:
+                        formats = self._extract_m3u8_formats(stream, video_id, ext='mp4', m3u8_id='1080p', fatal=False)
+                    if formats:
+                        return {
+                            'id': video_id,
+                            'title': video_id.replace('-', ' ').title(),
+                            'formats': formats
+                        }
 
                 if '403' in str(exc) or 'Forbidden' in str(exc):
                     raise ExtractorError(

@@ -33,6 +33,12 @@ class TestStreamBridge(unittest.TestCase):
         self.assertEqual(cached["url"], m3u8)
         self.assertEqual(cached["title"], "Unit Video")
 
+    def test_clipboard_stream_extractor(self):
+        from tools.yt_dlp_plugins.extractor.htv import _get_clipboard_stream
+        # Function gracefully returns string or None without raising exception
+        res = _get_clipboard_stream("test-slug")
+        self.assertTrue(res is None or isinstance(res, str))
+
     def test_http_daemon_endpoints(self):
         server = start_http_server(8765)
         time.sleep(0.3)
