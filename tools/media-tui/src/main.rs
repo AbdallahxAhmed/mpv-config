@@ -114,6 +114,9 @@ async fn main() -> Result<()> {
                                 KeyCode::Char('d') => {
                                     app.download_selected();
                                 }
+                                KeyCode::Char('p') => {
+                                    app.toggle_artwork_mode(action_tx.clone());
+                                }
                                 KeyCode::Char('c') => {
                                     app.copy_selected_url();
                                 }

@@ -9,12 +9,13 @@ use ratatui::{
 };
 use ratatui_image::StatefulImage;
 use ratatui_image::protocol::StatefulProtocol;
-use crate::app::App;
+use crate::app::{App, ArtworkMode};
 use crate::models::ProviderFilter;
 
 // MovieBox Catppuccin Mocha Color Palette
 const COLOR_MANTLE: Color = Color::Rgb(24, 24, 37);     // #181825
 const COLOR_SURFACE0: Color = Color::Rgb(49, 50, 68);   // #313244
+const COLOR_SURFACE1: Color = Color::Rgb(69, 71, 90);   // #45475A
 const COLOR_SURFACE2: Color = Color::Rgb(88, 91, 112);  // #585B70
 const COLOR_TEXT: Color = Color::Rgb(205, 214, 244);     // #CDD6F4
 const COLOR_SUBTEXT0: Color = Color::Rgb(166, 173, 200); // #A6ADC8
@@ -30,25 +31,36 @@ const COLOR_RED: Color = Color::Rgb(243, 139, 168);     // #F38BA8
 pub fn render_ui(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
-    // MovieBox Vertical Layout:
+    // MovieBox Vertical Layout Hierarchy:
     // 1. Unified Search & Brand Header (3 rows)
     // 2. Clean Provider Filter Pills (1 row)
-    // 3. Main Dual-Pane Catalog & Showcase (Min 10 rows)
-    // 4. Clean Footer Keybindings (1 row)
+    // 3. MovieBox Master Media Showcase (Top Deck: 2:3 Artwork + Rich Badges + Synopsis)
+    // 4. Episodes & Streams Catalog Deck (Bottom Deck: Full Width)
+    // 5. Clean Footer Keybindings (1 row)
+    let showcase_height = if size.height >= 38 {
+        16
+    } else if size.height >= 30 {
+        14
+    } else {
+        11
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Top Header
-            Constraint::Length(1), // Provider Pills
-            Constraint::Min(10),   // Dual-Pane Catalog & Showcase
-            Constraint::Length(1), // Footer Shortcuts
+            Constraint::Length(3),               // Top Header
+            Constraint::Length(1),               // Provider Pills
+            Constraint::Length(showcase_height), // Master Media Showcase
+            Constraint::Min(8),                  // Episodes & Streams Catalog
+            Constraint::Length(1),               // Footer Shortcuts
         ])
         .split(size);
 
     render_header(frame, app, chunks[0]);
     render_provider_pills(frame, app, chunks[1]);
-    render_main_showcase(frame, app, chunks[2]);
-    render_footer(frame, app, chunks[3]);
+    render_details_showcase(frame, app, chunks[2]);
+    render_catalog_table(frame, app, chunks[3]);
+    render_footer(frame, app, chunks[4]);
 }
 
 fn render_header(frame: &mut Frame, app: &App, area: Rect) {
@@ -92,7 +104,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         )
     } else if !app.all_results.is_empty() {
         Span::styled(
-            format!(" [ {} Sources Ready ] ", app.all_results.len()),
+            format!(" [ {} Streams Ready ] ", app.all_results.len()),
             Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
         )
     } else {
@@ -171,22 +183,175 @@ fn render_provider_pills(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(para, area);
 }
 
-fn render_main_showcase(frame: &mut Frame, app: &mut App, area: Rect) {
-    let dual_pane = Layout::default()
+fn render_details_showcase(frame: &mut Frame, app: &mut App, area: Rect) {
+    let Some(selected) = app.selected_result().cloned() else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(COLOR_SURFACE2))
+            .title(Span::styled(" ℹ Media Details & Artwork ", Style::default().fg(COLOR_SUBTEXT0)));
+        let msg = Paragraph::new("\n  Select a stream from the catalog below to inspect episode artwork, technical specifications, and synopsis.")
+            .style(Style::default().fg(COLOR_SUBTEXT0))
+            .block(block);
+        frame.render_widget(msg, area);
+        return;
+    };
+
+    // Split showcase horizontally:
+    // Left: Artwork Card (~26 width)
+    // Right: MovieBox Metadata & Synopsis (remaining)
+    let showcase_split = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(47), // Left: Catalog Table
-            Constraint::Percentage(53), // Right: MovieBox Details Showcase
+            Constraint::Length(28), // 2:3 Artwork Card
+            Constraint::Min(30),    // Details & Synopsis
         ])
         .split(area);
 
-    render_catalog_table(frame, app, dual_pane[0]);
-    render_details_showcase(frame, app, dual_pane[1]);
+    // 1. Artwork Card (Hardware Sixel / Protocol)
+    let (art_title, title_color) = match app.artwork_mode {
+        ArtworkMode::EpisodeFrame => {
+            if let Some(ref ep) = selected.episode {
+                (format!(" 🖼 Video Frame (Ep {}) [p] ", ep), COLOR_PEACH)
+            } else {
+                (" 🖼 Video Frame [p] ".to_string(), COLOR_PEACH)
+            }
+        }
+        ArtworkMode::SeriesPoster => {
+            (" 🖼 Series Poster [p] ".to_string(), COLOR_MAUVE)
+        }
+    };
+
+    let art_border = if app.artwork_mode == ArtworkMode::EpisodeFrame {
+        COLOR_PEACH
+    } else {
+        COLOR_LAVENDER
+    };
+
+    let art_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(art_border))
+        .title(Span::styled(art_title, Style::default().fg(title_color).add_modifier(Modifier::BOLD)));
+
+    let inner_art_area = art_block.inner(showcase_split[0]);
+    frame.render_widget(art_block, showcase_split[0]);
+
+    if let Some(ref mut protocol) = app.image_protocol {
+        let image_widget = StatefulImage::<StatefulProtocol>::default();
+        frame.render_stateful_widget(image_widget, inner_art_area, protocol);
+    } else {
+        let mode_desc = match app.artwork_mode {
+            ArtworkMode::EpisodeFrame => "Episode Frame",
+            ArtworkMode::SeriesPoster => "Series Poster",
+        };
+        let placeholder = Paragraph::new(format!("\n\n   ⏳ Loading\n   {}...", mode_desc))
+            .style(Style::default().fg(COLOR_SUBTEXT0));
+        frame.render_widget(placeholder, inner_art_area);
+    }
+
+    // 2. Metadata & Plot Showcase (MovieBox Style)
+    let meta_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(COLOR_SURFACE2))
+        .title(Span::styled(" ℹ Media Details & Synopsis ─ Toggle Poster/Frame: [p] ", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD)));
+
+    let official_title = selected
+        .official_title
+        .as_deref()
+        .unwrap_or(selected.title.as_str());
+
+    let studio_str = selected.studio.as_deref().unwrap_or("Studio Unknown");
+    let year_str = selected.year.map(|y| y.to_string()).unwrap_or_else(|| "N/A".to_string());
+    let rating_str = selected
+        .rating
+        .map(|r| format!("★ {:.1}", r / 10.0))
+        .unwrap_or_else(|| "★ N/A".to_string());
+
+    let censo_style = match selected.censorship.to_lowercase().as_str() {
+        "uncensored" => Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
+        "decensored" => Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD),
+    };
+
+    let target_ep = if let Some(ref ep) = selected.episode {
+        format!("Episode {}", ep)
+    } else {
+        "Full Release".to_string()
+    };
+
+    let synopsis_text = selected
+        .synopsis
+        .as_deref()
+        .unwrap_or("No plot overview available for this title.");
+
+    let mut meta_lines = vec![
+        // Row 1: Title
+        Line::from(Span::styled(
+            official_title,
+            Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD),
+        )),
+        // Row 2: Badges
+        Line::from(vec![
+            Span::styled(format!(" {} ", rating_str), Style::default().fg(COLOR_MANTLE).bg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(format!(" {} ", year_str), Style::default().fg(COLOR_TEXT).bg(COLOR_SURFACE0)),
+            Span::raw(" "),
+            Span::styled(format!(" {} ", studio_str), Style::default().fg(COLOR_PEACH).bg(COLOR_SURFACE0).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(format!(" [ {} ] ", selected.censorship.to_uppercase()), censo_style),
+            Span::raw(" "),
+            Span::styled(
+                format!("{} Episodes", selected.episodes_count.map(|e| e.to_string()).unwrap_or_else(|| "OVA".to_string())),
+                Style::default().fg(COLOR_SUBTEXT0),
+            ),
+        ]),
+    ];
+
+    // Row 3: Genres
+    if !selected.genres.is_empty() {
+        let mut genre_spans = vec![Span::styled("Genres: ", Style::default().fg(COLOR_SUBTEXT0))];
+        for g in selected.genres.iter().take(5) {
+            genre_spans.push(Span::styled(format!("[{}] ", g), Style::default().fg(COLOR_TEAL)));
+        }
+        meta_lines.push(Line::from(genre_spans));
+    }
+
+    // Row 4: Divider
+    meta_lines.push(Line::from(Span::styled("────────────────────────────────────────────────────────────────────────────", Style::default().fg(COLOR_SURFACE1))));
+
+    // Row 5: Active Stream Specs
+    meta_lines.push(Line::from(vec![
+        Span::styled("Selected: ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled(target_ep, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::raw(" • "),
+        Span::styled(&selected.provider, Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)),
+        Span::raw(" • "),
+        Span::styled(&selected.resolution, Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
+        Span::raw(" • "),
+        Span::styled(&selected.codec, Style::default().fg(COLOR_TEXT)),
+        Span::raw(" • "),
+        Span::styled(&selected.delivery, Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD)),
+        Span::raw(" • Audio: "),
+        Span::styled(&selected.audio, Style::default().fg(COLOR_PEACH)),
+    ]));
+
+    // Row 6+: Plot Overview
+    meta_lines.push(Line::from(vec![
+        Span::styled("Plot: ", Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
+        Span::styled(synopsis_text, Style::default().fg(COLOR_TEXT)),
+    ]));
+
+    let meta_para = Paragraph::new(meta_lines)
+        .block(meta_block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(meta_para, showcase_split[1]);
 }
 
 fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
     let header_cells = [
-        " #", "Source", "Episode / Title", "Res", "Type", "Score"
+        " #", "Source", "Episode & Title", "Res", "Format / Quality", "Delivery", "Score"
     ]
     .iter()
     .map(|h| {
@@ -240,10 +405,15 @@ fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
                 Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
             ));
 
+            let quality_cell = Cell::from(Span::styled(
+                format!("{} ({})", r.quality_type, r.codec),
+                Style::default().fg(COLOR_TEXT),
+            ));
+
             let (del_tag, del_color) = if r.delivery == "Instant CDN" {
-                ("CDN", COLOR_GREEN)
+                ("⚡ Instant CDN", COLOR_GREEN)
             } else {
-                ("P2P", COLOR_YELLOW)
+                ("🧲 Torrent P2P", COLOR_YELLOW)
             };
             let del_cell = Cell::from(Span::styled(
                 del_tag,
@@ -257,9 +427,9 @@ fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
             } else {
                 Style::default().fg(COLOR_PEACH)
             };
-            let score_cell = Cell::from(Span::styled(format!("★{:>2.0}", r.score), score_style));
+            let score_cell = Cell::from(Span::styled(format!("★ {:>2.0}", r.score), score_style));
 
-            let row = Row::new(vec![num_cell, source_cell, title_cell, res_cell, del_cell, score_cell]);
+            let row = Row::new(vec![num_cell, source_cell, title_cell, res_cell, quality_cell, del_cell, score_cell]);
             if disp_idx == app.selected_filtered_idx {
                 row.style(
                     Style::default()
@@ -275,14 +445,15 @@ fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let widths = [
         Constraint::Length(4),  // #
-        Constraint::Length(9),  // Source tag
-        Constraint::Min(20),    // Title & Episode
-        Constraint::Length(6),  // Res
-        Constraint::Length(5),  // Delivery
-        Constraint::Length(6),  // Score
+        Constraint::Length(10), // Source tag
+        Constraint::Min(28),    // Title & Episode
+        Constraint::Length(7),  // Res
+        Constraint::Length(22), // Format & Codec
+        Constraint::Length(16), // Delivery
+        Constraint::Length(8),  // Score
     ];
 
-    let count_text = format!(" 📋 Media Catalog ({}) ", app.filtered_indices.len());
+    let count_text = format!(" 📋 Episodes & Streams Catalog ({}) ", app.filtered_indices.len());
     let table = Table::new(rows, widths)
         .header(header)
         .block(
@@ -297,216 +468,6 @@ fn render_catalog_table(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(table, area, &mut app.table_state);
 }
 
-fn render_details_showcase(frame: &mut Frame, app: &mut App, area: Rect) {
-    let Some(selected) = app.selected_result().cloned() else {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(COLOR_SURFACE2))
-            .title(Span::styled(" ℹ Media Showcase ", Style::default().fg(COLOR_SUBTEXT0)));
-        let msg = Paragraph::new("\n  Select a stream from the catalog table to inspect episode artwork and stream specifications.")
-            .style(Style::default().fg(COLOR_SUBTEXT0))
-            .block(block);
-        frame.render_widget(msg, area);
-        return;
-    };
-
-    // Split showcase vertically:
-    // Top 60%: Artwork & Metadata
-    // Bottom 40%: Overview & Stream URL
-    let showcase_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(19), // Poster + Meta
-            Constraint::Min(6),     // Plot Overview + Stream Link
-        ])
-        .split(area);
-
-    // Split Top Section into: Left (Artwork ~45%), Right (Metadata ~55%)
-    let top_split = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(45), // Artwork Card
-            Constraint::Percentage(55), // Metadata Card
-        ])
-        .split(showcase_chunks[0]);
-
-    // 1. Artwork Card (Hardware Sixel)
-    let art_title = if let Some(ref ep) = selected.episode {
-        format!(" 🖼 Episode {} Preview ", ep)
-    } else {
-        " 🖼 Artwork Preview ".to_string()
-    };
-
-    let art_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_LAVENDER))
-        .title(Span::styled(art_title, Style::default().fg(COLOR_LAVENDER).add_modifier(Modifier::BOLD)));
-
-    let inner_art_area = art_block.inner(top_split[0]);
-    frame.render_widget(art_block, top_split[0]);
-
-    if let Some(ref mut protocol) = app.image_protocol {
-        let image_widget = StatefulImage::<StatefulProtocol>::default();
-        frame.render_stateful_widget(image_widget, inner_art_area, protocol);
-    } else {
-        let placeholder = Paragraph::new("\n\n   ⏳ Loading\n   Episode\n   Artwork...")
-            .style(Style::default().fg(COLOR_SUBTEXT0));
-        frame.render_widget(placeholder, inner_art_area);
-    }
-
-    // 2. Metadata Card (MovieBox-Style)
-    let meta_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_SURFACE2))
-        .title(Span::styled(" ℹ Media Details ", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD)));
-
-    let official_title = selected
-        .official_title
-        .as_deref()
-        .unwrap_or(selected.title.as_str());
-
-    let studio_str = selected.studio.as_deref().unwrap_or("Studio Unknown");
-    let year_str = selected.year.map(|y| y.to_string()).unwrap_or_else(|| "N/A".to_string());
-    let rating_str = selected
-        .rating
-        .map(|r| format!("★ {:.1}", r / 10.0))
-        .unwrap_or_else(|| "N/A".to_string());
-
-    let censo_style = match selected.censorship.to_lowercase().as_str() {
-        "uncensored" => Style::default().fg(COLOR_GREEN).add_modifier(Modifier::BOLD),
-        "decensored" => Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD),
-        _ => Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD),
-    };
-
-    let mut meta_lines = vec![
-        // Title
-        Line::from(Span::styled(
-            official_title,
-            Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD),
-        )),
-        // Rating & Studio Pills
-        Line::from(vec![
-            Span::styled(format!(" {} ", rating_str), Style::default().fg(COLOR_MANTLE).bg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
-            Span::raw(" "),
-            Span::styled(format!(" {} ", year_str), Style::default().fg(COLOR_TEXT).bg(COLOR_SURFACE0)),
-            Span::raw(" "),
-            Span::styled(format!(" {} ", studio_str), Style::default().fg(COLOR_PEACH).bg(COLOR_SURFACE0)),
-        ]),
-        // Status & Episodes
-        Line::from(vec![
-            Span::styled("Status: ", Style::default().fg(COLOR_SUBTEXT0)),
-            Span::styled(format!("[ {} ]", selected.censorship.to_uppercase()), censo_style),
-            Span::raw("  "),
-            Span::styled(
-                format!("Eps: {}", selected.episodes_count.map(|e| e.to_string()).unwrap_or_else(|| "OVA".to_string())),
-                Style::default().fg(COLOR_SUBTEXT0),
-            ),
-        ]),
-    ];
-
-    // Genres
-    if !selected.genres.is_empty() {
-        let mut genre_spans = vec![Span::styled("Genres: ", Style::default().fg(COLOR_SUBTEXT0))];
-        for g in selected.genres.iter().take(3) {
-            genre_spans.push(Span::styled(format!("[{}] ", g), Style::default().fg(COLOR_TEAL)));
-        }
-        meta_lines.push(Line::from(genre_spans));
-    }
-
-    meta_lines.push(Line::from(Span::styled("──────────────────────────────", Style::default().fg(COLOR_SURFACE2))));
-
-    // Target Selection Info
-    let target_ep = if let Some(ref ep) = selected.episode {
-        format!("Episode {}", ep)
-    } else {
-        "Full Release".to_string()
-    };
-
-    meta_lines.push(Line::from(vec![
-        Span::styled("Selected:  ", Style::default().fg(COLOR_SUBTEXT0)),
-        Span::styled(target_ep, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-    ]));
-
-    meta_lines.push(Line::from(vec![
-        Span::styled("Source:    ", Style::default().fg(COLOR_SUBTEXT0)),
-        Span::styled(&selected.provider, Style::default().fg(COLOR_BLUE).add_modifier(Modifier::BOLD)),
-        Span::raw(" • "),
-        Span::styled(&selected.delivery, Style::default().fg(COLOR_GREEN)),
-    ]));
-
-    meta_lines.push(Line::from(vec![
-        Span::styled("Format:    ", Style::default().fg(COLOR_SUBTEXT0)),
-        Span::styled(&selected.resolution, Style::default().fg(COLOR_BLUE)),
-        Span::raw(" • "),
-        Span::styled(&selected.codec, Style::default().fg(COLOR_TEXT)),
-    ]));
-
-    meta_lines.push(Line::from(vec![
-        Span::styled("Audio:     ", Style::default().fg(COLOR_SUBTEXT0)),
-        Span::styled(&selected.audio, Style::default().fg(COLOR_PEACH)),
-    ]));
-
-    meta_lines.push(Line::from(vec![
-        Span::styled("Subs:      ", Style::default().fg(COLOR_SUBTEXT0)),
-        Span::styled(&selected.subtitles, Style::default().fg(COLOR_TEXT)),
-    ]));
-
-    if let Some(seeders) = selected.seeders {
-        meta_lines.push(Line::from(vec![
-            Span::styled("Seeds:     ", Style::default().fg(COLOR_SUBTEXT0)),
-            Span::styled(format!("{} seeders", seeders), Style::default().fg(COLOR_GREEN)),
-        ]));
-    }
-
-    let meta_para = Paragraph::new(meta_lines)
-        .block(meta_block)
-        .wrap(Wrap { trim: true });
-    frame.render_widget(meta_para, top_split[1]);
-
-    // Bottom Section: Overview & Stream URL
-    let bottom_split = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(4),    // Plot Overview
-            Constraint::Length(3), // Stream URL
-        ])
-        .split(showcase_chunks[1]);
-
-    // 3. Overview Box
-    let synopsis_text = selected
-        .synopsis
-        .as_deref()
-        .unwrap_or("No plot overview available for this title.");
-
-    let overview_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_SURFACE2))
-        .title(Span::styled(" 📖 Plot Overview ", Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)));
-
-    let overview_para = Paragraph::new(synopsis_text)
-        .style(Style::default().fg(COLOR_TEXT))
-        .block(overview_block)
-        .wrap(Wrap { trim: true });
-    frame.render_widget(overview_para, bottom_split[0]);
-
-    // 4. Stream URL Box
-    let url_display = selected.download_url.as_deref().unwrap_or(&selected.url);
-    let stream_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(COLOR_SURFACE2))
-        .title(Span::styled(" ⚡ Stream Link (<Enter> Play • <Space> Preview • <c> Copy) ", Style::default().fg(COLOR_GREEN)));
-
-    let stream_para = Paragraph::new(url_display)
-        .style(Style::default().fg(COLOR_SUBTEXT0))
-        .block(stream_block);
-    frame.render_widget(stream_para, bottom_split[1]);
-}
-
 fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let status_span = Span::styled(&app.status_message, Style::default().fg(COLOR_TEXT));
 
@@ -517,6 +478,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(" Preview ", Style::default().fg(COLOR_SUBTEXT0)),
         Span::styled("<d>", Style::default().fg(COLOR_PEACH).add_modifier(Modifier::BOLD)),
         Span::styled(" Download ", Style::default().fg(COLOR_SUBTEXT0)),
+        Span::styled("<p>", Style::default().fg(COLOR_MAUVE).add_modifier(Modifier::BOLD)),
+        Span::styled(" Poster/Frame ", Style::default().fg(COLOR_SUBTEXT0)),
         Span::styled("<c>", Style::default().fg(COLOR_LAVENDER).add_modifier(Modifier::BOLD)),
         Span::styled(" Copy ", Style::default().fg(COLOR_SUBTEXT0)),
         Span::styled("</>", Style::default().fg(COLOR_YELLOW).add_modifier(Modifier::BOLD)),
@@ -530,8 +493,8 @@ fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     let footer_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(42),
-            Constraint::Percentage(58),
+            Constraint::Percentage(38),
+            Constraint::Percentage(62),
         ])
         .split(area);
 

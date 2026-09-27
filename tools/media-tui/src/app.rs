@@ -8,6 +8,13 @@ use crate::models::{ProviderFilter, SearchResult};
 use crate::bridge::{run_search_bridge, download_image_to_cache};
 use crate::mpv;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArtworkMode {
+    #[default]
+    EpisodeFrame,
+    SeriesPoster,
+}
+
 #[derive(Debug)]
 pub enum AppAction {
     SearchCompleted(anyhow::Result<Vec<SearchResult>>),
@@ -20,6 +27,7 @@ pub struct App {
     pub query_input: String,
     pub is_editing_search: bool,
     pub active_filter: ProviderFilter,
+    pub artwork_mode: ArtworkMode,
     pub all_results: Vec<SearchResult>,
     pub filtered_indices: Vec<usize>,
     pub selected_filtered_idx: usize,
@@ -43,6 +51,7 @@ impl App {
             query_input: String::new(),
             is_editing_search: true,
             active_filter: ProviderFilter::All,
+            artwork_mode: ArtworkMode::EpisodeFrame,
             all_results: Vec::new(),
             filtered_indices: Vec::new(),
             selected_filtered_idx: 0,
@@ -151,10 +160,34 @@ impl App {
         });
     }
 
+    pub fn toggle_artwork_mode(&mut self, action_tx: mpsc::Sender<AppAction>) {
+        self.artwork_mode = match self.artwork_mode {
+            ArtworkMode::EpisodeFrame => ArtworkMode::SeriesPoster,
+            ArtworkMode::SeriesPoster => ArtworkMode::EpisodeFrame,
+        };
+        // Invalidate current loaded URL so trigger_image_load_for_selected forces re-evaluation
+        self.current_image_url = None;
+        self.trigger_image_load_for_selected(action_tx);
+
+        let mode_label = match self.artwork_mode {
+            ArtworkMode::EpisodeFrame => "Episode Video Frame",
+            ArtworkMode::SeriesPoster => "Official Series Poster",
+        };
+        self.status_message = format!("Switched preview artwork to: {} [p: Toggle]", mode_label);
+    }
+
     pub fn trigger_image_load_for_selected(&mut self, action_tx: mpsc::Sender<AppAction>) {
         let target_url = if let Some(r) = self.selected_result() {
-            // Prioritize episode-specific thumbnail snapshot, fallback to series cover
-            r.thumbnail.as_ref().or(r.poster_url.as_ref()).cloned()
+            match self.artwork_mode {
+                ArtworkMode::EpisodeFrame => {
+                    // Prioritize episode snapshot, fallback to series cover
+                    r.thumbnail.as_ref().or(r.poster_url.as_ref()).cloned()
+                }
+                ArtworkMode::SeriesPoster => {
+                    // Prioritize official series cover, fallback to episode snapshot
+                    r.poster_url.as_ref().or(r.thumbnail.as_ref()).cloned()
+                }
+            }
         } else {
             None
         };
@@ -165,12 +198,12 @@ impl App {
             return;
         };
 
-        if self.current_image_url.as_deref() == Some(&url) {
-            return; // already loaded or loading
+        if self.current_image_url.as_deref() == Some(&url) && self.image_protocol.is_some() {
+            return; // already loaded
         }
 
         self.current_image_url = Some(url.clone());
-        self.image_protocol = None; // Reset so previous episode's image does not linger
+        self.image_protocol = None; // Reset so previous image does not linger
 
         let tx = action_tx.clone();
         let url_clone = url.clone();

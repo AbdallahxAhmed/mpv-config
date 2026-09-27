@@ -3,9 +3,38 @@ use tokio::process::Command;
 use crate::models::{BridgeResponse, SearchResult};
 use anyhow::{Result, Context};
 
+fn find_script(relative_path: &str) -> PathBuf {
+    let p = PathBuf::from(relative_path);
+    if p.exists() {
+        return p;
+    }
+    let p_up = PathBuf::from("..").join(relative_path);
+    if p_up.exists() {
+        return p_up;
+    }
+    let p_up2 = PathBuf::from("../..").join(relative_path);
+    if p_up2.exists() {
+        return p_up2;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate1 = dir.join("../../").join(relative_path);
+            if candidate1.exists() {
+                return candidate1;
+            }
+            let candidate2 = dir.join("../../../").join(relative_path);
+            if candidate2.exists() {
+                return candidate2;
+            }
+        }
+    }
+    PathBuf::from(relative_path)
+}
+
 pub async fn run_search_bridge(query: &str) -> Result<Vec<SearchResult>> {
+    let script = find_script("tools/search/json_bridge.py");
     let output = Command::new("python")
-        .arg("tools/search/json_bridge.py")
+        .arg(&script)
         .arg(query)
         .output()
         .await
@@ -23,8 +52,9 @@ pub async fn run_search_bridge(query: &str) -> Result<Vec<SearchResult>> {
 }
 
 pub async fn download_image_to_cache(url: &str) -> Option<PathBuf> {
+    let script = find_script("tools/search/fetch_image.py");
     let output = Command::new("python")
-        .arg("tools/search/fetch_image.py")
+        .arg(&script)
         .arg(url)
         .output()
         .await
