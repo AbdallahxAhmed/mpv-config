@@ -62,6 +62,7 @@ def search_muchohentai(query: str, max_results: int = 10) -> List[SearchResult]:
         links = re.findall(r'<a\s+href="([^"]*muchohentai\.com/[^"]+)"[^>]*>(.*?)</a>', html)
         seen_links = set()
 
+        candidate_links = []
         for url, raw_title in links:
             clean_title = re.sub(r"<[^>]+>", "", raw_title).strip()
             # Filter navigation links
@@ -76,17 +77,21 @@ def search_muchohentai(query: str, max_results: int = 10) -> List[SearchResult]:
             if url in seen_links:
                 continue
             seen_links.add(url)
+            candidate_links.append((url, clean_title))
+            if len(candidate_links) >= max_results:
+                break
 
-            # Resolve 1080p stream and thumbnail
-            stream_url, thumb = _resolve_mucho_stream(url)
-            play_url = stream_url or url
+        if candidate_links:
+            from concurrent.futures import ThreadPoolExecutor
 
-            results.append(
-                SearchResult(
-                    title=clean_title,
+            def _resolve_one(item):
+                u, t = item
+                stream_url, thumb = _resolve_mucho_stream(u)
+                return SearchResult(
+                    title=t,
                     provider="MuchoHentai",
-                    url=play_url,
-                    download_url=stream_url or url,
+                    url=stream_url or u,
+                    download_url=stream_url or u,
                     resolution="1080p",
                     quality_type="Master HLS (1080p)",
                     codec="H.264",
@@ -97,9 +102,9 @@ def search_muchohentai(query: str, max_results: int = 10) -> List[SearchResult]:
                     delivery="Instant CDN",
                     thumbnail=thumb,
                 )
-            )
-            if len(results) >= max_results:
-                break
+
+            with ThreadPoolExecutor(max_workers=min(len(candidate_links), 6)) as pool:
+                results = list(pool.map(_resolve_one, candidate_links))
 
     except Exception:
         pass

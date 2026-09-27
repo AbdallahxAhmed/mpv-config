@@ -151,6 +151,7 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                 ep_matches = re.findall(r'href="([^"]*episodes/[^"]*)"[^>]*>([^<]*)<', show_html)
                 seen_eps = set()
 
+                candidate_eps = []
                 for ep_url, ep_text in ep_matches:
                     clean_ep_url = ep_url.strip()
                     if not clean_ep_url or clean_ep_url in seen_eps:
@@ -159,19 +160,23 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
 
                     ep_slug = clean_ep_url.rstrip("/").split("/")[-1]
                     title_name = ep_slug.replace("-", " ").title()
+                    candidate_eps.append((clean_ep_url, title_name))
+                    if len(candidate_eps) >= max_results:
+                        break
 
-                    # Resolve direct high speed stream link, resolution, and thumbnail
-                    direct_url, res, thumb = _resolve_direct_stream(clean_ep_url)
+                if candidate_eps:
+                    from concurrent.futures import ThreadPoolExecutor
 
-                    play_url = direct_url if direct_url else clean_ep_url
-                    q_type = f"Direct MP4 ({res})" if direct_url else "Web Stream"
-
-                    results.append(
-                        SearchResult(
-                            title=title_name,
+                    def _resolve_one(item):
+                        u, t = item
+                        direct_url, res, thumb = _resolve_direct_stream(u)
+                        play_url = direct_url if direct_url else u
+                        q_type = f"Direct MP4 ({res})" if direct_url else "Web Stream"
+                        return SearchResult(
+                            title=t,
                             provider="HentaiMama",
                             url=play_url,
-                            download_url=direct_url or clean_ep_url,
+                            download_url=direct_url or u,
                             resolution=res,
                             quality_type=q_type,
                             codec="H.264",
@@ -182,9 +187,10 @@ def search_hentaimama(query: str, max_results: int = 10) -> List[SearchResult]:
                             delivery="Instant CDN",
                             thumbnail=thumb,
                         )
-                    )
-                    if len(results) >= max_results:
-                        break
+
+                    with ThreadPoolExecutor(max_workers=min(len(candidate_eps), 6)) as pool:
+                        results.extend(list(pool.map(_resolve_one, candidate_eps)))
+
             except Exception:
                 pass
             if len(results) >= max_results:

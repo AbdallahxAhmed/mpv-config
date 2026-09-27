@@ -22,11 +22,11 @@ def search_hanime(query: str, max_results: int = 10) -> List[SearchResult]:
     try:
         req = urllib.request.Request(
             endpoint,
-            data=json.dumps({"cmd": "request.get", "url": search_url, "maxTimeout": 25000}).encode("utf-8"),
+            data=json.dumps({"cmd": "request.get", "url": search_url, "maxTimeout": 5000}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=1.0) as r:
             data = json.loads(r.read().decode("utf-8"))
             if data.get("status") == "ok":
                 html = data.get("solution", {}).get("response", "")
