@@ -39,7 +39,7 @@ def find_chafa() -> Optional[str]:
     return None
 
 
-def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 54, height: int = 24) -> str:
+def _render_ascii_art_thumbnail(image_url: Optional[str], width: int = 60, height: int = 25) -> str:
     """Download and decode thumbnail/poster image to smooth high-density sub-pixel terminal graphics via Chafa or ffmpeg."""
     if not image_url:
         return ""
@@ -150,9 +150,9 @@ def format_preview_text(result: SearchResult) -> str:
     sio = StringIO()
     p_console = Console(file=sio, color_system="truecolor", width=65, force_terminal=True)
 
-    # 1. High-Resolution Poster Art (prioritize AniList official cover over video thumbnail)
-    poster_source = result.poster_url or result.thumbnail
-    ansi_poster = _render_ascii_art_thumbnail(poster_source, width=54, height=24) if poster_source else ""
+    # 1. Episode/Item Thumbnail Art (changes dynamically per episode/source, fallback to series cover)
+    poster_source = result.thumbnail or result.poster_url
+    ansi_poster = _render_ascii_art_thumbnail(poster_source, width=60, height=25) if poster_source else ""
     if ansi_poster:
         sio.write(ansi_poster + "\n")
 
@@ -160,7 +160,7 @@ def format_preview_text(result: SearchResult) -> str:
     main_title = result.official_title or result.title
     p_console.print(f"[bold cyan]🎬 {main_title}[/bold cyan]")
     if result.official_title and result.title != result.official_title:
-        p_console.print(f"[dim]Release: {result.title}[/dim]")
+        p_console.print(f"[dim]Episode / Release: {result.title}[/dim]")
 
     # 3. AniList Score, Year, Studio & Episodes (MovieBox-TUI style tags)
     meta_badges = []

@@ -95,8 +95,7 @@ sub-margin-y              = 45
 sub-fix-timing = yes
 sub-ass-override = force
 sub-ass-force-margins = yes
-sub-ass-vsfilter-aspect-compat = no
-sub-ass-vsfilter-blur-compat = no
+sub-ass-use-video-data = aspect-ratio
 demuxer-mkv-subtitle-preroll = yes
 
 # ─── Screenshot ──────────────────────────────────────────────────────
