@@ -1,0 +1,253 @@
+#######################################################################################
+# mpv.conf — RTX 3060 / Ryzen 5 5600X / 16GB / LG UltraGear 1080p 144Hz
+# Fixed-refresh 144Hz mode. UI stays smooth. Video synced via display-resample.
+# Validated May 2026 — mpv ≥ 0.40, libplacebo gpu-next, Anime4K v4.0.1
+#######################################################################################
+
+# ─── UI / uosc compatibility ─────────────────────────────────────────
+osc                       = no
+osd-bar                   = no
+border                    = {{BORDER}}
+osd-font                  = "Segoe UI"
+osd-font-size             = 32
+osd-bold                  = no
+osd-border-size           = 1.2
+osd-color                 = "#FFFFFFFF"
+osd-border-color          = "#FF000000"
+{{#if NATIVE_FS}}
+# ── KDE Plasma fullscreen synchronization ────────────────────────
+# Prevents WM-level fullscreen from desyncing mpv's internal fs state.
+native-fs                 = {{NATIVE_FS}}
+{{/if}}
+idle                      = yes
+keep-open                 = yes
+force-window              = immediate
+save-position-on-quit     = yes
+watch-later-options       = start,vid,aid,sid,volume,mute
+
+# ─── Clipboard ────────────────────────────────────────────────────────
+clipboard-monitor         = yes
+
+# ─── Video output stack ──────────────────────────────────────────────
+vo                        = {{VO}}
+gpu-api                   = {{GPU_API}}
+{{#if GPU_CONTEXT}}
+gpu-context               = {{GPU_CONTEXT}}
+{{/if}}
+{{#if D3D11_FLIP}}
+d3d11-output-format       = auto
+d3d11-flip                = {{D3D11_FLIP}}
+{{/if}}
+
+# ─── Hardware decoding — TRUE zero-copy on Windows/NVIDIA ────────────
+# VALIDATED: d3d11va keeps frames in VRAM end-to-end (decode->shaders->present).
+# Measured on RTX 3060: d3d11va = 1.4ms avg frame time vs nvdec-copy = 5.3ms.
+# -copy variants are only needed for CPU vf= filters, NEVER for glsl-shaders.
+hwdec                     = {{HWDEC}}
+
+# ─── Display sync — fixed 144Hz, UI stays at 144Hz always ────────────
+# mpv aligns video frames to vblank, audio resamples to match.
+# NO display-fps-override on Windows/X11 — mpv's measurement converges to 143.984Hz accurately.
+# Static override was the root cause of the 282Hz estimation bug (Wayland uses wayland-144hz-fix profile).
+video-sync                = {{VIDEO_SYNC}}
+video-output-levels       = full
+
+# ─── Cache — local files don't need 500MB ────────────────────────────
+cache                     = auto
+cache-pause               = no
+cache-secs                = 30
+demuxer-max-bytes         = 150MiB
+demuxer-max-back-bytes    = 75MiB
+demuxer-readahead-secs    = 20
+
+# ─── Seek responsiveness (PotPlayer-like) ────────────────────────────
+# hr-seek=default: inexact (keyframe-precise) on mouse clicks = instant response.
+# hr-seek-framedrop=yes: drop frames during refinement, never stall the UI.
+# demuxer-termination-timeout=0.5: abort stuck demuxer fast on rapid seek bursts.
+hr-seek                   = default
+hr-seek-framedrop         = yes
+demuxer-termination-timeout = 0.5
+prefetch-playlist         = yes
+
+# ─── Audio ───────────────────────────────────────────────────────────
+audio-channels            = auto-safe
+audio-normalize-downmix   = yes
+volume-max                = 200
+volume                    = 100
+alang                     = ar,jpn,jap,ja,en
+slang                     = ar,en
+
+# ─── Subtitles ───────────────────────────────────────────────────────
+# blend-subtitles=no: composite subs at DISPLAY resolution AFTER all scalers
+# and Anime4K passes. =yes would push glyph edges through the CNN restore/
+# upscale chain -> ringing, haloing, color bleed on text. Do not change.
+blend-subtitles           = no
+subs-with-matching-audio  = no
+sub-font                  = "Segoe UI"
+sub-font-size             = 40
+sub-bold                  = yes
+sub-color                 = "#FFFFFFFF"
+sub-back-color            = "#B3080808"
+sub-border-size           = 1.0
+sub-border-color          = "#FF000000"
+sub-shadow-offset         = 0
+sub-margin-y              = 45
+
+# Subtitle Timing & Display Sanitation
+sub-fix-timing = yes
+sub-ass-override = force
+sub-ass-force-margins = yes
+sub-ass-use-video-data = aspect-ratio
+demuxer-mkv-subtitle-preroll = yes
+
+# ─── Screenshot ──────────────────────────────────────────────────────
+screenshot-format         = png
+screenshot-png-compression = 4
+screenshot-high-bit-depth = yes
+screenshot-directory      = {{SCREENSHOT_DIR}}
+screenshot-template       = "%F_%P"
+
+# ─── ytdl ────────────────────────────────────────────────────────────
+ytdl                      = no
+ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+ytdl-raw-options-append = no-playlist=
+ytdl-raw-options-append = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append = socket-timeout=15
+
+# ─── Shader cache — critical for Anime4K first-frame speed ───────────
+gpu-shader-cache          = yes
+gpu-shader-cache-dir      = "~~/shader_cache"
+
+# ─── Scalers ─────────────────────────────────────────────────────────
+# ewa_lanczos (not ewa_lanczossharp — alias unstable on gpu-next/libplacebo).
+# spline36 for cscale — chroma gains nothing from EWA; saves real GPU cycles.
+scale                     = {{SCALE}}
+cscale                    = {{CSCALE}}
+dscale                    = {{DSCALE}}
+scale-antiring            = 0.7
+cscale-antiring           = 0.5
+
+# ─── Dither — 10-bit panel (confirmed via OSD: Format rgb10a2) ───────
+# dither-depth=auto on gpu-next defaults to 8-bit (mpv issue #11862: https://github.com/mpv-player/mpv/issues/11862).
+# Explicit =10 restores the full 10-bit pipeline.
+dither-depth              = {{DITHER_DEPTH}}
+temporal-dither           = yes
+
+# ==========================================
+# إعدادات واجهة البرنامج (OSD) والترجمة (SRT)
+# ==========================================
+{{LINUX_VISUAL_TUNING}}
+
+
+#######################################################################################
+# PROFILE: live-action
+#######################################################################################
+# ── IMPORTANT: Adaptive Sync / VRR / G-Sync ──────────────────
+# If your display uses Variable Refresh Rate (FreeSync/G-Sync),
+# display-resample may CONFLICT with VRR. Consider using:
+#   video-sync=audio
+#   interpolation=no
+# The [protocol.https] streaming profile already uses this mode.
+[live-action]
+profile-desc              = "Live-action: no shaders, mild deband"
+profile-restore           = copy-equal
+glsl-shaders              =
+scale                     = {{SCALE}}
+cscale                    = {{CSCALE}}
+# Calibrated deband: 1 pass is enough for clean sources; higher iterations
+# posterize and flatten fine detail (hair, film grain). grain=24 re-seeds
+# just enough noise to hide residual banding without a visible "snow" layer.
+deband                    = yes
+deband-iterations         = 1
+deband-threshold          = 48
+deband-range              = 16
+deband-grain              = 24
+interpolation             = {{INTERPOLATION}}
+tscale                    = linear
+video-timing-offset       = 0.01
+
+#######################################################################################
+# PROFILE: anime — Anime4K Mode A (RTX 3060 sweet spot at 1080p 144Hz)
+#######################################################################################
+[anime]
+profile-desc              = "Anime: Anime4K Mode A"
+profile-restore           = copy-equal
+# Mode A chain — official bloc97 v4.0.1 for 1080p sources
+# Lighter scale= because Anime4K handles upscaling; ewa_lanczos on top = frame drops
+glsl-shaders              = "{{ANIME_CHAIN}}"
+scale                     = spline36
+cscale                    = spline36
+# Anime deband is 2 passes: Anime4K Restore already suppresses flat-gradient
+# banding, so mpv's debander runs light on top rather than double-processing.
+# grain=32 masks CNN smoothing artifacts in dark scenes without softening
+# line art. Keep iterations <= 2 — higher flattens cel shading.
+deband                    = yes
+deband-iterations         = 2
+deband-threshold          = 48
+deband-range              = 20
+deband-grain              = 32
+interpolation             = {{INTERPOLATION}}
+tscale                    = linear
+video-timing-offset       = 0.01
+
+# ── Wayland Refresh Rate Stabilization ────────────────────────
+# KDE Plasma 6.6.4 Wayland provides unstable presentation feedback,
+# causing mpv's estimated refresh rate to wander. This forces mpv
+# to trust the specified rate for display-resample calculations.
+# Re-evaluate after KDE Plasma 7 or when compositor timing improves.
+[wayland-144hz-fix]
+profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"
+profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and string.find(p["options/gpu-context"] or "", "wayland") ~= nil
+override-display-fps      = 143.981
+profile-restore           = copy
+
+#######################################################################################
+# Auto-selection — simple fast substring match
+#######################################################################################
+# p.path is nil for dvd://, bd://, av://, piped stdin, and during early open.
+# (p.path or "") coerces nil -> "" so match() always receives a string and the
+# condition returns a real boolean instead of raising "attempt to index nil".
+# NOTE: this only fires on file:// — network URLs (YouTube) are matched by
+# protocol, not folder name, so streamed anime still needs CTRL+1..6 manually.
+[protocol.file]
+profile-desc              = "Auto-pick anime by path"
+profile-cond              = (p.path or ""):lower():match('anime') ~= nil or (p.path or ""):lower():match('cartoon') ~= nil
+profile                   = anime
+
+[default]
+profile                   = live-action
+
+#######################################################################################
+# Streaming — bigger cache + readahead for network jitter.
+# Sync is deliberately NOT downgraded here: on a fixed 144Hz panel, 30fps at
+# video-sync=audio gives 144/30 = 4.8 (non-integer) cadence = micro-judder.
+# Keeping display-resample + linear aligns 30fps cleanly to vblank, and the
+# enlarged cache (800MiB / 60s readahead) absorbs the packet jitter that the old
+# video-sync=audio fallback was compensating for. Buffer starvation is handled
+# by cache-pause=no + readahead, not by abandoning vblank alignment.
+#######################################################################################
+[protocol.https]
+profile-desc              = "Network streaming: big cache, display-synced"
+profile-restore           = copy-equal
+cache                     = yes
+demuxer-max-bytes         = 800MiB
+demuxer-max-back-bytes    = 800MiB
+demuxer-readahead-secs    = 60
+# video-sync and interpolation intentionally inherited from the base config
+# (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
+ytdl-format               = bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best
+ytdl-raw-options-append   = no-playlist=
+ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append   = socket-timeout=15
+
+[protocol.http]
+profile                   = protocol.https
+
+[protocol.ytdl]
+profile                   = protocol.https
+
+[default]
+#######################################################################################
+# User overrides (created by --migrate-from-old or manual edits)
+#######################################################################################
+include                   = "~~/mpv.conf.user"

@@ -1,0 +1,192 @@
+#######################################################################################
+#                                                                                     #
+#                         ملف اختصارات mpv - input.conf                                #
+#                               (النسخة المصححة والنهائية)                              #
+#                                                                                     #
+#######################################################################################
+
+# ┌─────────────────────────────────────────────────────────────────┐
+# │                    MPV Keybinding Quick Reference                │
+# ├─────────────┬───────────────────────────────────────────────────┤
+# │             │  🎨 Anime4K Shaders (CTRL + number)              │
+# │ CTRL+1      │  Mode A (Sharp)                                  │
+# │ CTRL+2      │  Mode B (Soft)                                   │
+# │ CTRL+3      │  Mode C (Denoise)                                │
+# │ CTRL+4      │  Mode A+A (Ultra Sharp)                          │
+# │ CTRL+5      │  Mode B+B (Ultra Soft)                           │
+# │ CTRL+6      │  Mode C+A (Denoise + Sharp)                      │
+# │ CTRL+0      │  Clear all shaders                               │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  📸 Screenshots & Display (F-keys)               │
+# │ F1          │  Screenshot (video only, no subs)                │
+# │ F2          │  Screenshot (with subtitles)                     │
+# │ F3          │  Toggle deband filter                            │
+# │ F4          │  Toggle interpolation (motion smoothing)         │
+# │ F5          │  Cycle audio track                               │
+# │ F6          │  Cycle subtitle track                            │
+# │ F7          │  Show/hide subtitles                             │
+# │ F8          │  Night mode (normalize loud audio)               │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  📜 Scripts — Everyday (single letter)           │
+# │ c           │  Subtitles menu (uosc)                           │
+# │ Ctrl+c      │  YouTube auto-subs menu (on-demand)              │
+# │ a           │  Audio tracks & dubs menu (uosc)                 │
+# │ h           │  History — open watch history (memo)             │
+# │ n           │  Subtitle syNc menu (autosubsync)                │
+# │ RIGHT       │  Fast-forward (evafast)                          │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  ⏭️  SmartSkip (>, <, ?, Ctrl/Shift/Alt+N)       │
+# │ >           │  Smart next (skip intro/outro/silence)           │
+# │ <           │  Smart previous                                  │
+# │ ?           │  Trigger silence skip                            │
+# │ Ctrl+.      │  Toggle autoskip on/off                          │
+# │ Alt+.       │  Toggle category autoskip                        │
+# │ Ctrl+RIGHT  │  Next chapter                                    │
+# │ Ctrl+LEFT   │  Previous chapter                                │
+# │ Shift+n     │  Add chapter at current position                 │
+# │ Alt+n       │  Remove current chapter                          │
+# │ Ctrl+n      │  Save chapters to file                           │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  🚫 SponsorBlock (B = Block)                     │
+# │ g           │  Mark segment start/end                          │
+# │ G           │  Submit segment to SponsorBlock API              │
+# │ B           │  Upvote segment (👍 = B for Block)               │
+# │ Ctrl+B      │  Downvote segment (👎)                           │
+# └─────────────┴───────────────────────────────────────────────────┘
+
+# **----- اختصارات تبديل مؤثرات Anime4K -----**
+
+# الوضع A
+CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A (Sharp)"
+
+# الوضع B
+CTRL+2 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B (Soft)"
+
+# الوضع C
+CTRL+3 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C (Denoise)"
+
+# الوضع A+A (تم التصحيح)
+CTRL+4 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A+A (Ultra Sharp)"
+
+# الوضع B+B (تم التصحيح)
+CTRL+5 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B+B (Ultra Soft)"
+
+# الوضع C+A (تم التصحيح)
+CTRL+6 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C+A (Denoise + Sharp)"
+
+# **----- اختصار لإلغاء جميع المؤثرات -----**
+CTRL+0 no-osd change-list glsl-shaders clr; show-text "Shaders Cleared"
+
+
+# **----- اختصارات مفيدة إضافية (تم التصحيح) -----**
+
+# F1: أخذ لقطة شاشة (Screenshot) بدون تضمين الترجمة.
+F1 no-osd screenshot video
+
+# F2: أخذ لقطة شاشة مع تضمين الترجمة.
+F2 no-osd screenshot
+
+# F3: تفعيل/تعطيل فلتر إزالة الشرائط اللونية (Debanding).
+F3 cycle deband
+
+# F4: تفعيل/تعطيل سلاسة الحركة (Interpolation).
+F4 cycle interpolation
+
+# F5: التبديل بين مسارات الصوت المتاحة.
+F5 cycle audio
+
+# F6: التبديل بين مسارات الترجمة المتاحة.
+F6 cycle sub
+
+# F7: إظهار/إخفاء الترجمة.
+F7 cycle sub-visibility
+
+
+# F8: تفعيل/تعطيل توحيد مستوى الصوت (Stable Volume / Night Mode)
+# مفيد جداً في الأنمي والأفلام التي يكون فيها صوت الحوار منخفضاً والمؤثرات عالية
+# f=500   : نافذة تحليل أطول = استجابة أهدأ، لا "تنفس" مسموع
+# g=15    : أقصى رفع 15dB بدلاً من 31 — لا يضخم هسهسة الخلفية
+# p=0.95  : هدف قمة قريب من المستوى الكامل، لا ضغط حاد نحو 50%
+# m=10    : سقف لمعدل تغير الكسب لكل إطار — يقتل ضخّ الكسب المفاجئ
+# alimiter: جدار حماية نهائي يمنع القص الرقمي عند رفع volume فوق 100%
+F8 cycle-values af "lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],lavfi=[alimiter=limit=0.9:level=false]" ""
+
+# ── Window close ── ensure WM close button kills mpv instantly ──
+CLOSE_WIN quit
+
+# ── Mouse Bindings ── Restore classic right-click pause over native context menu
+MBTN_RIGHT       cycle pause
+MBTN_RIGHT_DBL   ignore
+
+# Instant play from clipboard (with automatic URL normalization & instant OSD)
+Ctrl+v           script-binding smart_paste/paste-to-open
+Ctrl+V           script-binding smart_paste/paste-to-open
+Ctrl+Shift+v     script-binding smart_paste/paste-to-playlist
+Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist
+
+#######################################################################################
+#                                   نهاية الإعدادات                                   #
+#######################################################################################
+
+# ─── Script Keybindings (conflict-free) ──────────────────────────
+
+# Subtitles menu (uosc) — c = Subtitles
+c        script-binding uosc/subtitles
+
+# YouTube auto-subtitles on-demand menu — Ctrl+c
+Ctrl+c   script-binding ytdl_sub_menu/open
+Ctrl+C   script-binding ytdl_sub_menu/open
+
+# Audio tracks & dubs menu (uosc) — a = Audio
+a        script-binding uosc/audio
+
+# History (memo) — h = History
+h    script-binding memo-history
+
+# SponsorBlock voting — B = Block (Upvote), Ctrl+B = Downvote
+B        script-binding sponsorblock_upvote
+Ctrl+b   script-binding sponsorblock_downvote
+Ctrl+B   script-binding sponsorblock_downvote
+
+# Subtitle sync (autosubsync) — n = syNc
+n    script-binding autosubsync-menu
+
+# Subtitle background box toggle (Netflix / YouTube translucent box <-> transparent Cinema)
+b    cycle-values sub-back-color "#B3080808" "#00000000"
+
+# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
+# Subtitles menu (uosc) — ؤ = c
+ؤ        script-binding uosc/subtitles
+
+# YouTube auto-subtitles on-demand menu — Ctrl+ؤ = Ctrl+c
+Ctrl+ؤ   script-binding ytdl_sub_menu/open
+
+# Audio tracks & dubs menu (uosc) — ش = a
+ش        script-binding uosc/audio
+
+# History (memo) — ا = h (History)
+ا        script-binding memo-history
+
+# SponsorBlock voting — ﻻ = B (Upvote), ﻵ / Ctrl+ﻻ = Downvote
+ﻻ        script-binding sponsorblock_upvote
+Ctrl+ﻻ   script-binding sponsorblock_downvote
+ﻵ        script-binding sponsorblock_downvote
+
+# SponsorBlock segment marking / submission — ل = g, Shift+ل / إ = G
+ل        script-binding sponsorblock_set_segment
+Shift+ل  script-binding sponsorblock_submit_segment
+إ        script-binding sponsorblock_submit_segment
+
+# Explicit Latin bindings for SponsorBlock segment marking
+g        script-binding sponsorblock_set_segment
+G        script-binding sponsorblock_submit_segment
+
+# Subtitle sync (autosubsync) — ى = n (syNc)
+ى        script-binding autosubsync-menu
+
+# Subtitle background box toggle — لا = b
+لا       cycle-values sub-back-color "#B3080808" "#00000000"
+
+# Instant play from clipboard — Ctrl+ر = Ctrl+v
+Ctrl+ر           script-binding smart_paste/paste-to-open
+Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist

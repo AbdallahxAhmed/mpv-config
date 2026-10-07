@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mpv-config"
+version = "1.0.0"
+description = "Modern, automated MPV configuration and deployment system"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "rich>=13.0.0",
+    "pycryptodomex>=3.20.0",
+    "curl_cffi>=0.7.0",
+    "yt-dlp>=2024.0.0",
+]
+
+[project.scripts]
+mpv-config = "mpv_config.cli.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mpv_config"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [
+    ".agent",
+    ".agents",
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
