@@ -1,7 +1,7 @@
 # Research: Playback Performance — Display Sync Fixes
 
 **Date**: 2026-04-26
-**Spec**: [spec.md](file:///c:/Users/Abdallah_Ahmed/Desktop/mpv_construct/mpv-config/specs/004-playback-performance/spec.md)
+**Spec**: [spec.md](spec.md)
 
 ## Research Questions & Findings
 

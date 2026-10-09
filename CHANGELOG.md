@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`mpv-config install` / `verify` did nothing**: both subcommands were placeholders that printed `Executing: ...` and returned success. They now run `python -m deploy.deployer --install` / `--verify` in a subprocess (no shell, `PYTHONPATH` pinned to the checkout) and return its exit code. Unknown options such as `--dry-run` are forwarded to the deployer.
+- **`python -m deploy.deployer` was silent**: the module had no entry point, so `--install` exited 0 without doing anything. It now has `main()` with argparse (`--install`, `--verify`, `--dry-run`, `--mpv-profile`, `--anime-preset`, `--scaler-tier`, `--display-mode`, `--dither-depth`, `--mpv-version`), fail-closed ordering (fetch, dependencies, transactional deploy, verification) and exit codes 0 / 1 / 2 / 130. Option defaults come from `deploy()`'s own signature.
+- **Tests no longer write into real locations**: tests that saved cookies or probed install directories used `%APPDATA%`, `%ProgramFiles%`, `~/Desktop/mpv-config`, the repository root or the working directory; they now use scratch directories.
+
+### Security
+- `.gitignore` now also covers `.env`, `*.p12` and `*.pfx`.
+- Removed hard-coded personal paths from tracked files (the obsolete one-off `create-clean-repo.ps1` and absolute `file:///` links in `specs/`).
+- Added `tests/test_repo_hygiene.py`, which fails if key material, private-key blocks or personal paths become tracked.
+
 ## [1.0.0] - 2026-10-07
 
 ### Changed

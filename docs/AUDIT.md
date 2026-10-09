@@ -1,5 +1,10 @@
 # Audit and remediation report
 
+> **Historical document.** Written against the pre-1.0 layout. `setup.py` no longer exists:
+> its `--install` / `--verify` / `--dry-run` paths are now `python -m deploy.deployer` (behind
+> `mpv-config install` / `mpv-config verify`). `--update`, `--rollback`, `--uninstall`, `--status`
+> and `--sync-deps` have not been ported, so the `python setup.py ...` commands below do not run.
+
 Baseline reviewed: `835e46df0cc5ff11b33e3d01bc3982820852e58f`.
 All work described here lives on a review branch. `main` was not modified.
 

@@ -40,3 +40,8 @@ tools/native_host/com.mpv.cookiesync.json
 *.pem
 *.key
 *.crt
+*.p12
+*.pfx
+.env
+.env.*
+!.env.example

@@ -57,6 +57,16 @@ Deploy curated configurations, scripts, and shaders to your local MPV setup:
 mpv-config install
 ```
 
+Preview first with `mpv-config install --dry-run`: nothing is downloaded, installed or replaced.
+Options such as `--anime-preset`, `--scaler-tier`, `--mpv-profile`, `--display-mode`,
+`--dither-depth` and `--mpv-version` are passed straight to the deployer; run
+`python -m deploy.deployer --help` inside the repository for the full list.
+
+`mpv-config install` runs the deployer from the repository checkout (`deploy/` and `config/` are
+not part of the installed package). It looks for the checkout in `$MPV_CONFIG_REPO`, then the
+current directory, then the checkout the package was installed from (editable installs), then
+`~/.mpv-config-deploy` (where the bootstrap scripts clone). It exits with the deployer's status.
+
 ### 2. Verify Installation
 Run comprehensive self-diagnostic checks to verify binaries, shaders, and configs:
 ```bash

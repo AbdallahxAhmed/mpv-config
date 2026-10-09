@@ -3,6 +3,7 @@ Unit tests for the downloader framework, GenericDownloader, and plugin registry.
 """
 
 import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -123,7 +124,9 @@ class TestDownloaderFramework(unittest.TestCase):
             "title": "Test Download",
             "id": "xyz987",
         }
-        mock_ydl.prepare_filename.return_value = os.path.join("downloads", "Test Download.mp4")
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        mock_ydl.prepare_filename.return_value = os.path.join(scratch.name, "Test Download.mp4")
 
         dl = GenericDownloader()
         item = MediaItem(
@@ -132,7 +135,7 @@ class TestDownloaderFramework(unittest.TestCase):
             quality="1080p",
             subtitles=["en"],
         )
-        out = dl.download(item, output_dir="downloads")
+        out = dl.download(item, output_dir=scratch.name)
 
         mock_ydl.extract_info.assert_called_once_with("https://example.com/xyz987", download=True)
         self.assertTrue(out.endswith(".mp4"))

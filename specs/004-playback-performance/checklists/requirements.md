@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-04-26
-**Feature**: [spec.md](file:///c:/Users/Abdallah_Ahmed/Desktop/mpv_construct/mpv-config/specs/004-playback-performance/spec.md)
+**Feature**: [spec.md](../spec.md)
 
 ## Content Quality
 

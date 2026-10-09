@@ -1,6 +1,6 @@
 # Implementation Plan: Playback Performance — Display Sync Fixes
 
-**Branch**: `004-playback-performance` | **Date**: 2026-04-26 | **Spec**: [spec.md](file:///c:/Users/Abdallah_Ahmed/Desktop/mpv_construct/mpv-config/specs/004-playback-performance/spec.md)
+**Branch**: `004-playback-performance` | **Date**: 2026-04-26 | **Spec**: [spec.md](spec.md)
 
 ## Summary
 

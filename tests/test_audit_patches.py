@@ -316,9 +316,15 @@ class TestAuditPatches(unittest.TestCase):
         from deploy.installer import _get_target_tools_dir, sync_dependencies
 
         env = Environment(os="windows", platform_key="windows", gpu_vendor="nvidia")
-        target = _get_target_tools_dir(env)
-        self.assertTrue(target)
-        results = sync_dependencies(env=env, dry_run=True)
+        # The tools directory probe creates %ProgramFiles%\\mpv (falling back to %APPDATA%)
+        # and writes a test file in it; keep both in a scratch directory.
+        with (
+            tempfile.TemporaryDirectory() as scratch,
+            mock.patch.dict(os.environ, {"ProgramFiles": scratch, "APPDATA": scratch}),
+        ):
+            target = _get_target_tools_dir(env)
+            self.assertTrue(target)
+            results = sync_dependencies(env=env, dry_run=True)
         self.assertTrue(any(r["name"] == "yt-dlp" and r["status"] == "skipped" for r in results))
         self.assertTrue(
             any(r["name"] == "ffmpeg-full" and r["status"] == "skipped" for r in results)
@@ -511,6 +517,7 @@ class TestAuditPatches(unittest.TestCase):
             patch("deploy.installer._run", side_effect=fake_run),
             patch("shutil.which", return_value="C:\\dummy\\uv.exe"),
             patch("deploy.installer._add_to_path"),
+            patch("deploy.installer.os.makedirs"),  # bin_dir is a Windows path: never create it
         ):
             ok = _install_uv_tool({"pkg": "testpkg", "bin_dir": "C:\\custom\\bin"}, env)
             self.assertTrue(ok)

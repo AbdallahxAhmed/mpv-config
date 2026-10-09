@@ -5,15 +5,23 @@ Back up configuration, prepare replacements offline, render platform defaults,
 and apply updates without changing personal settings or playback presets.
 """
 
+import argparse
+import inspect
 import json
 import os
 import re
 import shutil
 import sys
 import tempfile
+from pathlib import Path
 
 from deploy import transaction as tx
 from deploy import ui
+from deploy.audit_log import AuditLog
+from deploy.detector import detect
+from deploy.fetcher import fetch_all
+from deploy.installer import install_deps
+from deploy.planner import build_install_plan, confirm_plan, display_plan
 from deploy.registry import (
     ANIME4K_CHAINS,
     MPV_EXPERIENCE_PROFILES,
@@ -21,8 +29,11 @@ from deploy.registry import (
     PLATFORM_NATIVE_MPV_DEFAULTS,
     PLATFORM_REQUIRED_DEFAULTS,
     SCALER_TIERS,
+    SCRIPTS,
+    SHADERS,
     SYSTEM_DEPS,
 )
+from deploy.verifier import verify
 
 LINUX_VISUAL_TUNING_BLOCK = (
     "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
@@ -1080,3 +1091,210 @@ def _extract_overrides(content, defaults):
             overrides[current_section].append((key, value))
 
     return order, overrides
+
+
+# ---------------------------------------------------------------------------
+# Command-line entry point
+#
+# ``python -m deploy.deployer --install`` is the process the ``mpv-config`` CLI
+# (and, through it, install.sh / install.ps1) delegates to. This section is
+# orchestration only: the transactional work lives in deploy() and the helpers
+# above, none of which are changed here.
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# deploy()'s own keyword defaults are the CLI defaults, so the two cannot drift.
+_DEPLOY_DEFAULTS = {
+    name: param.default
+    for name, param in inspect.signature(deploy).parameters.items()
+    if param.default is not inspect.Parameter.empty
+}
+
+
+def _is_interactive_session():
+    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+
+
+def _audit_log_for(env):
+    """Return an AuditLog pointing at the config directory's log file."""
+    return AuditLog(os.path.join(env.config_dir, ".audit-log.json"))
+
+
+def _require_complete_fetch(results):
+    """Refuse to continue unless every expected script and the shader pack arrived."""
+    expected = [entry["name"] for entry in SCRIPTS] + [SHADERS["name"]]
+    names = [result.get("name") for result in results]
+    if (
+        len(names) != len(expected)
+        or set(names) != set(expected)
+        or any(result.get("status") != "ok" for result in results)
+    ):
+        raise RuntimeError("Fetch was incomplete; no live configuration was replaced")
+
+
+def cmd_install(args):
+    """Fail-closed install: fetch, dependencies, recoverable deployment, verification.
+
+    Nothing live is touched until every download has succeeded and every
+    dependency step has passed. deploy() then swaps the configuration in
+    transactionally and rolls back if the verification callback raises.
+    """
+    ui.banner()
+    env = detect()
+    plan = build_install_plan(env)
+    display_plan(plan, "Installation Plan")
+    if args.dry_run:
+        ui.info("[DRY RUN] No downloads, installs, audit writes, or replacements.")
+        return 0
+    if _is_interactive_session() and not confirm_plan(plan, "installation"):
+        ui.warn("Installation cancelled by user.")
+        return 0
+
+    config_dir = tx.config_path(env.config_dir)
+    tx.assert_disjoint(config_dir, str(REPO_ROOT))
+    with tx.operation_lock(config_dir):
+        parent = os.path.dirname(config_dir)
+        with tempfile.TemporaryDirectory(prefix=".mpv-install-stage-", dir=parent) as staging:
+            # Download first: a failed fetch must not install any dependencies.
+            fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging)
+            ui.summary(fetch_results)
+            _require_complete_fetch(fetch_results)
+            tx.validate_staging(staging)
+
+            audit_log = _audit_log_for(env)
+            audit_log.start_session("install", env)
+            try:
+                dep_results = install_deps(
+                    env, dry_run=False, audit_log=audit_log, mpv_version=args.mpv_version
+                )
+                ui.summary(dep_results)
+                if any(result.get("status") == "failed" for result in dep_results):
+                    raise RuntimeError(
+                        "Dependency installation failed; configuration was not replaced"
+                    )
+
+                verify_results = []
+
+                def check_install():
+                    verify_results.extend(verify(config_dir, env))
+                    if any(result.get("status") == "failed" for result in verify_results):
+                        ui.summary(verify_results)
+                        raise RuntimeError(
+                            "Verification failed; restoring the previous configuration"
+                        )
+
+                deploy_results = deploy(
+                    staging,
+                    env,
+                    str(REPO_ROOT),
+                    audit_log=audit_log,
+                    mpv_profile=args.mpv_profile,
+                    anime_preset=args.anime_preset,
+                    scaler_tier=args.scaler_tier,
+                    display_mode=args.display_mode,
+                    dither_depth=args.dither_depth,
+                    lockfile=lockfile,
+                    verify_callback=check_install,
+                )
+                if any(result.get("status") == "failed" for result in deploy_results):
+                    raise RuntimeError("Deployment reported a failure")
+                ui.summary(deploy_results + verify_results)
+                audit_log.complete_session("completed")
+                ui.panel(
+                    f"Deployment complete. Config: {config_dir}", title="Success", style="green"
+                )
+            except BaseException as exc:
+                status = "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed"
+                audit_log.complete_session(status)
+                raise
+    return 0
+
+
+def cmd_verify(args):
+    """Verify the deployed configuration; fail loudly if any check fails."""
+    ui.banner()
+    env = detect()
+    results = verify(env.config_dir, env)
+    ui.summary(results)
+    if any(result.get("status") == "failed" for result in results):
+        raise RuntimeError("Installation verification failed")
+    return 0
+
+
+def build_arg_parser():
+    """Build the deployer's argument parser."""
+    parser = argparse.ArgumentParser(
+        prog="python -m deploy.deployer",
+        description="Deploy or verify the mpv configuration managed by this repository.",
+    )
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument(
+        "--install",
+        action="store_true",
+        help="full install: detect, plan, fetch, install dependencies, deploy, verify",
+    )
+    action.add_argument(
+        "--verify", action="store_true", help="verify the current deployment (read-only)"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="with --install: show the plan, change nothing"
+    )
+    parser.add_argument(
+        "--mpv-profile",
+        choices=sorted(MPV_EXPERIENCE_PROFILES),
+        default=_DEPLOY_DEFAULTS["mpv_profile"],
+        help="mpv behavior profile (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--anime-preset",
+        choices=list(ANIME4K_CHAINS),
+        default=_DEPLOY_DEFAULTS["anime_preset"],
+        help="Anime4K shader chain preset (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--scaler-tier",
+        choices=list(SCALER_TIERS),
+        default=_DEPLOY_DEFAULTS["scaler_tier"],
+        help="scaler tier for upscaling quality (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--display-mode",
+        choices=["auto", "fixed", "vrr"],
+        default=_DEPLOY_DEFAULTS["display_mode"],
+        help="display sync mode; auto is an alias of fixed, vrr is opt-in (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--dither-depth",
+        choices=["auto", "8", "10"],
+        default=_DEPLOY_DEFAULTS["dither_depth"],
+        help="dither depth: mpv auto-selection or explicit 8/10 bits (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--mpv-version",
+        metavar="TAG",
+        default=None,
+        help="override the pinned mpv Windows build tag (e.g. 2025-01-15)",
+    )
+    return parser
+
+
+def main(argv=None):
+    """Run the deployer CLI; returns the process exit code (0 ok, 1 failed, 130 interrupted)."""
+    args = build_arg_parser().parse_args(argv)
+    try:
+        if args.install:
+            return cmd_install(args)
+        return cmd_verify(args)
+    except KeyboardInterrupt:
+        ui.warn("Interrupted by user.")
+        return 130
+    except Exception as exc:
+        ui.error(f"Fatal error: {exc}")
+        if os.getenv("DEBUG"):
+            raise
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

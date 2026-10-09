@@ -1,8 +1,12 @@
 import json
+import os
+import tempfile
 import time
 import unittest
 import urllib.request
+from unittest import mock
 
+from tools.native_host import cookie_sync_host
 from tools.native_host.cookie_sync_host import (
     get_cached_stream,
     save_cookies,
@@ -12,6 +16,31 @@ from tools.native_host.cookie_sync_host import (
 
 
 class TestStreamBridge(unittest.TestCase):
+    def setUp(self):
+        # save_cookies()/save_stream() write under %APPDATA% and next to the repository
+        # (cookies.txt). Redirect all of it to a scratch directory so a test run never
+        # touches a real cookie jar or leaves files in the working tree.
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        root = scratch.name
+        patchers = [
+            mock.patch.dict(os.environ, {"APPDATA": root}),
+            mock.patch.object(
+                cookie_sync_host,
+                "ACTIVE_STREAMS_FILE",
+                os.path.join(root, "mpv-config", "active_streams.json"),
+            ),
+            # repo_dir is derived from __file__ (three levels up): make that the scratch dir
+            mock.patch.object(
+                cookie_sync_host,
+                "__file__",
+                os.path.join(root, "tools", "native_host", "cookie_sync_host.py"),
+            ),
+        ]
+        for patcher in patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_save_cookies_netscape(self):
         sample = "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t9999999999\tcf_clearance\ttestval\n"
         targets = save_cookies(sample, "example.com")
