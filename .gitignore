@@ -45,3 +45,6 @@ tools/native_host/com.mpv.cookiesync.json
 .env
 .env.*
 !.env.example
+
+tools/native_host/extension/
+tools/native_host/extension.crx

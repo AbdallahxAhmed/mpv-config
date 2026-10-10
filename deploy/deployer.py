@@ -21,7 +21,7 @@ from deploy.audit_log import AuditLog
 from deploy.detector import detect
 from deploy.fetcher import fetch_all
 from deploy.installer import install_deps
-from deploy.planner import build_install_plan, confirm_plan, display_plan
+from deploy.planner import build_install_plan, build_update_plan, confirm_plan, display_plan
 from deploy.registry import (
     ANIME4K_CHAINS,
     MPV_EXPERIENCE_PROFILES,
@@ -411,8 +411,12 @@ def ensure_windows_shortcuts(env, audit_log=None):
     appdata = os.environ.get("APPDATA") or os.path.expandvars("%APPDATA%")
     if not userprofile or not appdata:
         return []
-    mpv_exe = shutil.which("mpv")
-    if not mpv_exe:
+    mpv_exe = shutil.which("mpv.exe") or shutil.which("mpv")
+    if mpv_exe and mpv_exe.lower().endswith(".com"):
+        candidate_exe = os.path.splitext(mpv_exe)[0] + ".exe"
+        if os.path.isfile(candidate_exe):
+            mpv_exe = candidate_exe
+    if not mpv_exe or not os.path.isfile(mpv_exe):
         candidates = [
             os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "mpv", "mpv.exe"),
             r"C:\Program Files\mpv\mpv.exe",
@@ -467,7 +471,12 @@ foreach ($t in $targets) {
             timeout=15,
         )
         if res.returncode != 0:
-            ui.warn("PowerShell could not update mpv shortcuts")
+            err_msg = res.stderr.strip() if res.stderr and res.stderr.strip() else ""
+            ui.warn(
+                f"PowerShell could not update mpv shortcuts: {err_msg}"
+                if err_msg
+                else "PowerShell could not update mpv shortcuts"
+            )
             return []
         for line in res.stdout.splitlines():
             if line.startswith("SHORTCUT_OK:"):
@@ -1222,11 +1231,339 @@ def cmd_verify(args):
     return 0
 
 
+def cmd_update(args):
+    """Update only assets after complete fetch, keeping a recoverable backup."""
+    ui.banner()
+    env = detect()
+    plan = build_update_plan(env)
+    display_plan(plan, "Update Plan")
+    if args.dry_run:
+        ui.info("[DRY RUN] No downloads, audit writes, staging, or replacements.")
+        return 0
+    if _is_interactive_session() and not confirm_plan(plan, "update"):
+        ui.warn("Update cancelled by user.")
+        return 0
+    config_dir = tx.config_path(env.config_dir)
+    tx.assert_disjoint(config_dir, str(REPO_ROOT))
+    with tx.operation_lock(config_dir):
+        parent = os.path.dirname(config_dir)
+        with tempfile.TemporaryDirectory(prefix=".mpv-update-stage-", dir=parent) as staging:
+            fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging)
+            ui.summary(fetch_results)
+            _require_complete_fetch(fetch_results)
+            backup = tx.update_assets(config_dir, staging, str(REPO_ROOT), lockfile)
+        audit_log = _audit_log_for(env)
+        audit_log.start_session("update", env)
+        if backup:
+            audit_log.record_backup(backup)
+            ui.success(f"Previous configuration saved as: {backup}")
+        audit_log.record_file(
+            config_dir,
+            "copy",
+            "ok",
+            "assets and manifest committed; personal configuration preserved",
+        )
+        audit_log.complete_session("completed")
+        ui.panel(
+            "Update complete. Personal configuration was preserved.",
+            title="Success",
+            style="green",
+        )
+    return 0
+
+
+def cmd_rollback(args):
+    """Restore configuration from backup, retaining a safety snapshot."""
+    ui.banner()
+    env = detect()
+    requested = getattr(args, "backup_path", None) or getattr(args, "rollback", None)
+    if requested in (None, "", "LATEST", "__latest__", True):
+        requested = None
+    config_dir = tx.config_path(env.config_dir)
+    if requested is None:
+        backups = list_backups(config_dir)
+        if not backups:
+            ui.warn(f"No backups found for {config_dir}. Cannot rollback.")
+            return 1
+        requested = backups[0]
+    if args.dry_run:
+        result = rollback_config(config_dir, backup_path=requested, dry_run=True)
+        ui.summary([result])
+        return 0
+    if _is_interactive_session() and not ui.confirm("Restore backup and retain a safety snapshot?"):
+        ui.warn("Rollback cancelled by user.")
+        return 0
+    with tx.operation_lock(config_dir):
+        audit_log = _audit_log_for(env)
+        audit_log.start_session("rollback", env)
+        try:
+            result = rollback_config(config_dir, backup_path=requested, audit_log=audit_log)
+            ui.summary([result])
+            if result.get("status") != "ok":
+                raise RuntimeError("Rollback did not complete")
+            audit_log.complete_session("completed")
+            ui.panel(
+                f"Rollback complete!\nConfig dir: {config_dir}",
+                title="Success",
+                style="green",
+            )
+        except BaseException:
+            audit_log.complete_session("failed")
+            raise
+    return 0
+
+
+def cmd_status(args):
+    """Show current install status vs available versions."""
+    ui.banner()
+    env = detect()
+
+    lockfile_path = os.path.join(env.config_dir, ".deploy.lock.json")
+    if not os.path.isfile(lockfile_path):
+        ui.warn("No deployment lockfile found. Run 'mpv-config install' first.")
+        return 0
+
+    with open(lockfile_path, "r", encoding="utf-8") as f:
+        lockfile = json.load(f)
+
+    ui.header("Installed Scripts & Shaders")
+
+    scripts_data = lockfile.get("scripts", {})
+    for name, info in scripts_data.items():
+        version = info.get("version", info.get("source", "unknown"))
+        date = info.get("fetched_at", "")[:10]
+        ui.success(f"{name}: {version} (fetched {date})")
+
+    shaders_data = lockfile.get("shaders", {})
+    if shaders_data:
+        version = shaders_data.get("version", "unknown")
+        date = shaders_data.get("fetched_at", "")[:10]
+        ui.success(f"Anime4K shaders: {version} (fetched {date})")
+
+    audit_log = _audit_log_for(env)
+    sessions = audit_log.sessions()
+    if sessions:
+        last = sessions[-1]
+        ui.header("Last Installer Session")
+        ui.info(f"Operation : {last.get('operation', '?')}")
+        ui.info(f"Status    : {last.get('status', '?')}")
+        ui.info(f"Started   : {last.get('started_at', '?')}")
+        ui.info(f"Completed : {last.get('completed_at', '?') or '(in progress)'}")
+        pkg_safe = audit_log.get_packages_installed_by_us()
+        if pkg_safe:
+            ui.info(f"Installed by this tool: {', '.join(pkg_safe)}")
+
+    ui.panel(
+        f"Lockfile: {lockfile_path}\nConfig dir: {env.config_dir}",
+        title="Environment Info",
+        style="dim",
+    )
+    return 0
+
+
+def cmd_sync_deps(args):
+    """Sync MPV dependency suite (yt-dlp, ffmpeg-full, alass, ffsubsync)."""
+    ui.banner()
+    env = detect()
+    if args.dry_run:
+        ui.info("[DRY RUN] Read-only preview only. Dependency sync skipped.")
+        return 0
+    config_dir = tx.config_path(env.config_dir)
+    with tx.operation_lock(config_dir):
+        audit_log = _audit_log_for(env)
+        audit_log.start_session("sync-deps", env)
+        try:
+            from deploy.installer import sync_dependencies
+
+            results = sync_dependencies(env=env, dry_run=False, audit_log=audit_log)
+            ui.summary(results)
+            failed = any(r.get("status") == "failed" for r in results)
+            if failed:
+                ui.panel(
+                    "Dependency synchronization completed with failures.",
+                    title="Warning",
+                    style="yellow",
+                )
+                audit_log.complete_session("completed_with_errors")
+                return 1
+            ui.panel("Dependency synchronization complete!", title="Success", style="green")
+            audit_log.complete_session("completed")
+        except BaseException:
+            audit_log.complete_session("failed")
+            raise
+    return 0
+
+
+def _remove_deployed_files(
+    env, purge_config=False, remove_backups=False, dry_run=False, audit_log=None
+):
+    results = []
+    config_dir = env.config_dir
+
+    managed_entries = [
+        "scripts",
+        "shaders",
+        "fonts",
+        "script-opts",
+        "shader_cache",
+        "chapters",
+        "mpv.conf",
+        "input.conf",
+        ".deploy.lock.json",
+    ]
+
+    if purge_config:
+        if os.path.lexists(config_dir):
+            is_symlink = os.path.islink(config_dir)
+            kind = "symlink" if is_symlink else "config dir"
+            if dry_run:
+                ui.info(f"[DRY RUN] Would remove {kind}: {config_dir}")
+                results.append({"name": "config_dir", "status": "skipped", "detail": "dry run"})
+            else:
+                if is_symlink:
+                    os.unlink(config_dir)
+                else:
+                    _remove_path(config_dir)
+                ui.success(f"Removed {kind}: {config_dir}")
+                results.append({"name": "config_dir", "status": "ok", "detail": f"removed {kind}"})
+                if audit_log:
+                    audit_log.record_file(config_dir, "delete", "ok", f"full {kind} removed")
+        else:
+            results.append({"name": "config_dir", "status": "skipped", "detail": "not found"})
+    else:
+        for name in managed_entries:
+            path = os.path.join(config_dir, name)
+            if not os.path.lexists(path):
+                continue
+            is_symlink = os.path.islink(path)
+            kind = "symlink" if is_symlink else "file/dir"
+            if dry_run:
+                ui.info(f"[DRY RUN] Would remove {kind}: {path}")
+                results.append({"name": name, "status": "skipped", "detail": "dry run"})
+            else:
+                if is_symlink:
+                    os.unlink(path)
+                else:
+                    _remove_path(path)
+                ui.success(f"Removed {kind}: {path}")
+                results.append({"name": name, "status": "ok", "detail": f"removed {kind}"})
+                if audit_log:
+                    audit_log.record_file(path, "delete", "ok", f"removed {kind} by uninstall")
+
+    if remove_backups:
+        backups = list_backups(config_dir)
+        if not backups:
+            results.append({"name": "backups", "status": "skipped", "detail": "none found"})
+        for backup in backups:
+            if dry_run:
+                ui.info(f"[DRY RUN] Would remove backup: {backup}")
+                results.append({"name": "backup", "status": "skipped", "detail": backup})
+            else:
+                shutil.rmtree(backup, ignore_errors=True)
+                ui.success(f"Removed backup: {backup}")
+                results.append({"name": "backup", "status": "ok", "detail": backup})
+                if audit_log:
+                    audit_log.record_file(backup, "delete", "ok", "backup removed by uninstall")
+
+    return results
+
+
+def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False, audit_log=None):
+    results = []
+    default_launcher = os.path.expanduser("~/.local/bin/mpv-config")
+    default_deploy_dir = os.path.expanduser("~/.mpv-config-deploy")
+    if os.path.lexists(default_launcher):
+        if dry_run:
+            ui.info(f"[DRY RUN] Would remove launcher: {default_launcher}")
+            results.append({"name": "launcher", "status": "skipped", "detail": "dry run"})
+        else:
+            _remove_path(default_launcher)
+            ui.success(f"Removed launcher: {default_launcher}")
+            results.append({"name": "launcher", "status": "ok", "detail": "removed"})
+            if audit_log:
+                audit_log.record_file(default_launcher, "delete", "ok", "launcher removed")
+
+    if remove_install_dir and os.path.isdir(default_deploy_dir):
+        if dry_run:
+            ui.info(f"[DRY RUN] Would remove deploy dir: {default_deploy_dir}")
+            results.append({"name": "deploy_dir", "status": "skipped", "detail": "dry run"})
+        else:
+            _remove_path(default_deploy_dir)
+            ui.success(f"Removed deploy dir: {default_deploy_dir}")
+            results.append({"name": "deploy_dir", "status": "ok", "detail": "removed"})
+
+    return results
+
+
+def cmd_uninstall(args):
+    """Remove deployed files and optionally dependencies."""
+    ui.banner()
+    env = detect()
+    config_dir = tx.config_path(env.config_dir)
+    audit_log = _audit_log_for(env)
+    pre_existing_pkgs = audit_log.get_pre_existing_packages()
+
+    if args.dry_run:
+        remove_results = _remove_deployed_files(
+            env,
+            purge_config=args.purge_config,
+            remove_backups=args.remove_backups,
+            dry_run=True,
+        )
+        cleanup_results = _remove_launcher_and_install_dir(
+            remove_install_dir=args.remove_install_dir, dry_run=True
+        )
+        ui.summary(remove_results + cleanup_results)
+        return 0
+
+    if _is_interactive_session():
+        if not ui.confirm("Are you sure you want to uninstall MPV configuration?"):
+            ui.warn("Uninstall cancelled by user.")
+            return 0
+
+    with tx.operation_lock(config_dir):
+        audit_log.start_session("uninstall", env)
+        try:
+            if not args.remove_backups and os.path.isdir(config_dir):
+                backup_existing(config_dir, audit_log=audit_log)
+            remove_results = _remove_deployed_files(
+                env,
+                purge_config=args.purge_config,
+                remove_backups=args.remove_backups,
+                dry_run=False,
+                audit_log=audit_log,
+            )
+            dep_results = []
+            if args.remove_deps:
+                from deploy.installer import uninstall_deps
+
+                dep_results = uninstall_deps(
+                    env,
+                    remove_python=getattr(args, "remove_python", False),
+                    dry_run=False,
+                    pre_existing_pkgs=pre_existing_pkgs,
+                    audit_log=audit_log,
+                )
+            cleanup_results = _remove_launcher_and_install_dir(
+                remove_install_dir=args.remove_install_dir, dry_run=False, audit_log=audit_log
+            )
+            all_results = remove_results + dep_results + cleanup_results
+            ui.summary(all_results)
+            if any(result.get("status") == "failed" for result in all_results):
+                raise RuntimeError("Uninstall completed with failures")
+            audit_log.complete_session("completed")
+            ui.panel("Uninstall completed.", title="Success", style="green")
+        except BaseException:
+            audit_log.complete_session("failed")
+            raise
+    return 0
+
+
 def build_arg_parser():
     """Build the deployer's argument parser."""
     parser = argparse.ArgumentParser(
         prog="python -m deploy.deployer",
-        description="Deploy or verify the mpv configuration managed by this repository.",
+        description="Deploy or manage the mpv configuration managed by this repository.",
     )
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument(
@@ -1237,8 +1574,52 @@ def build_arg_parser():
     action.add_argument(
         "--verify", action="store_true", help="verify the current deployment (read-only)"
     )
+    action.add_argument(
+        "--update", action="store_true", help="update scripts and shaders to latest versions"
+    )
+    action.add_argument(
+        "--rollback",
+        nargs="?",
+        const="__latest__",
+        metavar="BACKUP_PATH",
+        help="restore configuration from backup (default: latest)",
+    )
+    action.add_argument(
+        "--status", action="store_true", help="show installed script/shader versions and status"
+    )
+    action.add_argument(
+        "--sync-deps",
+        action="store_true",
+        help="synchronize external dependencies (yt-dlp, ffmpeg, etc.)",
+    )
+    action.add_argument(
+        "--uninstall", action="store_true", help="remove files deployed by this tool"
+    )
     parser.add_argument(
-        "--dry-run", action="store_true", help="with --install: show the plan, change nothing"
+        "--dry-run", action="store_true", help="preview changes without modifying files"
+    )
+    parser.add_argument(
+        "--purge-config",
+        action="store_true",
+        help="with --uninstall: remove entire mpv config directory",
+    )
+    parser.add_argument(
+        "--remove-backups", action="store_true", help="with --uninstall: remove backup directories"
+    )
+    parser.add_argument(
+        "--remove-deps",
+        action="store_true",
+        help="with --uninstall: uninstall managed dependencies",
+    )
+    parser.add_argument(
+        "--remove-python",
+        action="store_true",
+        help="with --uninstall and --remove-deps: also remove Python packages",
+    )
+    parser.add_argument(
+        "--remove-install-dir",
+        action="store_true",
+        help="with --uninstall: remove deploy repository and launcher",
     )
     parser.add_argument(
         "--mpv-profile",
@@ -1285,7 +1666,19 @@ def main(argv=None):
     try:
         if args.install:
             return cmd_install(args)
-        return cmd_verify(args)
+        if args.verify:
+            return cmd_verify(args)
+        if args.update:
+            return cmd_update(args)
+        if args.rollback is not None:
+            return cmd_rollback(args)
+        if args.status:
+            return cmd_status(args)
+        if args.sync_deps:
+            return cmd_sync_deps(args)
+        if args.uninstall:
+            return cmd_uninstall(args)
+        return 0
     except KeyboardInterrupt:
         ui.warn("Interrupted by user.")
         return 130

@@ -72,6 +72,38 @@ class HandOffTests(unittest.TestCase):
         command, _ = self.spawned()
         self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--verify"])
 
+    def test_update_runs_the_deployer_update_action(self):
+        self.assertEqual(self.invoke("update")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--update"])
+
+    def test_rollback_runs_the_deployer_rollback_action(self):
+        self.assertEqual(self.invoke("rollback")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--rollback"])
+
+    def test_rollback_with_custom_path_forwards_target(self):
+        self.assertEqual(self.invoke("rollback", "/custom/backup")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(
+            command, [sys.executable, "-m", "deploy.deployer", "--rollback=/custom/backup"]
+        )
+
+    def test_status_runs_the_deployer_status_action(self):
+        self.assertEqual(self.invoke("status")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--status"])
+
+    def test_sync_deps_runs_the_deployer_sync_deps_action(self):
+        self.assertEqual(self.invoke("sync-deps")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--sync-deps"])
+
+    def test_uninstall_runs_the_deployer_uninstall_action(self):
+        self.assertEqual(self.invoke("uninstall")[0], 0)
+        command, _ = self.spawned()
+        self.assertEqual(command, [sys.executable, "-m", "deploy.deployer", "--uninstall"])
+
     def test_extra_options_are_forwarded_in_order(self):
         self.invoke("install", "--dry-run", "--anime-preset", "A+A", "--mpv-version=2025-01-15")
         command, _ = self.spawned()
@@ -125,7 +157,7 @@ class HandOffTests(unittest.TestCase):
 
 
 class ParserBehaviourTests(unittest.TestCase):
-    def test_unknown_options_are_still_rejected_outside_install_and_verify(self):
+    def test_unknown_options_are_still_rejected_outside_forwarding_commands(self):
         for argv in (["download", "--bogus"], ["--bogus"]):
             with self.subTest(argv=argv):
                 with redirect_stderr(io.StringIO()):

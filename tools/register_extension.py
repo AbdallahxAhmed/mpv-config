@@ -30,13 +30,17 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+import shutil
+
 root_dir = Path(__file__).resolve().parent.parent
-ext_dir = root_dir / "tools" / "extension"
+ext_src_dir = root_dir / "tools" / "extension"
 native_dir = root_dir / "tools" / "native_host"
+# Deployed unpacked extension directory inside native_dir so git working copy is not dirtied
+ext_dir = native_dir / "extension"
 manifest_path = ext_dir / "manifest.json"
 key_pem_path = native_dir / "key.pem"
 key_pkcs8_path = native_dir / "key_pkcs8.pem"
-crx_path = root_dir / "tools" / "extension.crx"
+crx_path = native_dir / "extension.crx"
 host_manifest_path = native_dir / "com.mpv.cookiesync.json"
 host_bat_path = native_dir / "cookie_sync.bat"
 
@@ -57,6 +61,10 @@ def ensure_key_and_manifest() -> tuple[str, str]:
             sys.exit(1)
 
     native_dir.mkdir(parents=True, exist_ok=True)
+    if ext_src_dir.exists():
+        if ext_dir.exists():
+            shutil.rmtree(ext_dir, ignore_errors=True)
+        shutil.copytree(ext_src_dir, ext_dir)
     ext_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Generate or load RSA private key
@@ -84,8 +92,9 @@ def ensure_key_and_manifest() -> tuple[str, str]:
     # 4. Inject key into manifest.json
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["key"] = pub_b64
-        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        if manifest.get("key") != pub_b64:
+            manifest["key"] = pub_b64
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         log(f"Deterministic Extension ID: {ext_id}")
 
     return pub_b64, ext_id

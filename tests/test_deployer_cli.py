@@ -50,6 +50,11 @@ class DeployerParserTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("--install", out)
         self.assertIn("--verify", out)
+        self.assertIn("--update", out)
+        self.assertIn("--rollback", out)
+        self.assertIn("--status", out)
+        self.assertIn("--sync-deps", out)
+        self.assertIn("--uninstall", out)
         self.assertIn("--dry-run", out)
 
     def test_an_action_is_required(self):
@@ -303,6 +308,30 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.m.verify.return_value = [_failed("mpv binary")]
         self.assertEqual(deployer.main(["--verify"]), 1)
         self.assertIn("verification failed", self.error_message())
+
+    def test_update_dry_run_exits_zero_without_writes(self):
+        self.assertEqual(deployer.main(["--update", "--dry-run"]), 0)
+        self.m.display_plan.assert_called_once()
+        self.audit_log.start_session.assert_not_called()
+
+    def test_rollback_dry_run_exits_zero(self):
+        backup_dir = Path(f"{self.config_dir}.backup.20260101_000000")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(deployer.main(["--rollback", "--dry-run"]), 0)
+        self.audit_log.start_session.assert_not_called()
+
+    def test_rollback_aborts_when_no_backups_found(self):
+        self.assertEqual(deployer.main(["--rollback"]), 1)
+        self.m.ui.warn.assert_called_once()
+        self.audit_log.start_session.assert_not_called()
+
+    def test_sync_deps_dry_run_exits_zero(self):
+        self.assertEqual(deployer.main(["--sync-deps", "--dry-run"]), 0)
+        self.audit_log.start_session.assert_not_called()
+
+    def test_uninstall_dry_run_exits_zero(self):
+        self.assertEqual(deployer.main(["--uninstall", "--dry-run"]), 0)
+        self.audit_log.start_session.assert_not_called()
 
 
 class DeployerModuleTests(unittest.TestCase):

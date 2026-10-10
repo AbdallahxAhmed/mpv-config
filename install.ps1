@@ -18,5 +18,9 @@ if ((Test-Path "pyproject.toml") -and (Test-Path "src/mpv_config")) {
 Set-Location $TargetDir
 
 Write-Host "Bootstrapping mpv-config..."
-python -m pip install --user .
+python -m pip install --user --no-warn-script-location .
+$UserScripts = python -c "import site, os; print(os.path.join(site.USER_BASE, 'Scripts'))" 2>$null
+if ($UserScripts -and -not ($env:PATH -split ';' -contains $UserScripts)) {
+    Write-Host "note: $UserScripts is not on your PATH; add it to run 'mpv-config' directly."
+}
 python -m mpv_config install @args

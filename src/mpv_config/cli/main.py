@@ -44,7 +44,15 @@ REPO_ENV_VAR = "MPV_CONFIG_REPO"
 BOOTSTRAP_DIR_NAME = ".mpv-config-deploy"
 
 # Subcommands whose extra options are handed to the deployer unchanged.
-_FORWARDING_COMMANDS = ("install", "verify")
+_FORWARDING_COMMANDS = (
+    "install",
+    "verify",
+    "update",
+    "rollback",
+    "status",
+    "sync-deps",
+    "uninstall",
+)
 
 
 class RepositoryNotFoundError(RuntimeError):
@@ -152,6 +160,35 @@ def cmd_install(args: argparse.Namespace) -> int:
 def cmd_verify(args: argparse.Namespace) -> int:
     """Delegate to ``python -m deploy.deployer --verify``."""
     return _run_deployer("--verify", getattr(args, "deployer_args", ()))
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Delegate to ``python -m deploy.deployer --update``."""
+    return _run_deployer("--update", getattr(args, "deployer_args", ()))
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    """Delegate to ``python -m deploy.deployer --rollback``."""
+    extra = list(getattr(args, "deployer_args", ()))
+    backup_path = getattr(args, "backup_path", None)
+    if backup_path:
+        return _run_deployer(f"--rollback={backup_path}", extra)
+    return _run_deployer("--rollback", extra)
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Delegate to ``python -m deploy.deployer --status``."""
+    return _run_deployer("--status", getattr(args, "deployer_args", ()))
+
+
+def cmd_sync_deps(args: argparse.Namespace) -> int:
+    """Delegate to ``python -m deploy.deployer --sync-deps``."""
+    return _run_deployer("--sync-deps", getattr(args, "deployer_args", ()))
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    """Delegate to ``python -m deploy.deployer --uninstall``."""
+    return _run_deployer("--uninstall", getattr(args, "deployer_args", ()))
 
 
 def cmd_download(args: argparse.Namespace) -> int:
@@ -288,6 +325,51 @@ def build_parser() -> argparse.ArgumentParser:
     # verify
     sub_verify = subparsers.add_parser("verify", help="Verify MPV configuration deployment")
     sub_verify.set_defaults(func=cmd_verify)
+
+    # update
+    sub_update = subparsers.add_parser(
+        "update",
+        help="Update scripts and shaders to latest versions",
+        epilog="Options are forwarded to the deployer, e.g. --dry-run.",
+    )
+    sub_update.set_defaults(func=cmd_update)
+
+    # rollback
+    sub_rollback = subparsers.add_parser(
+        "rollback",
+        help="Restore MPV configuration from backup snapshot",
+        epilog="Options are forwarded to the deployer, e.g. --dry-run.",
+    )
+    sub_rollback.add_argument(
+        "backup_path",
+        nargs="?",
+        default=None,
+        help="Specific backup directory to restore (default: latest)",
+    )
+    sub_rollback.set_defaults(func=cmd_rollback)
+
+    # status
+    sub_status = subparsers.add_parser(
+        "status",
+        help="Show installed versions and deployment status",
+    )
+    sub_status.set_defaults(func=cmd_status)
+
+    # sync-deps
+    sub_sync_deps = subparsers.add_parser(
+        "sync-deps",
+        help="Synchronize and update external dependencies (yt-dlp, ffmpeg, etc.)",
+        epilog="Options are forwarded to the deployer, e.g. --dry-run.",
+    )
+    sub_sync_deps.set_defaults(func=cmd_sync_deps)
+
+    # uninstall
+    sub_uninstall = subparsers.add_parser(
+        "uninstall",
+        help="Remove deployed MPV configuration and files",
+        epilog="Options are forwarded to the deployer, e.g. --purge-config, --dry-run.",
+    )
+    sub_uninstall.set_defaults(func=cmd_uninstall)
 
     # download
     sub_download = subparsers.add_parser("download", help="Download media stream from URL")
