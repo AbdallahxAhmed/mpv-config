@@ -22,15 +22,23 @@
 
 ## 📦 Installation
 
-Install `mpv-config` using `pip` or `pipx`:
+`mpv-config` deploys from a checkout of this repository (`deploy/`, `config/` and `scripts/` are not
+part of the installed package), so install it **editable** from a clone. The command can then find
+the checkout from any directory:
 
 ```bash
-# Direct install
-pip install .
+git clone https://github.com/AbdallahxAhmed/mpv-config.git
+cd mpv-config
 
-# Or isolated global CLI install via pipx
-pipx install .
+# Isolated global CLI install via pipx (recommended)
+pipx install --editable .
+
+# Or, inside a virtual environment
+pip install --editable .
 ```
+
+A regular (non-editable) install only works while you run it from inside the clone, or with
+`MPV_CONFIG_REPO` pointing at the clone.
 
 ### Quick Bootstrap
 
@@ -44,6 +52,11 @@ irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.sh | bash
 ```
+
+The script installs the CLI into its own virtual environment (`~/.local/share/mpv-config/venv`) and
+links `mpv-config` into `~/.local/bin`, so it also works on distributions that refuse
+`pip install --user` (PEP 668, e.g. Ubuntu 24.04). It needs Python 3.10+ (on Debian/Ubuntu also
+`python3-venv`). Pass options through with `... | bash -s -- --dry-run`.
 
 ---
 
