@@ -32,16 +32,27 @@ if sys.platform == "win32":
 
 import shutil
 
+
+def get_user_data_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser(r"~\AppData\Local")
+        return Path(base) / "mpv-config"
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return Path(base) / "mpv-config"
+
+
 root_dir = Path(__file__).resolve().parent.parent
 ext_src_dir = root_dir / "tools" / "extension"
 native_dir = root_dir / "tools" / "native_host"
-# Deployed unpacked extension directory inside native_dir so git working copy is not dirtied
-ext_dir = native_dir / "extension"
-manifest_path = ext_dir / "manifest.json"
-key_pem_path = native_dir / "key.pem"
-key_pkcs8_path = native_dir / "key_pkcs8.pem"
-crx_path = native_dir / "extension.crx"
-host_manifest_path = native_dir / "com.mpv.cookiesync.json"
+
+# User-specific persistent extension and signing data (completely outside git repository)
+user_ext_dir = get_user_data_dir() / "extension"
+unpacked_dir = user_ext_dir / "unpacked"
+manifest_path = unpacked_dir / "manifest.json"
+key_pem_path = user_ext_dir / "key.pem"
+key_pkcs8_path = user_ext_dir / "key_pkcs8.pem"
+crx_path = user_ext_dir / "extension.crx"
+host_manifest_path = user_ext_dir / "com.mpv.cookiesync.json"
 host_bat_path = native_dir / "cookie_sync.bat"
 
 
@@ -60,12 +71,12 @@ def ensure_key_and_manifest() -> tuple[str, str]:
             log("Error: pycryptodome/pycryptodomex is required. Please install via uv/pip.")
             sys.exit(1)
 
-    native_dir.mkdir(parents=True, exist_ok=True)
+    user_ext_dir.mkdir(parents=True, exist_ok=True)
     if ext_src_dir.exists():
-        if ext_dir.exists():
-            shutil.rmtree(ext_dir, ignore_errors=True)
-        shutil.copytree(ext_src_dir, ext_dir)
-    ext_dir.mkdir(parents=True, exist_ok=True)
+        if unpacked_dir.exists():
+            shutil.rmtree(unpacked_dir, ignore_errors=True)
+        shutil.copytree(ext_src_dir, unpacked_dir)
+    unpacked_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Generate or load RSA private key
     if not key_pem_path.exists():
@@ -129,7 +140,7 @@ def pack_crx():
     cmd = [
         browser_bin,
         "--headless=new",
-        f"--pack-extension={ext_dir}",
+        f"--pack-extension={unpacked_dir}",
         f"--pack-extension-key={key_to_use}",
     ]
     try:
@@ -190,7 +201,7 @@ def main():
     pack_crx()
     create_native_host_manifest(ext_id)
 
-    target_path = str(crx_path) if crx_path.exists() else str(ext_dir)
+    target_path = str(crx_path) if crx_path.exists() else str(unpacked_dir)
     host_json = str(host_manifest_path)
 
     # Browser targets (Helium, Brave, Chrome, Edge)
