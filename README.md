@@ -86,7 +86,24 @@ Run comprehensive self-diagnostic checks to verify binaries, shaders, and config
 mpv-config verify
 ```
 
-### 3. Download Media
+### 3. Manage the Deployment
+```bash
+mpv-config status             # installed script/shader versions and the last installer session
+mpv-config update             # refresh scripts and shaders; your personal config is preserved
+mpv-config rollback           # restore the newest backup (the current config is snapshotted first)
+mpv-config rollback <backup>  # restore a specific one of this config's mpv.backup.* folders
+mpv-config sync-deps          # update yt-dlp, ffmpeg, alass and ffsubsync
+mpv-config uninstall          # remove what was deployed (a backup is taken first)
+```
+
+The commands that change something accept `--dry-run`. `rollback` only restores one of the
+configuration's own backups (full path or bare folder name) and lists the available ones if you
+name anything else. `uninstall --purge-config` also removes the config directory itself,
+`--remove-backups` the backups, and `--remove-install-dir` the `~/.mpv-config-deploy` clone plus
+the private virtual environment that `install.sh` created. The launcher link is only removed if
+`install.sh` created it.
+
+### 4. Download Media
 Download streams directly with automatic format selection and FFmpeg merging:
 ```bash
 # Download a video (defaults to ~/Downloads at up to 1080p)
@@ -96,7 +113,7 @@ mpv-config download "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 mpv-config download "https://example.com/video" -o ~/Videos -q 720
 ```
 
-### 4. Background Clipboard Watcher
+### 5. Background Clipboard Watcher
 Automatically capture and download media links copied in your browser:
 ```bash
 mpv-config download --watch

@@ -1272,6 +1272,17 @@ def cmd_update(args):
     return 0
 
 
+def _match_backup(config_dir, requested, backups):
+    """Return the entry of ``backups`` that ``requested`` names (full path or bare name)."""
+    parent = os.path.dirname(config_dir)
+    known = {os.path.normcase(os.path.realpath(path)): path for path in backups}
+    for candidate in (requested, os.path.join(parent, requested)):
+        match = known.get(os.path.normcase(os.path.realpath(candidate)))
+        if match is not None:
+            return match
+    return None
+
+
 def cmd_rollback(args):
     """Restore configuration from backup, retaining a safety snapshot."""
     ui.banner()
@@ -1280,12 +1291,22 @@ def cmd_rollback(args):
     if requested in (None, "", "LATEST", "__latest__", True):
         requested = None
     config_dir = tx.config_path(env.config_dir)
+    backups = list_backups(config_dir)
     if requested is None:
-        backups = list_backups(config_dir)
         if not backups:
             ui.warn(f"No backups found for {config_dir}. Cannot rollback.")
             return 1
         requested = backups[0]
+    else:
+        # restore_snapshot copies whatever directory it is given over the live configuration,
+        # so only this configuration's own backups may be named here.
+        match = _match_backup(config_dir, requested, backups)
+        if match is None:
+            ui.error(f"Not a backup of {config_dir}: {requested}")
+            for path in backups[:5]:
+                ui.info(f"Available backup: {path}")
+            return 1
+        requested = match
     if args.dry_run:
         result = rollback_config(config_dir, backup_path=requested, dry_run=True)
         ui.summary([result])
@@ -1468,20 +1489,47 @@ def _remove_deployed_files(
     return results
 
 
+def _bootstrap_data_dir():
+    """Directory where install.sh keeps its private virtual environment."""
+    base = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(base, "mpv-config")
+
+
+def _is_inside(path, directory):
+    path, directory = os.path.realpath(path), os.path.realpath(directory)
+    try:
+        return os.path.commonpath([path, directory]) == directory
+    except ValueError:  # different drives on Windows
+        return False
+
+
+def _is_bootstrap_venv(path):
+    return os.path.isfile(os.path.join(path, "pyvenv.cfg"))
+
+
 def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False, audit_log=None):
     results = []
     default_launcher = os.path.expanduser("~/.local/bin/mpv-config")
     default_deploy_dir = os.path.expanduser("~/.mpv-config-deploy")
+    data_dir = _bootstrap_data_dir()
     if os.path.lexists(default_launcher):
-        if dry_run:
-            ui.info(f"[DRY RUN] Would remove launcher: {default_launcher}")
-            results.append({"name": "launcher", "status": "skipped", "detail": "dry run"})
+        # Only remove what install.sh created: a symlink into its private venv. A regular file,
+        # or a link owned by another tool (pipx), is not ours to delete.
+        if os.path.islink(default_launcher) and _is_inside(default_launcher, data_dir):
+            if dry_run:
+                ui.info(f"[DRY RUN] Would remove launcher: {default_launcher}")
+                results.append({"name": "launcher", "status": "skipped", "detail": "dry run"})
+            else:
+                _remove_path(default_launcher)
+                ui.success(f"Removed launcher: {default_launcher}")
+                results.append({"name": "launcher", "status": "ok", "detail": "removed"})
+                if audit_log:
+                    audit_log.record_file(default_launcher, "delete", "ok", "launcher removed")
         else:
-            _remove_path(default_launcher)
-            ui.success(f"Removed launcher: {default_launcher}")
-            results.append({"name": "launcher", "status": "ok", "detail": "removed"})
-            if audit_log:
-                audit_log.record_file(default_launcher, "delete", "ok", "launcher removed")
+            ui.warn(f"Left {default_launcher} in place: it was not created by install.sh")
+            results.append(
+                {"name": "launcher", "status": "skipped", "detail": "not created by install.sh"}
+            )
 
     if remove_install_dir and os.path.isdir(default_deploy_dir):
         if dry_run:
@@ -1492,7 +1540,30 @@ def _remove_launcher_and_install_dir(remove_install_dir=False, dry_run=False, au
             ui.success(f"Removed deploy dir: {default_deploy_dir}")
             results.append({"name": "deploy_dir", "status": "ok", "detail": "removed"})
 
+    venv = os.path.join(data_dir, "venv")
+    if remove_install_dir and dry_run and _is_bootstrap_venv(venv):
+        ui.info(f"[DRY RUN] Would remove private virtual environment: {venv}")
+        results.append({"name": "venv", "status": "skipped", "detail": "dry run"})
+
     return results
+
+
+def _remove_bootstrap_venv():
+    """Delete the private venv install.sh created. Call it last: this process may run from it."""
+    data_dir = _bootstrap_data_dir()
+    venv = os.path.join(data_dir, "venv")
+    if not _is_bootstrap_venv(venv):
+        return
+    ui.success(f"Removing private virtual environment: {venv}")
+    try:
+        shutil.rmtree(venv)
+    except OSError as exc:
+        ui.warn(f"Could not remove {venv}: {exc}")
+        return
+    try:
+        os.rmdir(data_dir)
+    except OSError:
+        pass  # something else lives there; leave it
 
 
 def cmd_uninstall(args):
@@ -1552,10 +1623,15 @@ def cmd_uninstall(args):
             if any(result.get("status") == "failed" for result in all_results):
                 raise RuntimeError("Uninstall completed with failures")
             audit_log.complete_session("completed")
+            if args.purge_config and os.path.lexists(config_dir):
+                # The audit log lives inside the config dir and was just written back into it.
+                _remove_path(config_dir)
             ui.panel("Uninstall completed.", title="Success", style="green")
         except BaseException:
             audit_log.complete_session("failed")
             raise
+    if args.remove_install_dir:
+        _remove_bootstrap_venv()
     return 0
 
 

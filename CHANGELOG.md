@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `mpv-config update`, `rollback`, `status`, `sync-deps` and `uninstall` (also `python -m deploy.deployer --update`, `--rollback`, `--status`, `--sync-deps`, `--uninstall`), ported from the pre-1.0 `setup.py`.
+
 ### Fixed
+- **`rollback <path>` accepted any directory** and copied it over the live configuration. It now restores only one of the configuration's own `mpv.backup.*` folders (full path or bare name) and lists the available ones otherwise.
+- **`uninstall` could delete an unrelated `~/.local/bin/mpv-config`** and ignored the private virtual environment `install.sh` creates. It now removes only a symlink into that environment, and `--remove-install-dir` also removes the environment (last, because the command runs from it).
+- **`uninstall --purge-config` left `.audit-log.json` behind**, recreating the config directory. The purge is now complete.
+- **Windows shortcuts could target `mpv.com`**: `shutil.which("mpv")` returns the console wrapper first because `.COM` leads `PATHEXT`. Shortcuts now target `mpv.exe`.
+- `tools/register_extension.py` builds the unpacked extension and the CRX under `tools/native_host/` (git-ignored) instead of rewriting tracked files, and `install.ps1` silences pip's script-location warning with a one-line PATH note.
 - **`mpv-config install` / `verify` did nothing**: both subcommands were placeholders that printed `Executing: ...` and returned success. They now run `python -m deploy.deployer --install` / `--verify` in a subprocess (no shell, `PYTHONPATH` pinned to the checkout) and return its exit code. Unknown options such as `--dry-run` are forwarded to the deployer.
 - **`python -m deploy.deployer` was silent**: the module had no entry point, so `--install` exited 0 without doing anything. It now has `main()` with argparse (`--install`, `--verify`, `--dry-run`, `--mpv-profile`, `--anime-preset`, `--scaler-tier`, `--display-mode`, `--dither-depth`, `--mpv-version`), fail-closed ordering (fetch, dependencies, transactional deploy, verification) and exit codes 0 / 1 / 2 / 130. Option defaults come from `deploy()`'s own signature.
 - **`install.sh` failed on externally managed Pythons (PEP 668)**: `pip install --user .` is refused there (reproduced on Ubuntu 24.04), so the bootstrap stopped before reaching the CLI. It now installs the CLI editable into a private virtual environment (`~/.local/share/mpv-config/venv`), links `mpv-config` into `~/.local/bin` without overwriting an unrelated file, checks for Python 3.10+, and updates an existing clone with `git pull --ff-only`.
