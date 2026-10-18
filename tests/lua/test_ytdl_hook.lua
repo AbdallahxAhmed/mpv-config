@@ -15,7 +15,8 @@ local function run(config)
         ['options/ytdl-format']='bestvideo[height<=?1080]+bestaudio/best',
         ['options/ytdl-raw-options']=config.raw or {},['options/vid']='auto',
         aid=config.aid or 'auto',sid=config.sid or 'auto',
-        ['option-info/ytdl-format/set-from-commandline']=config.explicit_format or false}}
+        ['option-info/ytdl-format/set-from-commandline']=config.explicit_format or false,
+        ['mpv-version']=config.mpv_version or 'mpv v0.42.0'}}
     if config.live then h.json.is_live=true end
     if config.other then h.json.extractor='other' end
     local function get(k,d) local v=h.props[k]; if v==nil then return d end; return v end
@@ -137,5 +138,15 @@ test('a broken configured candidate does not stall the search',function()
     eq(h.calls[2][1],'yt-dlp')
     eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].stdout,'fixture')
     assert(h.edl:find('https://media.example/video',1,true))
+end)
+test('EDL program_id gated by mpv build (0.41 release emits none, master does)',function()
+    -- Regression: release binaries up to mpv 0.41 reject EDL
+    -- "!track_meta,...,program_id=" with "Unknown or duplicate parameter"
+    -- once per track (37 warnings for a 4K YouTube track list).
+    eq(run({mpv_version='mpv v0.41.0'}).edl:find('program_id',1,true),nil)
+    eq(run({mpv_version='mpv 0.41.0'}).edl:find('program_id',1,true),nil)
+    assert(run({mpv_version='mpv v0.41.0-809-g84e8b2a'}).edl:find('program_id',1,true))
+    assert(run({mpv_version='mpv v0.42.0'}).edl:find('program_id',1,true))
+    assert(run().edl:find('program_id',1,true))
 end)
 print('Hook tests passed: '..total)

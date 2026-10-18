@@ -594,6 +594,22 @@ local function formats_to_edl(json, formats, use_all_formats)
     local has_requested_video = false
     local has_requested_audio = false
     local next_program_id = 0
+    -- EDL "!track_meta,...,program_id=" is understood only on mpv builds
+    -- newer than the 0.41 release (edition grouping landed master-side).
+    -- Release 0.41 and older log "Unknown or duplicate parameter:
+    -- 'program_id'" once per track, so only emit it when detectable.
+    local has_edl_program_id = (function()
+        local v = tostring(mp.get_property("mpv-version") or "")
+        v = v:gsub("^mpv", ""):gsub("^%s+", ""):lower()
+        if v:find("%-g%d", 1, false) or v:find("git", 1, false) then
+            return true
+        end
+        local major, minor = v:match("^v?(%d+)%.(%d+)")
+        if not major then
+            return false
+        end
+        return tonumber(major) > 0 or tonumber(minor) >= 42
+    end)()
     -- Web players with quality selection always show the highest quality
     -- option at the top. Since tracks are usually listed with the first
     -- track at the top, that should also be the highest quality track.
@@ -692,10 +708,10 @@ local function formats_to_edl(json, formats, use_all_formats)
                 hdr[#hdr + 1] = "!track_meta,title=" ..
                     edl_escape(title) .. ",byterate=" .. byterate ..
                     (lang and (",lang=" .. edl_escape(lang)) or "") ..
-                    (dominated and ",program_id=" .. next_program_id or "") ..
+                    (dominated and has_edl_program_id and ",program_id=" .. next_program_id or "") ..
                     (#flags > 0 and ",flags=" .. table.concat(flags, "+") or "")
             end
-            if dominated then
+            if dominated and has_edl_program_id then
                 next_program_id = next_program_id + 1
             end
 

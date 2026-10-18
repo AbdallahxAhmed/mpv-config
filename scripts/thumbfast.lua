@@ -1050,6 +1050,17 @@ local function real_res(req_w, req_h, filesize)
                 end
             end
         end
+        -- Tolerate trailing row padding: some write-back paths (driver row
+        -- alignment, a queued partial frame flush) append extra rows below
+        -- the requested height. The overlay consumes exactly req_w*req_h
+        -- pixels, so accept the frame when the stride still matches the
+        -- requested width and only a few rows of padding ride along.
+        if count % req_w == 0 then
+            local rows = count / req_w
+            if rows >= req_h and (rows - req_h) <= 8 then
+                return req_w, req_h
+            end
+        end
         return nil
     end
 end
