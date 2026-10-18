@@ -63,6 +63,12 @@ def _parse_mpv_version(text):
     return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
 
 
+def probe_mpv_version():
+    """Current `mpv --version` as a version tuple, or None when unavailable."""
+    _, output = _run_silent(["mpv", "--version"])
+    return _parse_mpv_version(output)
+
+
 # lspci device-name fragments for Intel iGPUs whose Mesa Vulkan drivers are
 # incomplete/broken. They do not fail to initialize — mpv happily plays
 # through them and small/correct-rendering differences become broken color
@@ -678,8 +684,7 @@ def detect():
         for name, info in SYSTEM_DEPS.items():
             env.installed[name] = _check_installed(name, info)
             if name == "mpv" and env.installed.get(name):
-                _, output = _run_silent(["mpv", "--version"])
-                env.mpv_version = _parse_mpv_version(output)
+                env.mpv_version = probe_mpv_version()
                 if env.mpv_version:
                     rows.append(["mpv version", ".".join(map(str, env.mpv_version))])
 

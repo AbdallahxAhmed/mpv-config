@@ -19,14 +19,22 @@ import zipfile
 from deploy import ui
 from deploy.registry import MPV_MINIMUM_VERSION, SYSTEM_DEPS
 
+# WHY: package-manager operations legitimately run far longer than the
+# default 5-minute _run timeout — a full `apt-get update`/`add-apt-repository`
+# refresh against slow or distant mirrors routinely exceeded 300 s, and the
+# killed step left machines without the very package they were installing
+# (report: mpv PPA setup "times out and eventually not installed"). Package
+# installs/updates/PPA setup get a 30-minute budget instead.
+PKG_TIMEOUT = 1800  # seconds
 
-def _run(cmd, check=True, env=None):
+
+def _run(cmd, check=True, env=None, timeout=300):
     """Run a command, showing output. Returns success bool."""
     try:
         result = subprocess.run(
             cmd,
             check=check,
-            timeout=300,
+            timeout=timeout,
             env=env,
             # Don't capture — let user see install progress
         )
@@ -39,7 +47,7 @@ def _run(cmd, check=True, env=None):
         ui.error(f"Command not found: {cmd[0]}")
         return False
     except subprocess.TimeoutExpired:
-        ui.error(f"Command timed out: {' '.join(cmd)}")
+        ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
         return False
 
 
@@ -51,11 +59,15 @@ def _ensure_pipx(env):
     ui.step("pipx not found — attempting to install via OS package manager...")
     if env.os == "linux":
         if env.distro in ("ubuntu", "debian", "mint", "pop"):
-            return _run(["sudo", "apt", "install", "-y", "pipx"])
+            return _run(
+                ["sudo", "apt", "install", "-y", "pipx"], timeout=PKG_TIMEOUT
+            )
         elif env.distro == "fedora":
-            return _run(["sudo", "dnf", "install", "-y", "pipx"])
+            return _run(
+                ["sudo", "dnf", "install", "-y", "pipx"], timeout=PKG_TIMEOUT
+            )
     elif env.os == "macos":
-        return _run(["brew", "install", "pipx"])
+        return _run(["brew", "install", "pipx"], timeout=PKG_TIMEOUT)
 
     ui.warn("Could not automatically install pipx. Please install it manually.")
     return False
@@ -83,7 +95,8 @@ def _ensure_7zip():
             "-e",
             "--accept-package-agreements",
             "--accept-source-agreements",
-        ]
+        ],
+        timeout=PKG_TIMEOUT,
     )
 
 
@@ -597,27 +610,47 @@ def _install_mpv_latest(env):
     22.04/24.04/25.x on amd64/arm64 (Mint 22.x/21.x uses the Ubuntu base
     series, so the PPA works there too).  Debian has no matching PPA series
     and stays on its own apt build.
+
+    Why not let add-apt-repository refresh the cache itself: its built-in
+    `apt update` refreshes EVERY configured apt source (was the step that
+    timed out past 300 s on the friend's machine), so we add the PPA with
+    -n/--no-update and run exactly ONE update ourselves, with the long
+    PKG_TIMEOUT budget and on-the-wire retries for flaky networks.
     """
     if env.os == "linux" and _os_release_id() not in ("ubuntu", "linuxmint", "pop", ""):
         # Debian & derivatives: ubuntuhandbook1's PPA has no matching
         # series there — stay on the distro's own mpv build.
-        return _run(["sudo", "apt", "install", "-y", "mpv"])
+        return _run(
+            ["sudo", "apt", "install", "-y", "mpv"], check=False, timeout=PKG_TIMEOUT
+        )
     if not shutil.which("add-apt-repository"):
         _run(
             ["sudo", "apt-get", "install", "-y", "software-properties-common"],
             check=False,
+            timeout=PKG_TIMEOUT,
         )
     added = _run(
-        ["sudo", "add-apt-repository", "-y", "ppa:ubuntuhandbook1/mpv"], check=False
+        # -n: register the source only; the cache refresh below is ours.
+        ["sudo", "add-apt-repository", "-y", "-n", "ppa:ubuntuhandbook1/mpv"],
+        check=False,
+        timeout=PKG_TIMEOUT,
     )
-    if added:
-        # Mint and some derivatives do not refresh the cache automatically.
-        _run(["sudo", "apt-get", "update"], check=False)
-    else:
+    if not added:
         ui.warn(
             "Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build."
         )
-    return _run(["sudo", "apt-get", "install", "-y", "mpv"])
+    ui.step(
+        "Refreshing apt cache (single pass; can take a few minutes on slow networks)..."
+    )
+    _run(
+        ["sudo", "apt-get", "update", "-o", "Acquire::Retries=3"],
+        check=False,
+        timeout=PKG_TIMEOUT,
+    )
+    return _run(
+        ["sudo", "apt-get", "install", "-y", "-o", "Acquire::Retries=3", "mpv"],
+        timeout=PKG_TIMEOUT,
+    )
 
 
 def _install_uv(name, info, env):
@@ -626,17 +659,20 @@ def _install_uv(name, info, env):
         return True
 
     if env.os == "macos":
-        if shutil.which("brew") and _run(["brew", "install", "uv"]):
+        if shutil.which("brew") and _run(["brew", "install", "uv"], timeout=PKG_TIMEOUT):
             return True
     elif env.os == "linux":
         if env.distro == "arch":
-            if _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", "uv"]):
+            if _run(
+                ["sudo", "pacman", "-S", "--noconfirm", "--needed", "uv"],
+                timeout=PKG_TIMEOUT,
+            ):
                 return True
         elif env.distro in ("ubuntu", "debian", "mint", "pop"):
-            if _run(["sudo", "apt", "install", "-y", "uv"]):
+            if _run(["sudo", "apt", "install", "-y", "uv"], timeout=PKG_TIMEOUT):
                 return True
         elif env.distro == "fedora":
-            if _run(["sudo", "dnf", "install", "-y", "uv"]):
+            if _run(["sudo", "dnf", "install", "-y", "uv"], timeout=PKG_TIMEOUT):
                 return True
 
     if env.os == "windows":
@@ -646,7 +682,7 @@ def _install_uv(name, info, env):
         return False
 
     ui.step("Installing uv via official installer script...")
-    ok = _run(["/bin/sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"])
+    ok = _run(["/bin/sh", "-c", "curl -LsSf https://astral.sh/uv/install.sh | sh"], timeout=900)
     if ok:
         local_bin = os.path.expanduser("~/.local/bin")
         if local_bin not in os.environ.get("PATH", ""):
@@ -785,10 +821,13 @@ def _install_one(name, dep_info, env, mpv_version=None):
     method = info["method"]
 
     if method == "pacman":
-        return _run(["sudo", "pacman", "-S", "--noconfirm", "--needed", info["pkg"]])
+        return _run(
+            ["sudo", "pacman", "-S", "--noconfirm", "--needed", info["pkg"]],
+            timeout=PKG_TIMEOUT,
+        )
 
     elif method == "apt":
-        return _run(["sudo", "apt", "install", "-y", info["pkg"]])
+        return _run(["sudo", "apt", "install", "-y", info["pkg"]], timeout=PKG_TIMEOUT)
 
     elif method == "ppa":
         # Ubuntu/Mint apt repos ship ancient mpv (Noble: 0.37) that fails on
@@ -796,10 +835,10 @@ def _install_one(name, dep_info, env, mpv_version=None):
         return _install_mpv_latest(env)
 
     elif method == "dnf":
-        return _run(["sudo", "dnf", "install", "-y", info["pkg"]])
+        return _run(["sudo", "dnf", "install", "-y", info["pkg"]], timeout=PKG_TIMEOUT)
 
     elif method == "brew":
-        return _run(["brew", "install", info["pkg"]])
+        return _run(["brew", "install", info["pkg"]], timeout=PKG_TIMEOUT)
 
     elif method == "winget":
         return _run(
@@ -811,7 +850,8 @@ def _install_one(name, dep_info, env, mpv_version=None):
                 "-e",
                 "--accept-package-agreements",
                 "--accept-source-agreements",
-            ]
+            ],
+            timeout=PKG_TIMEOUT,
         )
 
     elif method == "github_asset":

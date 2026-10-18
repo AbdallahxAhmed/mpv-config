@@ -18,7 +18,7 @@ from pathlib import Path
 from deploy import transaction as tx
 from deploy import ui
 from deploy.audit_log import AuditLog
-from deploy.detector import detect
+from deploy.detector import detect, probe_mpv_version
 from deploy.fetcher import fetch_all
 from deploy.installer import install_deps
 from deploy.planner import build_install_plan, build_update_plan, confirm_plan, display_plan
@@ -263,6 +263,49 @@ def _detect_display_fps(env):
     return None
 
 
+# Template options that did not exist in older distro mpv builds (Ubuntu/
+# Mint Noble ships 0.37). When a machine runs an mpv older than an option's
+# added-in version, the option is commented instead of left to crash config
+# parsing; after the PPA upgrade + redeploy they are restored automatically.
+# WHY per-option floors instead of one MPV_MINIMUM_VERSION cut: mpv 0.39
+# already understands sub-ass-use-video-data (adopting it there must not be
+# discarded), it only never existed before 0.39.
+_MPV_OPTIONS_ADDED_IN = {
+    "clipboard-monitor": (0, 40, 0),
+    "sub-ass-use-video-data": (0, 39, 0),
+}
+
+# Marker comment left in place of a sanitized option line. Repair pass in
+# _migrate_mpv_conf un-comments lines starting with it once mpv is new enough.
+_SANITIZED_OPTION_MARKER = "# beyond installed mpv — commented out; re-run `mpv-config install` after upgrading"
+
+
+def _sanitize_mpv_conf_for_mpv_version(content, mpv_version):
+    """Comment out options newer than the installed mpv.
+
+    Returns (content', removed_count). Nothing runs when mpv_version is
+    None (unknown version → assume a current build, keep every option).
+    """
+    if not mpv_version:
+        return content, 0
+    version = tuple(mpv_version)
+    removed = 0
+    lines = []
+    for line in content.splitlines(keepends=True):
+        match = re.match(r"^([ \t]*)([A-Za-z][\w-]*)([ \t]*=)", line)
+        if (
+            match
+            and match.group(2) in _MPV_OPTIONS_ADDED_IN
+            and version < _MPV_OPTIONS_ADDED_IN[match.group(2)]
+        ):
+            origin = line.rstrip("\r\n").strip()
+            lines.append(f"{_SANITIZED_OPTION_MARKER} was: {origin}\n")
+            removed += 1
+        else:
+            lines.append(line)
+    return "".join(lines), removed
+
+
 def _patch_mpv_conf(
     template_path,
     dest_path,
@@ -384,6 +427,23 @@ def _patch_mpv_conf(
             "D3D11_FLIP": display_settings["d3d11_flip"] if env.os == "windows" else "",
         },
     )
+    # Adapt to the actually-installed mpv: a below-0.40 distro build (e.g.
+    # Ubuntu 24.04's 0.37) cannot parse clipboard-monitor /
+    # sub-ass-use-video-data, and one bad option aborts config parsing at
+    # startup — comment those out so the rest of the config still works.
+    mpv_version = getattr(env, "mpv_version", None)
+    content, sanitized_count = _sanitize_mpv_conf_for_mpv_version(content, mpv_version)
+    if sanitized_count:
+        ui.warn(
+            f"mpv {'.'.join(map(str, mpv_version))} predates {sanitized_count} template "
+            "option(s) — commented out to keep the config loadable; upgrade mpv and "
+            "re-run `mpv-config install` to restore them."
+        )
+        if audit_log:
+            audit_log.record_note(
+                "mpv_conf_sanitized",
+                f"mpv {'.'.join(map(str, mpv_version))} — commented {sanitized_count} newer option(s)",
+            )
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(content)
 
@@ -1161,11 +1221,15 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     2. On legacy Intel iGPUs (Haswell or older) a template-patched
        gpu-api=vulkan renders video magenta — swap it to opengl, matching
        what fresh deployments compute in _patch_mpv_conf.
+    3. Version adapt: comments out template options newer than the
+       installed mpv, and restores previously commented ones once that
+       mpv can actually parse them (upgrade-then-redeploy flow).
     """
     if not os.path.isfile(mpv_conf_path):
         return False
     with open(mpv_conf_path, "r", encoding="utf-8") as f:
         content = f.read()
+    mpv_version = getattr(env, "mpv_version", None) if env is not None else None
     updated = re.sub(
         r"^([ \t]*)override-display-fps([ \t]*=)",
         r"\1display-fps-override\2",
@@ -1185,34 +1249,60 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     # when the conf has neither, the canonical replacement is inserted
     # directly above the first commented line so it lands in the same
     # (global) options section.
-    already_has_sub_ass_use_video_data = re.search(
-        r"^[ \t]*sub-ass-use-video-data[ \t]*=", updated, re.MULTILINE
-    )
-    updated, removed_sub_ass = re.subn(
-        r"^[ \t]*sub-ass-vsfilter-(?:aspect|blur)-compat[ \t]*=[^\r\n]*$",
-        lambda m: "# removed in newer mpv — was: " + m.group(0).strip(),
-        updated,
-        flags=re.MULTILINE,
-    )
-    if removed_sub_ass and not already_has_sub_ass_use_video_data:
-        updated = re.sub(
-            r"^([ \t]*# removed in newer mpv)",
-            lambda m: "sub-ass-use-video-data = aspect-ratio\n" + m.group(1),
+    # Version-aware guard: on an mpv OLDER than sub-ass-use-video-data
+    # (e.g. Ubuntu 0.37) the vsfilter options are still valid, and the
+    # replacement does not exist yet — touching them would break parsing.
+    sub_ass_floor = _MPV_OPTIONS_ADDED_IN["sub-ass-use-video-data"]
+    if mpv_version is None or mpv_version >= sub_ass_floor:
+        already_has_sub_ass_use_video_data = re.search(
+            r"^[ \t]*sub-ass-use-video-data[ \t]*=", updated, re.MULTILINE
+        )
+        updated, removed_sub_ass = re.subn(
+            r"^[ \t]*sub-ass-vsfilter-(?:aspect|blur)-compat[ \t]*=[^\r\n]*$",
+            lambda m: "# removed in newer mpv — was: " + m.group(0).strip(),
             updated,
-            count=1,
             flags=re.MULTILINE,
         )
+        if removed_sub_ass and not already_has_sub_ass_use_video_data:
+            updated = re.sub(
+                r"^([ \t]*# removed in newer mpv)",
+                lambda m: "sub-ass-use-video-data = aspect-ratio\n" + m.group(1),
+                updated,
+                count=1,
+                flags=re.MULTILINE,
+            )
+    # Restore options the sanitizer previously commented out (marker in
+    # _patch_mpv_conf / older runs of this migration) now that the
+    # installed mpv actually supports them.
+    restored_count = 0
+    if mpv_version:
+        version = tuple(mpv_version)
+        for option, added_in in _MPV_OPTIONS_ADDED_IN.items():
+            if version < added_in:
+                continue
+            updated, counted = re.subn(
+                r"^" + re.escape(_SANITIZED_OPTION_MARKER) + r" was: ([ \t]*"
+                + option
+                + r"[ \t]*=[^\r\n]*)$",
+                r"\1",
+                updated,
+                flags=re.MULTILINE,
+            )
+            restored_count += counted
+    # And strip options the installed mpv cannot parse (no-op when it is
+    # already new enough or its version is unknown).
+    updated, sanitized_count = _sanitize_mpv_conf_for_mpv_version(updated, mpv_version)
     if updated == content:
         return False
     with open(mpv_conf_path, "w", encoding="utf-8") as f:
         f.write(updated)
     if audit_log:
-        audit_log.record_file(
-            mpv_conf_path,
-            "modify",
-            "ok",
-            "repaired mpv.conf options (renames / GPU-API safety)",
-        )
+        detail = "repaired mpv.conf options (renames / GPU-API safety)"
+        if restored_count:
+            detail += f" — restored {restored_count} option(s) for upgraded mpv"
+        if sanitized_count:
+            detail += f" — commented {sanitized_count} too-new option(s)"
+        audit_log.record_file(mpv_conf_path, "modify", "ok", detail)
     return True
 
 
@@ -1365,10 +1455,37 @@ def cmd_install(args):
                     env, dry_run=False, audit_log=audit_log, mpv_version=args.mpv_version
                 )
                 ui.summary(dep_results)
-                if any(result.get("status") == "failed" for result in dep_results):
+                # mpv is deliberately not fatal: its install can fail for
+                # reasons outside our control (slow mirrors, blocked PPA,
+                # absent network) and the fail-closed abort would leave the
+                # usable machine un-deployed. The deploy adapts the config
+                # to whatever mpv exists (too-new options get commented).
+                # Every other dependency stays fail-closed.
+                fatal_failures = [
+                    result
+                    for result in dep_results
+                    if result.get("status") == "failed" and result.get("name") != "mpv"
+                ]
+                if fatal_failures:
                     raise RuntimeError(
                         "Dependency installation failed; configuration was not replaced"
                     )
+                if any(
+                    result.get("status") == "failed" and result.get("name") == "mpv"
+                    for result in dep_results
+                ):
+                    ui.warn(
+                        "mpv installation failed — deploying a config adapted to the mpv "
+                        "already on this machine (options it cannot parse are commented "
+                        "out). Upgrade mpv, then re-run `mpv-config install` to restore "
+                        "the full option set."
+                    )
+                # Refresh the recorded mpv version after any install attempt so
+                # the deploy adapts to what is ACTUALLY installed now (the
+                # detection-time probe predates the PPA upgrade). A failed mpv
+                # install then surfaces as "old known version" → sanitized
+                # config; nothing to refresh when mpv is absent entirely.
+                env.mpv_version = probe_mpv_version()
 
                 verify_results = []
 

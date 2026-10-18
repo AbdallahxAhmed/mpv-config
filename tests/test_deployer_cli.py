@@ -162,6 +162,9 @@ class InstallOrchestrationTests(unittest.TestCase):
             "install_deps": mock.patch.object(
                 deployer, "install_deps", autospec=True, side_effect=install_deps
             ),
+            "probe_mpv_version": mock.patch.object(
+                deployer, "probe_mpv_version", autospec=True, return_value=(0, 41, 0)
+            ),
             "verify": mock.patch.object(
                 deployer, "verify", autospec=True, return_value=[_ok("mpv binary")]
             ),
@@ -181,6 +184,25 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.audit_log.complete_session.assert_called_once_with("completed")
         self.m.ui.panel.assert_called_once()
         self.m.ui.error.assert_not_called()
+
+    def test_install_continues_after_mpv_dependency_failure(self):
+        """mpv failure is non-fatal: deploy adapts the config to the actual mpv."""
+        self.dep_results = [
+            {"name": "mpv", "status": "failed", "detail": "add-apt-repository timed out"},
+            _ok("yt-dlp"),
+        ]
+        self.assertEqual(deployer.main(["--install"]), 0)
+        self.assertEqual(self.calls, ["fetch_all", "install_deps", "deploy"])
+        self.audit_log.complete_session.assert_called_once_with("completed")
+        self.assertTrue(self.m.ui.warn.called)
+
+    def test_install_aborts_on_non_mpv_dependency_failure(self):
+        """Anything other than mpv stays fail-closed (no deploy, no replace)."""
+        self.dep_results = [_ok("mpv"), _failed("yt-dlp")]
+        self.assertEqual(deployer.main(["--install"]), 1)
+        self.assertEqual(self.calls, ["fetch_all", "install_deps"])
+        self.assertIn("Dependency installation failed", self.error_message())
+        self.audit_log.complete_session.assert_called_once_with("failed")
 
     def test_deploy_receives_its_actual_signature_arguments(self):
         # autospec makes any mismatch with deploy()'s real signature raise TypeError,
@@ -238,7 +260,9 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertEqual(self.calls, ["fetch_all"])
 
     def test_failed_dependency_install_aborts_before_deploy(self):
-        self.dep_results = [_failed("mpv")]
+        # mpv failures are tolerable (see test_install_continues_after_mpv_dependency_failure);
+        # every other dependency stays fail-closed.
+        self.dep_results = [_ok("mpv"), _failed("yt-dlp")]
         self.assertEqual(deployer.main(["--install"]), 1)
         self.assertEqual(self.calls, ["fetch_all", "install_deps"])
         self.assertIn("Dependency installation failed", self.error_message())

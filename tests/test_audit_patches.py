@@ -514,6 +514,156 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(_parse_mpv_version("mpv 0.39.0 (C) 2000-2025"), (0, 39, 0))
         self.assertIsNone(_parse_mpv_version("no version text here"))
 
+    def test_sanitize_mpv_conf_for_mpv_version(self):
+        """Too-new options are commented; known/unknown-version callers keep control."""
+        from deploy.deployer import _sanitize_mpv_conf_for_mpv_version
+
+        content = (
+            "clipboard-monitor = yes\n"
+            "sub-ass-use-video-data = aspect-ratio\n"
+            "hwdec = auto-safe\n"
+            "# clipboard-monitor = no (pre-existing comment — untouched)\n"
+            "sub-ass-vsfilter-blur-compat = yes\n"
+        )
+
+        old, removed = _sanitize_mpv_conf_for_mpv_version(content, (0, 37, 0))
+        self.assertEqual(removed, 2)
+        self.assertNotRegex(old, r"(?m)^clipboard-monitor[ \t]*=")
+        self.assertNotRegex(old, r"(?m)^sub-ass-use-video-data[ \t]*=")
+        self.assertIn("was: clipboard-monitor = yes", old)
+        self.assertIn("was: sub-ass-use-video-data = aspect-ratio", old)
+        self.assertIn("hwdec = auto-safe", old)  # existing option untouched
+        self.assertIn("# clipboard-monitor = no (pre-existing comment — untouched)", old)
+        self.assertIn("sub-ass-vsfilter-blur-compat = yes", old)  # not in the table
+        # idempotent
+        again, removed_again = _sanitize_mpv_conf_for_mpv_version(old, (0, 37, 0))
+        self.assertEqual(removed_again, 0)
+        self.assertEqual(again, old)
+
+        current, removed_current = _sanitize_mpv_conf_for_mpv_version(content, (0, 41, 0))
+        self.assertEqual(removed_current, 0)
+        self.assertEqual(current, content)
+
+        unknown, removed_unknown = _sanitize_mpv_conf_for_mpv_version(content, None)
+        self.assertEqual(removed_unknown, 0)
+        self.assertEqual(unknown, content)
+
+    def test_patched_mpv_conf_adapts_to_old_mpv(self):
+        """Fresh deploys render loadable configs on sub-minimum mpv (e.g. 0.37)."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template = os.path.join(repo_root, "config", "mpv.conf.template")
+        defaults = {"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "", "vo": "gpu-next"}
+
+        old_env = Environment(
+            os="linux",
+            platform_key="ubuntu",
+            gpu_vendor="intel",
+            mpv_version=(0, 37, 0),
+        )
+        new_env = Environment(
+            os="linux",
+            platform_key="ubuntu",
+            gpu_vendor="intel",
+            mpv_version=(0, 41, 0),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_dest = os.path.join(tmpdir, "mpv-old.conf")
+            _patch_mpv_conf(template, old_dest, old_env, "linux-like", defaults)
+            with open(old_dest, "r", encoding="utf-8") as f:
+                old_content = f.read()
+
+            self.assertNotRegex(old_content, r"(?m)^clipboard-monitor[ \t]*=")
+            self.assertNotRegex(old_content, r"(?m)^sub-ass-use-video-data[ \t]*=")
+            self.assertIn("beyond installed mpv", old_content)
+
+            new_dest = os.path.join(tmpdir, "mpv-new.conf")
+            _patch_mpv_conf(template, new_dest, new_env, "linux-like", defaults)
+            with open(new_dest, "r", encoding="utf-8") as f:
+                new_content = f.read()
+            self.assertRegex(new_content, r"(?m)^clipboard-monitor[ \t]*=")
+            self.assertRegex(new_content, r"(?m)^sub-ass-use-video-data[ \t]*=")
+            self.assertNotIn("beyond installed mpv", new_content)
+
+    def test_migrate_mpv_conf_is_version_aware(self):
+        """Old mpv keeps its valid options; upgraded mpv strips and restores."""
+        from deploy.deployer import _migrate_mpv_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "sub-ass-vsfilter-blur-compat = yes\n"
+                    "clipboard-monitor = yes\n"
+                    "gpu-api = vulkan\n"
+                )
+
+            # Older-than-replacement mpv (e.g. 0.37): vsfilter options are
+            # still VALID there — nothing about sub-ass gets touched.
+            env_old = Environment(os="linux", distro="ubuntu", mpv_version=(0, 37, 0))
+            self.assertTrue(_migrate_mpv_conf(conf_path, env_old))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                old_state = f.read()
+            self.assertRegex(old_state, r"(?m)^sub-ass-vsfilter-blur-compat[ \t]*=")
+            self.assertIsNone(
+                re.search(r"(?m)^sub-ass-use-video-data[ \t]*=", old_state)
+            )
+            # clipboard-monitor cannot exist on 0.37 → sanitizer comments it.
+            self.assertIn("was: clipboard-monitor = yes", old_state)
+            # idempotent
+            self.assertFalse(_migrate_mpv_conf(conf_path, env_old))
+
+            # Upgraded mpv: restore the commented option, retire vsfilter,
+            # insert the canonical replacement.
+            env_new = Environment(os="linux", distro="ubuntu", mpv_version=(0, 41, 0))
+            self.assertTrue(_migrate_mpv_conf(conf_path, env_new))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_state = f.read()
+            self.assertRegex(new_state, r"(?m)^clipboard-monitor[ \t]*=")
+            self.assertIn(
+                "# removed in newer mpv — was: sub-ass-vsfilter-blur-compat = yes",
+                new_state,
+            )
+            self.assertRegex(new_state, r"(?m)^sub-ass-use-video-data[ \t]*= aspect-ratio")
+            self.assertFalse(_migrate_mpv_conf(conf_path, env_new))
+
+    def test_install_mpv_latest_single_fast_ppa_flow(self):
+        """PPA setup must not refresh the whole apt cache and must use the long budget."""
+        from deploy import installer
+
+        calls = []
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            calls.append((tuple(cmd), timeout))
+            return True
+
+        env = Environment(os="linux", distro="ubuntu")
+        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer.ui, "step"):
+            installer._install_mpv_latest(env)
+
+        commands = [c[0] for c in calls]
+        # Nothing double-updates: add-apt-repository runs with -n (no internal
+        # refresh), followed by exactly ONE apt-get update.
+        add_calls = [c for c in commands if "add-apt-repository" in c]
+        self.assertEqual(len(add_calls), 1)
+        self.assertIn("-n", add_calls[0])
+        update_calls = [c for c in commands if c[:2] == ("sudo", "apt-get") and "update" in c]
+        self.assertEqual(len(update_calls), 1)
+        self.assertIn("Acquire::Retries=3", update_calls[0])
+        install_calls = [c for c in commands if c[:2] == ("sudo", "apt-get") and "install" in c]
+        self.assertEqual(len(install_calls), 1)
+        self.assertIn("mpv", install_calls[0])
+        self.assertIn("Acquire::Retries=3", install_calls[0])
+        # Package-manager steps never run under the default 300 s budget.
+        for cmd, timeout in calls:
+            for marker in ("apt-get", "add-apt-repository", "apt"):
+                if marker in cmd:
+                    self.assertEqual(timeout, installer.PKG_TIMEOUT)
+                    break
+
     def test_migrate_uosc_conf_removes_volume_max(self):
         from deploy.deployer import _migrate_uosc_conf
 
