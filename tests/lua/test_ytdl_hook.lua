@@ -31,8 +31,15 @@ local function run(config)
         end,
         command_native=function(c)
             if c[1]=='expand-path' then return '/config/yt-dlp.exe' end
-            assert(c._name=='subprocess'); h.calls[#h.calls+1]=c.args
+            assert(c._name=='subprocess')
+            -- Snapshot args at call time: the hook reuses/mutates a single
+            -- command table, so storing a reference would erase history.
+            local snap={} for i,v in ipairs(c.args) do snap[i]=v end
+            h.calls[#h.calls+1]=snap
             -- mpv >= 0.40 returns null when the process cannot be spawned.
+            if config.broken_then_good and c.args[1]=='/broken/yt-dlp' then
+                return {status=-1,error_string='init',stdout='',stderr=''}
+            end
             if config.nil_subprocess then return nil end
             return {status=0,stdout='fixture',stderr=''}
         end,
@@ -40,10 +47,14 @@ local function run(config)
         add_hook=function(name,priority,fn) h.hooks[name]=h.hooks[name] or {}; table.insert(h.hooks[name],{priority,fn}) end}
     for _,name in ipairs({'mp.utils','mp.msg','mp.options'}) do package.loaded[name]=nil end
     package.preload['mp.utils']=function() return {parse_json=function() return h.json end,
-        file_info=function(path) if path=='yt-dlp' then return {is_file=true} end end} end
+        file_info=function(path)
+            if path=='yt-dlp' then return {is_file=true} end
+            if config.broken_then_good and path=='/broken/yt-dlp' then return {is_file=true} end
+            return nil
+        end} end
     package.preload['mp.msg']=function() return log end
     package.preload['mp.options']=function() return {read_options=function(o)
-        o.ytdl_path='yt-dlp'
+        o.ytdl_path = config.broken_then_good and '/broken/yt-dlp:yt-dlp' or 'yt-dlp'
         if config.all_audio then o.best_audio_per_language=false end
         if config.all_subs then o.youtube_subs_on_demand=false end
     end} end
@@ -109,5 +120,16 @@ test('mpv >= 0.40 null subprocess result normalizes instead of crashing',functio
     -- stream-open-filename untouched and no EDL rewrite: a graceful
     -- "youtube-dl failed" path, not a script crash.
     eq(h.edl,'https://youtu.be/video')
+end)
+test('a broken configured candidate does not stall the search',function()
+    -- Regression: the known-paths loop used to break on the FIRST existing
+    -- file even when its spawn failed (init), so every later candidate —
+    -- including the PATH-based bare name — was never tried.
+    local h=run({broken_then_good=true})
+    eq(#h.calls,2)
+    eq(h.calls[1][1],'/broken/yt-dlp')
+    eq(h.calls[2][1],'yt-dlp')
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].stdout,'fixture')
+    assert(h.edl:find('https://media.example/video',1,true))
 end)
 print('Hook tests passed: '..total)

@@ -1032,8 +1032,10 @@ local function run_ytdl_hook(url)
     table.insert(command, url)
 
     local result
+    local tried = {}
     if ytdl.searched then
         result = exec(command)
+        tried[#tried + 1] = command[1]
     else
         local separator = platform_is_windows() and ";" or ":"
         if o.ytdl_path:match("[^" .. separator .. "]") then
@@ -1055,20 +1057,52 @@ local function run_ytdl_hook(url)
         table.insert(known_paths, mp.find_config_file("yt-dlp.exe"))
         table.insert(known_paths, mp.find_config_file("yt-dlp"))
 
+        -- Attempt-tracker: spawn each candidate at most once and record
+        -- every attempt for the final failure message.
+        local spawned = {}
+        local function try_exec(path)
+            if spawned[path] then
+                return false
+            end
+            spawned[path] = true
+            tried[#tried + 1] = path
+            msg.verbose("Trying to run youtube-dl: " .. path)
+            command[1] = path
+            result = exec(command)
+            return not (result and result.error_string == "init")
+        end
+
         for _, kpath in ipairs(known_paths) do
             if kpath and kpath ~= "" then
                 local info = utils.file_info(kpath)
                 if info and info.is_file then
                     msg.verbose("Found youtube-dl at known path: " .. kpath)
-                    ytdl.path = kpath
-                    command[1] = ytdl.path
-                    result = exec(command)
-                    break
+                    if try_exec(kpath) then
+                        ytdl.path = kpath
+                        break
+                    end
+                    -- Exists but cannot spawn (permissions, broken
+                    -- interpreter, ...): keep trying other candidates
+                    -- instead of stalling on the first broken one.
+                    msg.verbose("youtube-dl at " .. kpath ..
+                                " failed to start; trying other candidates")
                 end
             end
         end
 
         if not ytdl.path or ytdl.path == "" then
+            -- Last resort: the bare program name. On POSIX this triggers a
+            -- PATH-based spawn — a different resolution mechanism than the
+            -- absolute candidates above.
+            if not platform_is_windows() then
+                local known = {}
+                for _, path in ipairs(ytdl.paths_to_search) do
+                    known[path] = true
+                end
+                if not known["yt-dlp"] then
+                    table.insert(ytdl.paths_to_search, "yt-dlp")
+                end
+            end
             for _, path in pairs(ytdl.paths_to_search) do
                 -- search for youtube-dl in mpv's config dir
                 local exesuf = platform_is_windows() and not path:lower():match("%.exe$")
@@ -1076,23 +1110,21 @@ local function run_ytdl_hook(url)
                 local ytdl_cmd = mp.find_config_file(path .. exesuf)
                 if ytdl_cmd then
                     msg.verbose("Found youtube-dl at: " .. ytdl_cmd)
-                    ytdl.path = ytdl_cmd
-                    command[1] = ytdl.path
-                    result = exec(command)
-                    break
+                    if try_exec(ytdl_cmd) then
+                        ytdl.path = ytdl_cmd
+                        break
+                    end
+                    msg.verbose("youtube-dl at " .. ytdl_cmd ..
+                                " failed to start; trying other candidates")
                 else
                     msg.verbose("No youtube-dl found with path " .. path .. exesuf ..
                                 " in config directories")
-                    command[1] = path
-                    result = exec(command)
-                    if result.error_string == "init" then
-                        msg.verbose("youtube-dl with path " .. path ..
-                                    " not found in PATH or not enough permissions")
-                    else
-                        msg.verbose("Found youtube-dl with path " .. path .. " in PATH")
+                    if try_exec(path) then
                         ytdl.path = path
                         break
                     end
+                    msg.verbose("youtube-dl with path " .. path ..
+                                " not found in PATH or not enough permissions")
                 end
             end
         end
@@ -1131,7 +1163,8 @@ local function run_ytdl_hook(url)
         msg.error(ytdl_err)
         local err = "youtube-dl failed: "
         if result.error_string and result.error_string == "init" then
-            err = err .. "binary failed to start (tried: " .. tostring(command[1])
+            err = err .. "binary failed to start (tried: "
+                  .. table.concat(tried, ", ")
                   .. ") — not found or not enough permissions; check "
                   .. "script-opts/ytdl_hook.conf (ytdl_path)"
         elseif parse_err then
