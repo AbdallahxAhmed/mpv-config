@@ -1689,5 +1689,324 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(env.platform_key, "fedora")
 
 
+class AlassInstallerTests(unittest.TestCase):
+    """alass: prebuilt GitHub release on Ubuntu/Fedora; AUR + binary fallback on Arch."""
+
+    def test_ubuntu_fedora_use_github_release_file(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        entry = SYSTEM_DEPS["alass"]
+        for key in ("ubuntu", "fedora"):
+            self.assertEqual(entry[key]["method"], "github_release_file")
+            self.assertEqual(entry[key]["dest_name"], "alass")
+            self.assertNotIn("~", entry[key]["install_dir"])
+
+    def test_asset_pattern_matches_upstream_name(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        self.assertTrue(
+            any(
+                re.match(pattern, "alass-linux64")
+                for pattern in SYSTEM_DEPS["alass"]["ubuntu"]["asset_patterns"]
+            )
+        )
+
+    def test_arch_has_prebuilt_fallback(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        fallback = SYSTEM_DEPS["alass"]["arch"]["fallback"]
+        self.assertEqual(fallback["method"], "github_release_file")
+        self.assertEqual(fallback["dest_name"], "alass")
+
+    def test_no_aur_helper_falls_back_to_prebuilt(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch", aur_helper="")
+        with mock.patch.object(
+            installer, "_install_github_release_file", return_value=True
+        ) as m_github:
+            ok = installer._install_one("alass", SYSTEM_DEPS["alass"], env)
+
+        self.assertTrue(ok)
+        m_github.assert_called_once()
+        self.assertEqual(m_github.call_args[0][0], "alass")
+
+    def test_aur_build_failure_falls_back_to_prebuilt(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch", aur_helper="paru")
+        with (
+            mock.patch.object(installer, "_run", return_value=False) as m_run,
+            mock.patch.object(
+                installer, "_install_github_release_file", return_value=True
+            ) as m_github,
+        ):
+            ok = installer._install_one("alass", SYSTEM_DEPS["alass"], env)
+
+        self.assertTrue(ok)
+        self.assertEqual(m_run.call_count, 2)  # pkg + fallback_pkg attempts
+        m_github.assert_called_once()
+
+    def test_aur_success_never_falls_back(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch", aur_helper="paru")
+        with (
+            mock.patch.object(installer, "_run", return_value=True),
+            mock.patch.object(
+                installer, "_install_github_release_file", return_value=True
+            ) as m_github,
+        ):
+            ok = installer._install_one("alass", SYSTEM_DEPS["alass"], env)
+
+        self.assertTrue(ok)
+        m_github.assert_not_called()
+
+    def test_release_file_installs_executable_binary(self):
+        from deploy import installer
+
+        release = {
+            "assets": [
+                {
+                    "name": "alass-linux64",
+                    "browser_download_url": "https://example.com/alass-linux64",
+                }
+            ]
+        }
+
+        def fake_download(url, dest):
+            with open(dest, "wb") as fh:
+                fh.write(b"ELF-binary-payload")
+
+        with tempfile.TemporaryDirectory() as install_dir:
+            info = {
+                "method": "github_release_file",
+                "repo": "kaegi/alass",
+                "asset_patterns": [r"^alass-linux64$"],
+                "install_dir": install_dir,
+                "dest_name": "alass",
+            }
+            env = Environment(os="linux", platform_key="ubuntu")
+            with (
+                mock.patch.object(installer, "_fetch_latest_release", return_value=release),
+                mock.patch.object(installer, "_download_asset", side_effect=fake_download),
+                mock.patch.object(installer.shutil, "which", return_value=None),
+                mock.patch.object(installer, "_run", return_value=True) as m_run,
+            ):
+                ok = installer._install_github_release_file("alass", info, env)
+
+            self.assertTrue(ok)
+            dest = os.path.join(install_dir, "alass")
+            self.assertTrue(os.path.isfile(dest))
+            with open(dest, "rb") as fh:
+                self.assertEqual(fh.read(), b"ELF-binary-payload")
+            # PATH-unreachable install dirs get a /usr/local/bin symlink
+            m_run.assert_called_once()
+            self.assertIn("ln", m_run.call_args[0][0])
+
+    def test_release_file_missing_asset_fails(self):
+        from deploy import installer
+
+        release = {"assets": [{"name": "unrelated.tar.gz", "browser_download_url": "u"}]}
+
+        with tempfile.TemporaryDirectory() as install_dir:
+            info = {
+                "method": "github_release_file",
+                "repo": "kaegi/alass",
+                "asset_patterns": [r"^alass-linux64$"],
+                "install_dir": install_dir,
+                "dest_name": "alass",
+            }
+            env = Environment(os="linux", platform_key="ubuntu")
+            with (
+                mock.patch.object(installer, "_fetch_latest_release", return_value=release),
+                mock.patch.object(installer, "_download_asset") as m_dl,
+                mock.patch.object(installer, "_run", return_value=True),
+            ):
+                ok = installer._install_github_release_file("alass", info, env)
+
+            self.assertFalse(ok)
+            m_dl.assert_not_called()
+
+
+class CachyOSOptimizedReposTests(unittest.TestCase):
+    """pacman deps prefer the CachyOS x86-64-v3/v4 optimized builds."""
+
+    CONF_TEMPLATE = """[options]
+HoldPkg     = pacman glibc man
+Architecture = auto
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+
+[extra]
+Include = /etc/pacman.d/mirrorlist
+
+[cachyos]
+Include = /etc/pacman.d/cachyos-mirrorlist
+"""
+
+    def _ensure(
+        self,
+        tmpdir,
+        tier="v3",
+        conf_text=None,
+        os_release_text='ID=cachyos\nPRETTY_NAME="CachyOS Linux"\n',
+    ):
+        from deploy import installer
+
+        conf_path = os.path.join(tmpdir, "pacman.conf")
+        with open(conf_path, "w", encoding="utf-8") as fh:
+            fh.write(conf_text or self.CONF_TEMPLATE)
+        pacman_d = os.path.join(tmpdir, "pacman.d")
+        os.makedirs(pacman_d, exist_ok=True)
+        for name in ("cachyos-mirrorlist", "cachyos-v3-mirrorlist", "cachyos-v4-mirrorlist"):
+            with open(os.path.join(pacman_d, name), "w", encoding="utf-8") as fh:
+                fh.write("Server = https://mirror.cachyos.org/repo/x86_64/$repo/os/$arch\n")
+
+        env = Environment(os="linux", platform_key="arch")
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if cmd[:2] == ["sudo", "cp"]:
+                shutil.copyfile(cmd[2], cmd[3])
+            return True
+
+        with (
+            mock.patch.object(installer, "_x86_64_isa_level", return_value=tier),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+        ):
+            ok = installer._ensure_cachyos_optimized_repos(
+                env,
+                conf_path=conf_path,
+                os_release_text=os_release_text,
+                pacman_d_dir=pacman_d,
+            )
+        return ok, calls, conf_path
+
+    def test_isa_level_probe(self):
+        import subprocess
+
+        from deploy import installer
+
+        def completed(stdout):
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr=None)
+
+        with mock.patch.object(
+            installer.subprocess, "run", return_value=completed("  x86-64-v3 (supported, searched)\n  x86-64-v4 (supported, searched)\n")
+        ):
+            self.assertEqual(installer._x86_64_isa_level(), "v4")
+
+        with mock.patch.object(
+            installer.subprocess, "run", return_value=completed("  x86-64-v3 (supported, searched)\n")
+        ):
+            self.assertEqual(installer._x86_64_isa_level(), "v3")
+
+        with mock.patch.object(installer.subprocess, "run", return_value=completed("")):
+            self.assertEqual(installer._x86_64_isa_level(), "")
+
+        with mock.patch.object(installer.subprocess, "run", side_effect=OSError("gone")):
+            self.assertEqual(installer._x86_64_isa_level(), "")
+
+    def test_v3_repos_enabled_on_cachyos(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ok, calls, conf_path = self._ensure(tmpdir, tier="v3")
+
+            self.assertTrue(ok)
+            with open(conf_path, encoding="utf-8") as fh:
+                text = fh.read()
+            for section in ("[cachyos-v3]", "[cachyos-core-v3]", "[cachyos-extra-v3]"):
+                self.assertIn(section, text)
+            # tier repos go ahead of existing repos: first match wins in pacman
+            self.assertLess(text.index("[cachyos-v3]"), text.index("[core]"))
+
+            flat = [" ".join(c) for c in calls]
+            self.assertTrue(any("cachyos-keyring" in s and "-S" in s for s in flat))
+            self.assertTrue(any(c[-1] == "-Sy" for c in calls))
+            self.assertTrue(any("cp" in s and ".mpv-config.bak" in s for s in flat))
+
+    def test_idempotent_when_already_enabled(self):
+        conf = self.CONF_TEMPLATE.replace(
+            "[core]",
+            "[cachyos-extra-v3]\nInclude = /etc/pacman.d/cachyos-v3-mirrorlist\n\n[core]",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ok, calls, _ = self._ensure(tmpdir, tier="v3", conf_text=conf)
+
+            self.assertTrue(ok)
+            self.assertEqual(calls, [])
+
+    def test_skips_non_cachyos_hosts(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ok, calls, conf_path = self._ensure(
+                tmpdir, os_release_text='ID=arch\nPRETTY_NAME="Arch Linux"\n'
+            )
+
+            self.assertFalse(ok)
+            self.assertEqual(calls, [])
+            with open(conf_path, encoding="utf-8") as fh:
+                self.assertNotIn("[cachyos-v3]", fh.read())
+
+    def test_missing_include_file_aborts_cleanly(self):
+        from deploy import installer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "pacman.conf")
+            with open(conf_path, "w", encoding="utf-8") as fh:
+                fh.write(self.CONF_TEMPLATE)
+            env = Environment(os="linux", platform_key="arch")
+            with (
+                mock.patch.object(installer, "_x86_64_isa_level", return_value="v3"),
+                mock.patch.object(installer, "_run", return_value=False),
+            ):
+                ok = installer._ensure_cachyos_optimized_repos(
+                    env,
+                    conf_path=conf_path,
+                    os_release_text="ID=cachyos\n",
+                    pacman_d_dir=os.path.join(tmpdir, "pacman.d"),
+                )
+
+            self.assertFalse(ok)
+            with open(conf_path, encoding="utf-8") as fh:
+                self.assertNotIn("[cachyos-v3]", fh.read())
+
+    def test_non_arch_env_skipped(self):
+        from deploy import installer
+
+        env = Environment(os="linux", platform_key="ubuntu")
+        with mock.patch.object(installer, "_x86_64_isa_level") as m_level:
+            ok = installer._ensure_cachyos_optimized_repos(
+                env, conf_path="irrelevant", os_release_text="ID=cachyos\n"
+            )
+
+        self.assertFalse(ok)
+        m_level.assert_not_called()
+
+    def test_pacman_hook_invoked_for_optimized_deps(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch")
+        with (
+            mock.patch.object(installer, "_ensure_cachyos_optimized_repos") as m_ensure,
+            mock.patch.object(installer, "_run", return_value=True) as m_run,
+        ):
+            ok = installer._install_one("mpv", SYSTEM_DEPS["mpv"], env)
+
+        self.assertTrue(ok)
+        m_ensure.assert_called_once()
+        self.assertIn("mpv", m_run.call_args[0][0])
+
+    def test_all_pacman_deps_prefer_optimized_repo(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        for name in ("mpv", "yt-dlp", "ffmpeg", "python", "aria2"):
+            self.assertTrue(SYSTEM_DEPS[name]["arch"].get("prefer_optimized_repo"))
+
+
 if __name__ == "__main__":
     unittest.main()

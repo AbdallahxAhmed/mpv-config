@@ -15,6 +15,11 @@ WINDOWS_UV_DIR = os.path.join(WINDOWS_MPV_DIR, "uv")
 WINDOWS_FFSUBSYNC_DIR = os.path.join(WINDOWS_MPV_DIR, "ffsubsync")
 WINDOWS_ALASS_DIR = os.path.join(WINDOWS_MPV_DIR, "alass")
 WINDOWS_FFMPEG_BIN_DIR = os.path.join(WINDOWS_FFMPEG_DIR, "bin")
+# alass on Linux is a standalone GitHub release binary (kaegi/alass). It goes
+# into the user's PATH dir; Ubuntu/Fedora add ~/.local/bin to PATH via the
+# profile when it exists. Installer also symlinks it into /usr/local/bin
+# if the current PATH cannot see it.
+LINUX_ALASS_DIR = os.path.expanduser("~/.local/bin")
 
 SCRIPTS = [
     {
@@ -227,7 +232,10 @@ SYSTEM_DEPS = {
             "ensure_in_dir": WINDOWS_MPV_DIR,
             "bin_names": ["mpv.exe"],
         },
-        "arch": {"method": "pacman", "pkg": "mpv"},
+        # prefer_optimized_repo: on CachyOS the deployer enables the
+        # x86-64-v3/v4 optimized repos first so a plain `pacman -S mpv` pulls
+        # the AVX2/AVX512 rebuild instead of the generic Arch build.
+        "arch": {"method": "pacman", "pkg": "mpv", "prefer_optimized_repo": True},
         # Ubuntu/Mint apt repos ship ancient mpv (Noble: 0.37) that fails on
         # clipboard-monitor and sub-ass-use-video-data.  "ppa" adds
         # ppa:ubuntuhandbook1/mpv for the latest stable build (installer.py).
@@ -245,7 +253,7 @@ SYSTEM_DEPS = {
             "ensure_in_dir": WINDOWS_YTDLP_DIR,
             "bin_names": ["yt-dlp.exe"],
         },
-        "arch": {"method": "pacman", "pkg": "yt-dlp"},
+        "arch": {"method": "pacman", "pkg": "yt-dlp", "prefer_optimized_repo": True},
         "ubuntu": {"method": "apt", "pkg": "yt-dlp"},  # was pip
         "fedora": {"method": "dnf", "pkg": "yt-dlp"},
         "macos": {"method": "brew", "pkg": "yt-dlp"},
@@ -267,7 +275,7 @@ SYSTEM_DEPS = {
             "ensure_in_dir": WINDOWS_FFMPEG_BIN_DIR,
             "bin_names": ["ffmpeg.exe"],
         },
-        "arch": {"method": "pacman", "pkg": "ffmpeg"},
+        "arch": {"method": "pacman", "pkg": "ffmpeg", "prefer_optimized_repo": True},
         "ubuntu": {"method": "apt", "pkg": "ffmpeg"},
         "fedora": {"method": "dnf", "pkg": "ffmpeg"},
         "macos": {"method": "brew", "pkg": "ffmpeg"},
@@ -275,7 +283,7 @@ SYSTEM_DEPS = {
     },
     "python": {
         "windows": {"method": "winget", "id": "Python.Python.3.11"},
-        "arch": {"method": "pacman", "pkg": "python"},
+        "arch": {"method": "pacman", "pkg": "python", "prefer_optimized_repo": True},
         "ubuntu": {"method": "apt", "pkg": "python3"},
         "fedora": {"method": "dnf", "pkg": "python3"},
         "macos": {"method": "brew", "pkg": "python@3"},
@@ -284,7 +292,7 @@ SYSTEM_DEPS = {
     },
     "aria2": {
         "windows": {"method": "winget", "id": "aria2.aria2"},
-        "arch": {"method": "pacman", "pkg": "aria2"},
+        "arch": {"method": "pacman", "pkg": "aria2", "prefer_optimized_repo": True},
         "ubuntu": {"method": "apt", "pkg": "aria2"},
         "fedora": {"method": "dnf", "pkg": "aria2"},
         "macos": {"method": "brew", "pkg": "aria2"},
@@ -322,7 +330,37 @@ SYSTEM_DEPS = {
         "verify": ["ffsubsync", "--version"],
     },
     "alass": {
-        "arch": {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},
+        # Arch/CachyOS: AUR build first; the prebuilt GitHub release binary is
+        # the fallback when no AUR helper exists (or the build fails).
+        "arch": {
+            "method": "aur",
+            "pkg": "alass-bin",
+            "fallback_pkg": "alass",
+            "fallback": {
+                "method": "github_release_file",
+                "repo": "kaegi/alass",
+                "asset_patterns": [r"^alass-linux64$", r"^alass-lin.*64.*$"],
+                "install_dir": LINUX_ALASS_DIR,
+                "dest_name": "alass",
+            },
+        },
+        # No alass package exists in Ubuntu/Fedora repos. kaegi ships a
+        # standalone Linux binary in the releases (a Rust build, no extra
+        # runtime deps).
+        "ubuntu": {
+            "method": "github_release_file",
+            "repo": "kaegi/alass",
+            "asset_patterns": [r"^alass-linux64$", r"^alass-lin.*64.*$"],
+            "install_dir": LINUX_ALASS_DIR,
+            "dest_name": "alass",
+        },
+        "fedora": {
+            "method": "github_release_file",
+            "repo": "kaegi/alass",
+            "asset_patterns": [r"^alass-linux64$", r"^alass-lin.*64.*$"],
+            "install_dir": LINUX_ALASS_DIR,
+            "dest_name": "alass",
+        },
         "windows": {
             "method": "github_release_zip",
             "repo": "kaegi/alass",

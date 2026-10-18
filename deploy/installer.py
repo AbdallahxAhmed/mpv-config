@@ -679,6 +679,16 @@ def _install_github_release_file(name, info, env):
 
     if env.os != "windows":
         os.chmod(dest_path, 0o755)
+        # The install dir (e.g. a freshly created ~/.local/bin) may not be on
+        # the PATH of the current session. Best effort: symlink into
+        # /usr/local/bin so the binary is immediately callable; harmless if
+        # sudo is unavailable (verify reports it politely).
+        if not shutil.which(dest_name):
+            _run(
+                ["sudo", "ln", "-sf", dest_path, os.path.join("/usr/local/bin", dest_name)],
+                check=False,
+                timeout=60,
+            )
     else:
         _add_to_path(install_dir)
 
@@ -1119,6 +1129,216 @@ def _uninstall_uv_tool(info, env):
     return ok
 
 
+# --- CachyOS x86-64-v3/v4 optimized repos ------------------------------------
+# CachyOS rebuilds every Arch package for newer CPUs (cachyos-v3 /
+# cachyos-extra-v3 for x86-64-v3, the v4/znver4 tiers for v4 CPUs). When the
+# optimized repos are enabled, a plain `pacman -S mpv` automatically picks the
+# AVX2 build because pacman prefers the first repo that carries the package.
+# Sections inserted here mirror the official CachyOS repo script
+# (github.com/CachyOS/cachyos-repo-add-script, install-repo.awk): tiered repos
+# go ahead of every existing repo section. Unlike that script we avoid pinned
+# .zst package URLs and full `pacman -Syu` upgrades: the keyring/mirrorlist
+# packages come from pacman itself and only the package DB is refreshed.
+
+_CACHYOS_V3_REPOS = {
+    "cachyos-v3",
+    "cachyos-core-v3",
+    "cachyos-extra-v3",
+    "cachyos-testing-v3",
+}
+_CACHYOS_V4_REPOS = {
+    "cachyos-v4",
+    "cachyos-core-v4",
+    "cachyos-extra-v4",
+    "cachyos-testing-v4",
+    "cachyos-znver4",
+    "cachyos-core-znver4",
+    "cachyos-extra-znver4",
+}
+_CACHYOS_MIRRORLIST_PACKAGES = (
+    "cachyos-keyring",
+    "cachyos-mirrorlist",
+    "cachyos-v3-mirrorlist",
+    "cachyos-v4-mirrorlist",
+)
+
+
+def _x86_64_isa_level(loader=None):
+    """Return the machine's x86-64 microarchitecture level ("v3"/"v4"/"").
+
+    Uses the dynamic loader's advertised ISA support — exactly what the
+    official CachyOS repo script probes. Returns "" on non-x86_64 or
+    non-Linux machines so callers skip cleanly.
+    """
+    loader = loader or "/lib64/ld-linux-x86-64.so.2"
+    try:
+        proc = subprocess.run(
+            [loader, "--help"], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return ""
+    text = (proc.stdout or "") + (proc.stderr or "")
+    # glibc prints lines like "  x86-64-v4 (supported, searched)".
+    if "x86-64-v4 (supported, searched)" in text:
+        return "v4"
+    if "x86-64-v3 (supported, searched)" in text:
+        return "v3"
+    return ""
+
+
+def _pacman_enabled_repos(conf_text):
+    """Set of uncommented [repo] section names in a pacman.conf text."""
+    enabled = set()
+    for line in conf_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            enabled.add(stripped[1:-1].strip())
+    return enabled
+
+
+def _is_cachyos_host(os_release_text=None):
+    """True when this machine is a CachyOS install (os-release mentions it)."""
+    if os_release_text is None:
+        try:
+            with open("/etc/os-release", "r", encoding="utf-8", errors="replace") as fh:
+                os_release_text = fh.read()
+        except OSError:
+            return False
+    return "cachyos" in os_release_text.lower()
+
+
+def _cachyos_tier_block(tier):
+    """pacman.conf lines for a tier's optimized repos (official layout)."""
+    if tier == "v4":
+        mirror = "/etc/pacman.d/cachyos-v4-mirrorlist"
+        tier_repos = ["[cachyos-v4]", "[cachyos-core-v4]", "[cachyos-extra-v4]"]
+    else:
+        mirror = "/etc/pacman.d/cachyos-v3-mirrorlist"
+        tier_repos = ["[cachyos-v3]", "[cachyos-core-v3]", "[cachyos-extra-v3]"]
+    lines = ["", f"# x86-64-{tier} optimized CachyOS repos (added by mpv-config deployer)."]
+    for repo in tier_repos:
+        lines.append(repo)
+        lines.append(f"Include = {mirror}")
+        lines.append("")
+    return lines
+
+
+def _ensure_cachyos_optimized_repos(
+    env,
+    conf_path="/etc/pacman.conf",
+    os_release_text=None,
+    pacman_d_dir="/etc/pacman.d",
+    tier=None,
+):
+    """Best effort: make pacman prefer x86-64-v3/v4 optimized CachyOS builds.
+
+    Only acts on CachyOS machines reporting a supported ISA level. Inserts the
+    tier repo sections ahead of everything else in pacman.conf (with a backup
+    at <conf>.mpv-config.bak) and refreshes the package DB. Returns True when
+    optimized repos are (or already were) enabled. Any failure is non-fatal:
+    pacman keeps using the generic repos.
+    """
+    if env.os != "linux" or env.platform_key != "arch":
+        return False
+    if not _is_cachyos_host(os_release_text):
+        return False
+    tier = tier or _x86_64_isa_level()
+    if not tier:
+        return False
+
+    tier_repos = _CACHYOS_V4_REPOS if tier == "v4" else _CACHYOS_V3_REPOS
+    try:
+        with open(conf_path, "r", encoding="utf-8", errors="replace") as fh:
+            conf_text = fh.read()
+    except OSError as exc:
+        ui.warn(f"CachyOS repos: cannot read {conf_path}: {exc}")
+        return False
+
+    if _pacman_enabled_repos(conf_text) & tier_repos:
+        return True  # already optimized
+
+    ui.step(f"CachyOS: enabling x86-64-{tier} optimized repos before package installs...")
+    ok = _run(
+        ["sudo", "pacman", "-S", "--noconfirm", "--needed", *_CACHYOS_MIRRORLIST_PACKAGES],
+        check=False,
+        timeout=PKG_TIMEOUT,
+    )
+    if not ok:
+        # One missing package name should not sink the whole transaction.
+        for pkg in _CACHYOS_MIRRORLIST_PACKAGES:
+            _run(
+                ["sudo", "pacman", "-S", "--noconfirm", "--needed", pkg],
+                check=False,
+                timeout=PKG_TIMEOUT // 4,
+            )
+    include_name = f"cachyos-{tier}-mirrorlist"
+    if not os.path.isfile(os.path.join(pacman_d_dir, include_name)):
+        ui.warn(
+            f"CachyOS repos: {include_name} still missing — keeping default package sources."
+        )
+        return False
+
+    lines = conf_text.splitlines()
+    insert_at = -1
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if stripped[1:-1].strip() == "options":
+                continue
+            insert_at = idx
+            break
+    if insert_at < 0:
+        ui.warn("CachyOS repos: no repo sections found in pacman.conf")
+        return False
+
+    new_lines = lines[:insert_at] + _cachyos_tier_block(tier) + lines[insert_at:]
+    new_text = "\n".join(new_lines) + ("\n" if conf_text.endswith("\n") else "")
+
+    fd, tmp_path = tempfile.mkstemp(prefix="pacman.conf.", suffix=".mpvconfig", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(new_text)
+        if not _run(["sudo", "cp", conf_path, conf_path + ".mpv-config.bak"], timeout=60):
+            return False
+        if not _run(["sudo", "cp", tmp_path, conf_path], timeout=60):
+            return False
+        _run(["sudo", "chmod", "644", conf_path], check=False, timeout=60)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    # Refresh the package DB so the new repos resolve immediately. Avoids a
+    # full system upgrade (-u) which a config deployer must never trigger.
+    _run(["sudo", "pacman", "-Sy"], timeout=PKG_TIMEOUT)
+    ui.success(
+        f"CachyOS x86-64-{tier} optimized repos enabled — pacman installs now prefer optimized builds"
+    )
+    return True
+
+
+def _install_aur_fallback(name, dep_info, env):
+    """Install from a prebuilt source when the AUR path is unusable.
+
+    The registry can carry a "fallback" install info dict (same shape as a
+    platform entry, e.g. github_release_file for alass) either on the platform
+    entry or at the top level. Used when the AUR helper is missing or the
+    package failed to build.
+    """
+    platform = env.platform_key
+    info = dep_info.get(platform) or {}
+    fallback = info.get("fallback") or dep_info.get("fallback") or {}
+    if not fallback.get("method"):
+        return False
+    ui.info(f"{name}: falling back to '{fallback['method']}' installer")
+    synthetic = {k: v for k, v in dep_info.items() if k != "fallback"}
+    if dep_info.get("fallback") is not None:
+        synthetic.pop("fallback", None)
+    synthetic[platform] = fallback
+    return _install_one(name, synthetic, env)
+
+
 def _install_one(name, dep_info, env, mpv_version=None):
     """Install a single dependency using the appropriate method."""
     platform = env.platform_key
@@ -1134,6 +1354,8 @@ def _install_one(name, dep_info, env, mpv_version=None):
     method = info["method"]
 
     if method == "pacman":
+        if info.get("prefer_optimized_repo"):
+            _ensure_cachyos_optimized_repos(env)
         return _run(
             ["sudo", "pacman", "-S", "--noconfirm", "--needed", info["pkg"]],
             timeout=PKG_TIMEOUT,
@@ -1194,17 +1416,28 @@ def _install_one(name, dep_info, env, mpv_version=None):
         return _install_uv_tool(info, env)
 
     elif method == "aur":
+        ok = False
         if env.aur_helper:
-            ok = _run([env.aur_helper, "-S", "--noconfirm", info["pkg"]], check=False)
+            ok = _run(
+                [env.aur_helper, "-S", "--noconfirm", info["pkg"]],
+                check=False,
+                timeout=PKG_TIMEOUT,
+            )
             if not ok:
                 fallback_pkg = info.get("fallback_pkg")
                 if fallback_pkg:
                     ui.info(f"{info['pkg']} not found in AUR — trying fallback: {fallback_pkg}...")
-                    ok = _run([env.aur_helper, "-S", "--noconfirm", fallback_pkg])
-            return ok
+                    ok = _run(
+                        [env.aur_helper, "-S", "--noconfirm", fallback_pkg],
+                        timeout=PKG_TIMEOUT,
+                    )
         else:
-            ui.warn(f"{name} requires an AUR helper (paru/yay). Install manually.")
-            return False
+            ui.warn(f"{name}: no AUR helper (paru/yay) found")
+        if not ok:
+            # AUR helper missing or the package failed to build — install a
+            # prebuilt binary instead (registry "fallback" install info).
+            ok = _install_aur_fallback(name, dep_info, env)
+        return ok
 
     elif method == "manual":
         url = info.get("url", "")
