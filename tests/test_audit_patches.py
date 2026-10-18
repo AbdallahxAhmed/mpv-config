@@ -395,6 +395,115 @@ class TestAuditPatches(unittest.TestCase):
             )
             self.assertIn('osd-font = "Segoe UI"', new_content)
 
+    def test_gpu_vendor_scan_optimus_laptop(self):
+        """iGPU + old Quadro (Optimus): hybrid detected, legacy iGPU detected."""
+        from deploy import detector
+        from deploy.detector import _detect_gpus, _gpu_vendor_from_device, _is_display_device
+
+        self.assertFalse(
+            _is_display_device(
+                "00:1f.6 Ethernet controller: Intel Corporation Ethernet Connection I219-V"
+            )
+        )
+        self.assertTrue(
+            _is_display_device(
+                "01:00.0 3D controller: NVIDIA Corporation GK107GLM [Quadro K1100M]"
+            )
+        )
+        self.assertEqual(
+            _gpu_vendor_from_device(
+                "01:00.0 3D controller: NVIDIA Corporation GK107GLM [Quadro K1100M]"
+            ),
+            "nvidia",
+        )
+
+        optimus_lines = [
+            "00:02.0 VGA compatible controller: Intel Corporation 4th Gen Core "
+            "Processor Integrated Graphics Controller (rev 06)",
+            "01:00.0 3D controller: NVIDIA Corporation GK107GLM [Quadro K1100M] (rev a1)",
+            "00:1f.6 Ethernet controller: Intel Corporation Ethernet Connection I219-V",
+        ]
+        with mock.patch.object(detector, "_display_device_lines", return_value=optimus_lines):
+            primary, vendors, lines = _detect_gpus()
+
+        self.assertEqual(primary, "nvidia")  # historical priority preserved
+        self.assertEqual(sorted(vendors), ["intel", "nvidia"])
+        # (The Ethernet line is excluded by _is_display_device inside the
+        # real _display_device_lines; the mock above replaces it wholesale,
+        # so _detect_gpus simply classifies the lines it is handed.)
+
+        with mock.patch.object(detector, "_display_device_lines", return_value=optimus_lines):
+            # _legacy_vulkan_intel_gpu only runs on Linux — patch its os gate.
+            with mock.patch("platform.system", return_value="Linux"):
+                self.assertTrue(detector._legacy_vulkan_intel_gpu())
+
+    def test_gpu_vendor_scan_legacy_intel_false_positive_free(self):
+        """An NVIDIA desktop with an Intel NIC must not read as legacy Intel."""
+        from deploy import detector
+        from deploy.detector import _detect_gpus
+
+        desktop_lines = [
+            "01:00.0 VGA compatible controller: NVIDIA Corporation GP104 [GeForce GTX 1070]",
+            "00:1f.6 Ethernet controller: Intel Corporation I219-V (Ethernet Only)",
+        ]
+        with mock.patch.object(
+            detector, "_display_device_lines", return_value=[desktop_lines[0]]
+        ):
+            primary, vendors, _ = _detect_gpus()
+        self.assertEqual(vendors, ["nvidia"])
+        self.assertFalse(detector._legacy_vulkan_intel_gpu())
+
+    def test_patched_native_nvdec_requires_libcuda_and_pure_nvidia(self):
+        """nvdec forcing only on pure-NVIDIA Linux with a CUDA runtime present."""
+        from deploy.detector import Environment
+        from deploy.deployer import _patch_mpv_conf
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template = os.path.join(repo_root, "config", "mpv.conf.template")
+        defaults = {
+            "gpu_api": "vulkan",
+            "hwdec": "auto-safe",
+            "gpu_context": "",
+            "vo": "gpu-next",
+        }
+
+        def hwdec_for(env, profile):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                dest = os.path.join(tmpdir, "mpv.conf")
+                _patch_mpv_conf(template, dest, env, profile, defaults)
+                with open(dest, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.startswith("hwdec"):
+                            return line.split("=", 1)[1].strip()
+            return None
+
+        optimus = Environment(
+            os="linux",
+            platform_key="ubuntu",
+            distro="ubuntu",
+            gpu_vendor="nvidia",
+            gpu_hybrid=True,
+            has_libcuda=True,
+        )
+        pure = Environment(
+            os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=True
+        )
+        pure_nocuda = Environment(
+            os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=False
+        )
+
+        # Pure NVIDIA + CUDA → nvidia-grade in-VRAM decode on both profiles.
+        self.assertEqual(hwdec_for(pure, "native"), "nvdec")
+        self.assertEqual(hwdec_for(pure, "windows-like"), "nvdec")
+
+        # Optimus laptop → decode on the iGPU it renders on (no cross-PCIe copy).
+        self.assertEqual(hwdec_for(optimus, "native"), "auto-safe")
+        self.assertEqual(hwdec_for(optimus, "windows-like"), "auto-safe")
+
+        # CUDA runtime missing → never write a decoder that cannot initialize.
+        self.assertEqual(hwdec_for(pure_nocuda, "native"), "auto-safe")
+        self.assertEqual(hwdec_for(pure_nocuda, "windows-like"), "auto-safe")
+
     def test_parse_mpv_version(self):
         """Distro and dev-build version strings both parse."""
         from deploy.detector import _parse_mpv_version

@@ -32,6 +32,11 @@ class Environment:
     platform_key: str = ""  # resolved key for PLATFORM_DEFAULTS
     display: str = ""  # "wayland" | "x11" | ""
     gpu_vendor: str = ""  # "nvidia" | "amd" | "intel" | ""
+    # True when more than one GPU vendor is present (laptop iGPU + dGPU or
+    # desktop iGPU + dGPU). On hybrid/Optimus layouts the iGPU is typically
+    # the one rendering — decode must also happen there (vaapi/auto-safe),
+    # never cross-PCIe from the dGPU.
+    gpu_hybrid: bool = False
     pkg_manager: str = ""  # "pacman" | "apt" | "brew" | "winget" | ""
     aur_helper: str = ""  # "paru" | "yay" | ""
     config_dir: str = ""  # resolved mpv config path
@@ -80,13 +85,7 @@ def _legacy_vulkan_intel_gpu():
     """True when an Intel Haswell-or-older iGPU is present (Linux, via lspci)."""
     if platform.system() != "Linux":
         return False
-    try:
-        r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-    if r.returncode != 0:
-        return False
-    output = (r.stdout or "").lower()
+    output = "\n".join(_display_device_lines()).lower()
     return any(pattern in output for pattern in LEGACY_VULKAN_INTEL_PATTERNS)
 
 
@@ -164,13 +163,22 @@ def _detect_display():
     return ""
 
 
-def _detect_gpu():
-    """Detect the GPU vendor."""
+def _is_display_device(line):
+    """True for lspci display-class lines (VGA compatible / 3D / Display)."""
+    return bool(re.search(r"\b(VGA compatible|3D|Display)\s+controller\b", line, re.I))
+
+
+def _display_device_lines():
+    """Lines describing display-class devices only (VGA/3D/Display controllers).
+
+    Scanning only display-class devices avoids false positives from other
+    PCI hardware that shares vendor strings (e.g. "Intel Corporation
+    Ethernet", "Advanced Micro Devices USB hub") — legacy heuristics matched
+    whole lspci output and misclassified such machines.
+    """
     if sys.platform == "win32":
         # WHY: wmic is deprecated and removed-by-default on Windows 11 24H2+.
-        # CIM is the canonical replacement and exists on Win10 1709+. We use
-        # it as the PRIMARY method, and fall back to wmic only if CIM fails
-        # (very old systems / restricted environments).
+        # CIM is the canonical replacement and exists on Win10 1709+.
         ok, out = _run_silent(
             [
                 "powershell",
@@ -181,25 +189,50 @@ def _detect_gpu():
         )
         if not ok or not out.strip():
             ok, out = _run_silent(["wmic", "path", "win32_VideoController", "get", "name"])
-        if ok and out:
-            out_lower = out.lower()
-            if "nvidia" in out_lower:
-                return "nvidia"
-            elif "amd" in out_lower or "radeon" in out_lower:
-                return "amd"
-            elif "intel" in out_lower:
-                return "intel"
-    else:
-        ok, out = _run_silent(["lspci"])
-        if ok:
-            out_lower = out.lower()
-            if "nvidia" in out_lower:
-                return "nvidia"
-            elif "amd" in out_lower or "radeon" in out_lower:
-                return "amd"
-            elif "intel" in out_lower:
-                return "intel"
+        if not ok:
+            return []
+        return [line.strip() for line in out.splitlines() if line.strip()]
+    ok, out = _run_silent(["lspci"])
+    if not ok:
+        return []
+    return [line for line in out.splitlines() if _is_display_device(line)]
+
+
+def _gpu_vendor_from_device(device_text):
+    """'… Quadro K1100M …' → 'nvidia'; unknown → ''."""
+    lc = device_text.lower()
+    if "nvidia" in lc:
+        return "nvidia"
+    if "amd" in lc or "radeon" in lc:
+        return "amd"
+    if "intel" in lc:
+        return "intel"
     return ""
+
+
+def _detect_gpus():
+    """Return (primary_vendor, all_vendors, display_device_lines).
+
+    primary_vendor keeps the historical pick order (nvidia > amd > intel) —
+    the right notion for desktop rigs where the discrete GPU drives the
+    display. Hybrid layouts (iGPU + dGPU) are reported separately; call
+    sites that must match the *rendering* GPU should consult gpu_hybrid.
+    """
+    lines = _display_device_lines()
+    vendors = []
+    for line in lines:
+        vendor = _gpu_vendor_from_device(line)
+        if vendor and vendor not in vendors:
+            vendors.append(vendor)
+    for preferred in ("nvidia", "amd", "intel"):
+        if preferred in vendors:
+            return preferred, vendors, lines
+    return "", vendors, lines
+
+
+def _detect_gpu():
+    """Compat wrapper for the primary GPU vendor."""
+    return _detect_gpus()[0]
 
 
 def _detect_avx2():
@@ -565,18 +598,34 @@ def detect():
             rows.append(["Display", env.display or "unknown"])
 
         # GPU
-        env.gpu_vendor = _detect_gpu()
+        env.gpu_vendor, gpu_vendors, _gpu_lines = _detect_gpus()
+        env.gpu_hybrid = len(gpu_vendors) > 1
         if env.gpu_vendor:
-            rows.append(["GPU", env.gpu_vendor])
+            if env.gpu_hybrid:
+                rows.append(
+                    [
+                        "GPU layout",
+                        f"hybrid ({' + '.join(gpu_vendors)}) — decode/render forced to the same GPU",
+                    ]
+                )
+            else:
+                rows.append(["GPU", env.gpu_vendor])
         else:
             ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")
             env.gpu_vendor = ""
+            env.gpu_hybrid = False
 
         # CUDA runtime: nvdec (the Linux counterpart of the Windows
         # d3d11va in-VRAM path) needs libcuda, which comes with the NVIDIA
         # driver's userland (nvidia-utils on Arch/CachyOS). Without it,
         # hwdec=auto-safe silently falls back to software decode.
-        if env.os == "linux" and env.gpu_vendor == "nvidia":
+        # On hybrid/Optimus layouts nvdec is not the intended decoder — the
+        # rendering iGPU decodes via vaapi — so the CUDA check stays silent.
+        if (
+            env.os == "linux"
+            and env.gpu_vendor == "nvidia"
+            and not env.gpu_hybrid
+        ):
             env.has_libcuda = ctypes.util.find_library("cuda") is not None
             rows.append(
                 [

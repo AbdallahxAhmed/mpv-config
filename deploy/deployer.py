@@ -343,11 +343,23 @@ def _patch_mpv_conf(
             gpu_context = "x11vk"
         else:
             gpu_context = ""
+    # nvdec is only preferable on a PURE NVIDIA Linux machine: it needs a
+    # CUDA runtime (libcuda) to exist, and on hybrid/Optimus laptops the
+    # iGPU does the rendering — decoding on the dGPU would force a
+    # cross-PCIe copy every frame, slower than vaapi on the same GPU.
+    # When unavailable, keep the caller's safe default so mpv resolves the
+    # fastest *working* decoder at runtime (e.g. vaapi on the iGPU).
+    use_dgpu_nvdec = (
+        env.os == "linux"
+        and env.gpu_vendor == "nvidia"
+        and getattr(env, "has_libcuda", False)
+        and not getattr(env, "gpu_hybrid", False)
+    )
     if selected_profile == "native":
         if env.os == "windows" and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
             hwdec = "d3d11va"
         if env.gpu_vendor == "nvidia" and env.os == "linux":
-            hwdec = "nvdec"
+            hwdec = "nvdec" if use_dgpu_nvdec else base_hwdec
         elif env.gpu_vendor == "amd" and env.os == "linux":
             hwdec = "vaapi"
         elif env.gpu_vendor == "intel" and env.os == "linux":
@@ -356,6 +368,7 @@ def _patch_mpv_conf(
         if (
             env.gpu_vendor == "nvidia"
             and env.os == "linux"
+            and use_dgpu_nvdec
             and base_hwdec in {"auto", "auto-copy", "auto-safe"}
         ):
             hwdec = "nvdec"
