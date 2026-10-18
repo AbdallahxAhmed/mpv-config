@@ -3,7 +3,9 @@
 import json
 import os
 import shutil
+import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -236,6 +238,64 @@ class TransactionTests(unittest.TestCase):
             lock.unlink()
             lock.write_text('{"token":"another-owner"}')
         self.assertTrue(lock.is_file())
+
+    def test_stale_lock_from_exited_process_is_auto_recovered(self):
+        """A lock whose recorded pid is dead must not require manual surgery."""
+        lock = self.root / ".config.mpv-config.lock"
+        lock.write_text(json.dumps({"pid": 2147483000, "token": "dead-owner"}))
+        with mock.patch.object(tx, "_pid_alive", return_value=False):
+            with mock.patch.object(tx.ui, "warn") as warn:
+                with tx.operation_lock(str(self.config)):
+                    contents = json.loads(lock.read_text())
+                    self.assertEqual(contents.get("pid"), os.getpid())  # fresh owner took over
+        self.assertFalse(lock.exists())  # cleanup removes the NEW holder's lock
+        warn.assert_called()  # removal is announced, never silent
+
+    def test_live_pid_lock_is_never_stolen(self):
+        lock = self.root / ".config.mpv-config.lock"
+        lock.write_text(json.dumps({"pid": 1234, "token": "live-owner"}))
+        with mock.patch.object(tx, "_pid_alive", return_value=True):
+            with self.assertRaises(RuntimeError):
+                with tx.operation_lock(str(self.config)):
+                    self.fail("must not acquire")
+        self.assertTrue(lock.is_file())  # untouched
+
+    def test_corrupt_lock_fails_closed_until_it_is_old_enough(self):
+        lock = self.root / ".config.mpv-config.lock"
+        lock.write_text("{ no json here")
+        # Young corrupt lock: fail closed.
+        with self.assertRaises(RuntimeError):
+            with tx.operation_lock(str(self.config)):
+                self.fail("must not acquire")
+        self.assertTrue(lock.is_file())
+        # The same lock abandoned for hours is provably dead.
+        old = time.time() - (tx.STALE_LOCK_MAX_AGE_SECONDS + 60)
+        os.utime(lock, (old, old))
+        with mock.patch.object(tx.ui, "warn"):
+            with tx.operation_lock(str(self.config)):
+                self.assertTrue(lock.is_file())
+        self.assertFalse(lock.exists())
+
+    def test_pid_alive_helpers(self):
+        """Known-dead pid → False; own pid classification depends on cmdline markers."""
+        impossible_pid = 2147483000
+        if sys.platform == "win32":
+            import ctypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, impossible_pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                self.skipTest("impossible pid somehow exists")
+            self.assertFalse(tx._pid_alive_windows(impossible_pid))
+        else:
+            self.assertFalse(tx._pid_alive(impossible_pid))
+        self.assertIsNone(tx._pid_alive(0))
+        self.assertIsNone(tx._pid_alive(None))
+
+        if sys.platform != "win32" and not os.path.isdir("/proc"):
+            # macOS: signal-0 fallback only; sanity-check it doesn't explode.
+            self.assertFalse(tx._pid_alive_posix(impossible_pid))
+
 
     def test_rollback_missing_config_preserves_git_and_ignores_old_lock(self):
         backup = self.root / "restore-source"

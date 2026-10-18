@@ -19,7 +19,16 @@ from typing import Dict, Optional, Tuple
 from deploy import ui
 
 HEALTH_CHECK_TIMEOUT_SECONDS = 10
-FFSUBSYNC_HEALTH_CHECK_MODULES = ("pkg_resources", "webrtcvad")
+# Modules whose absence means ffsubsync cannot actually do its job — a
+# failure here marks ffsubsync as broken so the planner reinstalls it.
+FFSUBSYNC_REQUIRED_HEALTH_MODULES = ("webrtcvad",)
+# pkg_resources (setuptools) was import-required by older ffsubsync builds;
+# current ones are importlib-based and run fine without it. uv-tool venvs
+# deliberately never ship setuptools, so failing this module only ever
+# caused loud warnings followed by a pointless reinstall.
+FFSUBSYNC_SOFT_HEALTH_MODULES = ("pkg_resources",)
+# Kept as the union for _check_python_module_import's whitelist.
+FFSUBSYNC_HEALTH_CHECK_MODULES = FFSUBSYNC_REQUIRED_HEALTH_MODULES + FFSUBSYNC_SOFT_HEALTH_MODULES
 MODULE_IMPORT_CHECK_SCRIPT = "import importlib, sys\n" "importlib.import_module(sys.argv[1])\n"
 
 
@@ -519,10 +528,32 @@ def _check_ffsubsync_installed(launcher=None):
             no_window_flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             run_kwargs["creationflags"] = no_window_flag
 
-        return all(
-            _check_python_module_import(py, module, run_kwargs)
-            for module in FFSUBSYNC_HEALTH_CHECK_MODULES
-        )
+        # Required modules: absence is real breakage — report ffsubsync as
+        # not installed so the planner replaces it.
+        healthy = True
+        for module in FFSUBSYNC_REQUIRED_HEALTH_MODULES:
+            ok, diagnostic = _check_python_module_import(py, module, run_kwargs)
+            if not ok:
+                healthy = False
+                if diagnostic:
+                    ui.warn(
+                        f"ffsubsync health check failed ({module}): {diagnostic}"
+                        " — reinstalling it may fix this"
+                    )
+                else:
+                    ui.warn(f"ffsubsync health check failed: {module} does not import")
+
+        # Soft modules: absence is acceptable on short-lived-venv setups
+        # (modern ffsubsync no longer imports pkg_resources); note it and
+        # keep ffsubsync installed.
+        for module in FFSUBSYNC_SOFT_HEALTH_MODULES:
+            ok, diagnostic = _check_python_module_import(py, module, run_kwargs)
+            if not ok and diagnostic:
+                ui.info(
+                    f"ffsubsync: {diagnostic} — safe to ignore on recent builds; if subtitle "
+                    "sync later complains, run: uv tool install ffsubsync --force --with setuptools"
+                )
+        return healthy
     except Exception:
         # If we cannot introspect the interpreter, keep ffsubsync as installed
         # and avoid false negatives.
@@ -549,21 +580,25 @@ def _looks_like_python_interpreter(py_base):
 
 
 def _check_python_module_import(py, module, run_kwargs):
-    """Return True if `module` imports successfully under the given interpreter."""
+    """Return (ok, diagnostic): does `module` import under the given interpreter?
+
+    The diagnostic keeps only the LAST stderr/stdout line — that is the
+    actual error ("ModuleNotFoundError: No module named 'pkg_resources'");
+    the raw head was "Traceback (most recent call last):" noise.
+    """
     if module not in FFSUBSYNC_HEALTH_CHECK_MODULES:
-        ui.warn(f"ffsubsync health check skipped unexpected module name: {module!r}")
-        return True
-    r = subprocess.run([py, "-c", MODULE_IMPORT_CHECK_SCRIPT, module], **run_kwargs)
+        return True, f"skipped unexpected module name: {module!r}"
+    try:
+        r = subprocess.run([py, "-c", MODULE_IMPORT_CHECK_SCRIPT, module], **run_kwargs)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, f"{type(exc).__name__}: {exc}"
     if r.returncode == 0:
-        return True
+        return True, ""
     # Some wrappers may surface interpreter diagnostics on stdout instead of stderr.
     diagnostic = (r.stderr or r.stdout or "").strip()
     if diagnostic:
-        first_diagnostic_line = diagnostic.splitlines()[0]
-        ui.warn(f"ffsubsync health check failed ({module}): {first_diagnostic_line}")
-    else:
-        ui.warn(f"ffsubsync health check failed: could not import {module}")
-    return False
+        return False, diagnostic.splitlines()[-1]
+    return False, f"could not import {module}"
 
 
 def detect():

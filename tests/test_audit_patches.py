@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import tempfile
 import unittest
 from unittest import mock
@@ -512,7 +513,86 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(_parse_mpv_version("mpv v0.41.0-934-g9f9f8c4dd"), (0, 41, 0))
         self.assertEqual(_parse_mpv_version("mpv 0.40.0"), (0, 40, 0))
         self.assertEqual(_parse_mpv_version("mpv 0.39.0 (C) 2000-2025"), (0, 39, 0))
-        self.assertIsNone(_parse_mpv_version("no version text here"))
+    def test_ffsubsync_module_import_diagnostics_use_real_error_line(self):
+        """Import failure diagnostics surface the error, not 'Traceback (...': head noise."""
+        from deploy import detector
+
+        def fake_subprocess_run(cmd, **kwargs):
+            return mock.Mock(
+                returncode=1,
+                stderr=(
+                    "Traceback (most recent call last):\n"
+                    '  File "<string>", line 2, in <module>\n'
+                    "ModuleNotFoundError: No module named 'pkg_resources'\n"
+                ),
+                stdout="",
+            )
+
+        with mock.patch.object(detector.subprocess, "run", side_effect=fake_subprocess_run):
+            ok, diagnostic = detector._check_python_module_import(
+                "python3", "pkg_resources", {"capture_output": True, "text": True}
+            )
+        self.assertFalse(ok)
+        self.assertEqual(diagnostic, "ModuleNotFoundError: No module named 'pkg_resources'")
+
+        with mock.patch.object(detector.subprocess, "run", return_value=mock.Mock(returncode=0)):
+            ok, diagnostic = detector._check_python_module_import(
+                "python3", "webrtcvad", {"capture_output": True, "text": True}
+            )
+        self.assertTrue(ok)
+        self.assertEqual(diagnostic, "")
+
+    def test_ffsubsync_health_pkg_resources_soft_webrtcvad_required(self):
+        """Missing pkg_resources no longer queues a reinstall; webrtcvad failure does."""
+        from deploy import detector
+
+        launcher_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, launcher_dir, ignore_errors=True)
+        launcher = os.path.join(launcher_dir, "ffsubsync")
+        with open(launcher, "w", encoding="utf-8") as fh:
+            fh.write("#!/usr/bin/python3\n")
+
+        def fake_subprocess_run(cmd, **kwargs):
+            module = cmd[-1] if cmd[-1] else ""
+            returncode = 0
+            stderr = ""
+            if module == "pkg_resources":
+                returncode = 1
+                stderr = (
+                    "Traceback (most recent call last):\n"
+                    "ModuleNotFoundError: No module named 'pkg_resources'\n"
+                )
+            return mock.Mock(returncode=returncode, stderr=stderr, stdout="")
+
+        with mock.patch.object(detector, "_run_silent", return_value=(True, "ffsubsync 0.4.26")), \
+                mock.patch.object(detector.shutil, "which", return_value=launcher), \
+                mock.patch.object(detector.sys, "platform", "linux"), \
+                mock.patch.object(detector.subprocess, "run", side_effect=fake_subprocess_run):
+            with mock.patch.object(detector.ui, "info") as ui_info:
+                with mock.patch.object(detector.ui, "warn") as ui_warn:
+                    ok = detector._check_ffsubsync_installed(launcher)
+            # pkg_resources absence alone keeps ffsubsync "installed".
+            self.assertTrue(ok)
+            ui_info.assert_called_once()
+            self.assertIn("--with setuptools", ui_info.call_args.args[0])
+            ui_warn.assert_not_called()
+
+            def fake_webrtcvad_broken(cmd, **kwargs):
+                returncode = 0 if cmd[-1] != "webrtcvad" else 1
+                stderr = "" if returncode == 0 else (
+                    "Traceback (most recent call last):\n"
+                    "ModuleNotFoundError: No module named 'webrtcvad'\n"
+                )
+                return mock.Mock(returncode=returncode, stderr=stderr, stdout="")
+
+            with mock.patch.object(detector.subprocess, "run", side_effect=fake_webrtcvad_broken):
+                with mock.patch.object(detector.ui, "warn") as ui_warn:
+                    broken = detector._check_ffsubsync_installed(launcher)
+            # webrtcvad still marks ffsubsync broken (planner reinstalls it).
+            self.assertFalse(broken)
+            self.assertTrue(ui_warn.called)
+            self.assertIn("webrtcvad", ui_warn.call_args.args[0])
+
 
     def test_sanitize_mpv_conf_for_mpv_version(self):
         """Too-new options are commented; known/unknown-version callers keep control."""

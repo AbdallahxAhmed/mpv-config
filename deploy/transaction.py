@@ -13,15 +13,25 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
+import time
 import uuid
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
+from deploy import ui
+
 ASSET_DIRS = ("scripts", "shaders", "fonts")
 PROTECTED = frozenset((".git", ".mpv-config.lock"))
 MANIFEST = ".deploy.lock.json"
+
+# When a lock file is too corrupt to even read a pid, its age decides
+# staleness: mpv-config operations finish in well under 6 hours, so
+# anything older was abandoned (crash, killed shell, power loss) — it is
+# impossible for a live operation to still be honest about that age.
+STALE_LOCK_MAX_AGE_SECONDS = 6 * 3600
 
 
 class RecoveryError(RuntimeError):
@@ -30,6 +40,102 @@ class RecoveryError(RuntimeError):
 
 def canonical(path):
     return os.path.normcase(os.path.realpath(os.path.abspath(os.path.expanduser(path))))
+
+
+def _pid_alive(pid):
+    """Best-effort liveness probe: True/False, or None when unverifiable."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if sys.platform == "win32":
+        return _pid_alive_windows(pid)
+    return _pid_alive_posix(pid)
+
+
+def _pid_alive_posix(pid):
+    """Check /proc/<pid>/cmdline where available; fall back to os.kill(pid, 0).
+
+    A recorded lock pid MUST have been this tool's process when it wrote
+    the lock. If the same pid is alive but its cmdline looks nothing like
+    an mpv-config run, the pid has been RECYCLED and our holder is gone —
+    treat the lock as stale.
+    """
+    if os.path.isdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as stream:
+                cmdline = stream.read().replace(b"\x00", b" ").decode("utf-8", "replace")
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return True  # cannot inspect → refuse to steal
+        return "deploy" in cmdline or "mpv" in cmdline
+    # macOS & friends: no /proc — signal 0 liveness probe only (a recycled
+    # pid then reads as alive, which fails closed; acceptable).
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _pid_alive_windows(pid):
+    """OpenProcess probe: exit-code STILL_ACTIVE means alive."""
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    STILL_ACTIVE = 259
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong()
+        if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return exit_code.value == STILL_ACTIVE
+        return True  # cannot query → fail closed
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _recover_stale_lock(lock):
+    """Steal the lock ONLY when its recorded holder is provably gone.
+
+    Returns True when the stale lock file was removed and a fresh one may
+    be created. Returns False whenever ownership cannot be ruled out — a
+    live holder, an unverifiable pid on young-enough lock, or unlink
+    failure — leaving the fail-closed message to the caller.
+    """
+    try:
+        with open(lock, encoding="utf-8") as stream:
+            contents = json.load(stream)
+        pid = int(contents.get("pid") or 0)
+    except (OSError, ValueError, TypeError):
+        pid = None
+
+    if pid:
+        alive = _pid_alive(pid)
+        if alive:
+            return False
+        owner_text = f"exited process (pid {pid})"
+    else:
+        # No usable pid: refuse below the age threshold, recover past it.
+        try:
+            age = time.time() - os.lstat(lock).st_mtime
+        except OSError:
+            return False
+        if age <= STALE_LOCK_MAX_AGE_SECONDS:
+            return False
+        owner_text = f"holder untraceable, lock waited {age / 3600:.1f} h"
+
+    try:
+        os.unlink(lock)
+    except OSError:
+        return False
+    ui.warn(f"Stale operation lock removed — {owner_text} will no longer be recorded there.")
+    return True
 
 
 def is_junction(path):
@@ -64,8 +170,9 @@ def assert_disjoint(*paths):
 def operation_lock(config_dir):
     """Exclusive, owner-checked lock beside (never inside) the config directory.
 
-    A crashed process may leave a lock. Do not automatically steal it: verify
-    the recorded process has exited before manually removing the exact file.
+    A crashed process may leave a lock. One whose recorded process has
+    provably exited is auto-removed here (no manual surgery needed);
+    anything unverifiable still fails closed with instructions.
     """
     config_dir = config_path(config_dir)
     parent, name = os.path.split(config_dir)
@@ -75,10 +182,18 @@ def operation_lock(config_dir):
     try:
         fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     except FileExistsError as exc:
-        raise RuntimeError(
-            f"Another operation holds {lock}. If this is a stale lock, verify "
-            "its recorded process has exited before removing it."
-        ) from exc
+        if not _recover_stale_lock(lock):
+            raise RuntimeError(
+                f"Another operation holds {lock}. If this is a stale lock, verify "
+                "its recorded process has exited before removing it."
+            ) from exc
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as second:
+            raise RuntimeError(
+                f"Another operation grabbed {lock} while the stale lock was being "
+                "indexed — re-run the command."
+            ) from second
     identity = os.fstat(fd)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
