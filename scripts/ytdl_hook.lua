@@ -140,7 +140,12 @@ end
 
 local function exec(args)
     local result, err = mp.command_native({
-        _name = "subprocess",
+        -- "name", NOT "_name": mpv release binaries through 0.41 only read
+        -- "name" here; "_name" is a master-branch addition, rejected as
+        -- "invalid parameter" on released builds (proven on Ubuntu PPA
+        -- 0.41.0). Every mpv version accepts "name" — master keeps it as a
+        -- documented compatibility alias.
+        name = "subprocess",
         args = args,
         capture_stdout = true,
         capture_stderr = true,
@@ -154,8 +159,9 @@ local function exec(args)
     if not result then
         if err and err ~= "" then
             -- Dump the exact argument list with Lua types: "invalid
-            -- parameter" means one item in args is not a string; this
-            -- names the item and its type/value verbatim.
+            -- parameter" means a bad argument OR an unrecognized command
+            -- key (e.g. "_name" on release builds); this names each item
+            -- and its type/value verbatim.
             local dump = {}
             for i, v in ipairs(args) do
                 dump[#dump + 1] = i .. "=[" .. type(v) .. "]"
@@ -163,7 +169,6 @@ local function exec(args)
             end
             msg.error("subprocess command failed: " .. err
                       .. " (args: " .. table.concat(dump, " | ") .. ")")
-        end
         end
         return {status = -1, error_string = tostring(err or "init"), stdout = "", stderr = ""}
     end

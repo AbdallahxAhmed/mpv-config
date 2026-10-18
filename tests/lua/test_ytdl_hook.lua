@@ -31,7 +31,11 @@ local function run(config)
         end,
         command_native=function(c)
             if c[1]=='expand-path' then return '/config/yt-dlp.exe' end
-            assert(c._name=='subprocess')
+            -- Regression: the subprocess table must use the universal
+            -- "name" key (mpv <= 0.41 releases reject "_name" as invalid
+            -- parameter) and must NOT carry "_name".
+            assert(c.name=='subprocess')
+            assert(c._name==nil)
             -- Snapshot args at call time: the hook reuses/mutates a single
             -- command table, so storing a reference would erase history.
             local snap={} for i,v in ipairs(c.args) do snap[i]=v end
