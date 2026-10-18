@@ -685,8 +685,8 @@ def _find_binary(name, env):
     return None
 
 
-def _resolve_ytdl_path(env):
-    """Resolve localized yt-dlp binary path dynamically."""
+def _ytdl_path_candidates(env):
+    """Every location the deployer generates for ytdl_path, in preference order."""
     candidates = []
     if env.os == "windows":
         prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
@@ -708,7 +708,12 @@ def _resolve_ytdl_path(env):
                 "/usr/bin/yt-dlp",
             ]
         )
-    for c in candidates:
+    return candidates
+
+
+def _resolve_ytdl_path(env):
+    """Resolve localized yt-dlp binary path dynamically."""
+    for c in _ytdl_path_candidates(env):
         if os.path.isfile(c):
             if env.os == "windows":
                 return _normalize_windows_path(c)
@@ -717,6 +722,27 @@ def _resolve_ytdl_path(env):
     if which_path:
         return which_path
     return "yt-dlp"
+
+
+def _ytdl_conf_is_refreshable(path, env):
+    """True for a single-line ytdl_path stub the deployer itself generated.
+
+    Our localized stub is exactly `ytdl_path=<one of the standard candidate
+    paths>`. Re-resolving it at deploy time keeps the hook pointed at the
+    CURRENT binary (e.g. the 7-day self-refresh installs the standalone
+    yt-dlp into ~/.local/bin and shadow-updates the stale distro package —
+    without this, the hook.conf would keep spawning the old one forever).
+    Any user customization (comments, extra options, a non-standard single
+    value) makes the file personal — never touch it.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            lines = [ln.strip() for ln in fh.read().strip().splitlines() if ln.strip()]
+    except OSError:
+        return False
+    if len(lines) != 1 or not lines[0].startswith("ytdl_path="):
+        return False
+    return lines[0].split("=", 1)[1] in _ytdl_path_candidates(env)
 
 
 def _normalize_line_endings(directory, env):
@@ -881,8 +907,14 @@ def deploy(
                     shutil.copy2(src, dst)
                     newly_managed.append("script-opts/" + name)
         ytdl_dest = os.path.join(opts_dst, "ytdl_hook.conf")
-        # Only localize a newly supplied default, not a personal existing path.
-        if not os.path.exists(os.path.join(opts_old, "ytdl_hook.conf")):
+        # Localize a freshly supplied default; refresh OUR OWN previously
+        # generated stub (single standard-candidate line — e.g. after the
+        # standalone yt-dlp self-refresh switches the binary location);
+        # anything else is personal and never touched.
+        ytdl_should_localize = not os.path.exists(os.path.join(opts_old, "ytdl_hook.conf")) or _ytdl_conf_is_refreshable(
+            os.path.join(opts_old, "ytdl_hook.conf"), env
+        )
+        if ytdl_should_localize:
             with open(ytdl_dest, "w", encoding="utf-8") as stream:
                 stream.write(f"ytdl_path={_resolve_ytdl_path(env)}\n")
             if "script-opts/ytdl_hook.conf" not in newly_managed:

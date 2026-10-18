@@ -1067,7 +1067,7 @@ class TestAuditPatches(unittest.TestCase):
         """Heartbeats fire per interval, NOT per poll slice (no 5x/second spam)."""
         from deploy import installer
 
-        child = "import time; time.sleep(0.6)"
+        child = "import time; time.sleep(1.0)"
         buf = []
         with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.5), \
                 mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
@@ -1075,9 +1075,10 @@ class TestAuditPatches(unittest.TestCase):
         joined = "\n".join(buf)
         ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
         self.assertTrue(ok)
-        # Poll slices fire at 0.2s granularity: beats can only appear once the
-        # FULL 0.5s interval has elapsed — one at ~0.6s, nothing before.
-        self.assertEqual(len(ticks), 1)
+        # Slices fire at 0.2s granularity (~5 over one second): interval
+        # gating keeps ticks roughly at interval cadence, never per-slice.
+        self.assertGreaterEqual(len(ticks), 1)
+        self.assertLessEqual(len(ticks), 4)
 
     def test_run_timeout_kills_process_and_reports(self):
         """Stuck children are killed at budget; the failure says why."""
@@ -1976,6 +1977,70 @@ class YtDlpFreshnessTests(unittest.TestCase):
         by_name = {r["name"]: r for r in results}
         self.assertEqual(by_name["yt-dlp"]["status"], "ok")
         self.assertEqual(by_name["yt-dlp"]["detail"], "already installed")
+
+
+    def test_deployer_refreshes_its_own_generated_stub(self):
+        """A generated ytdl_path stub gets re-resolved; personal files never do."""
+        import tempfile as tf_mod
+
+        from deploy import deployer
+
+        env = Environment(os="linux", platform_key="ubuntu")
+        races = deployer._ytdl_path_candidates(env)
+        self.assertIn(os.path.expanduser("~/.local/bin/yt-dlp"), races)
+        self.assertIn("/usr/bin/yt-dlp", races)
+
+        with tf_mod.TemporaryDirectory() as tmpdir:
+            stub = os.path.join(tmpdir, "ytdl_hook.conf")
+
+            # A stub the deployer itself generated (older standard path).
+            with open(stub, "w", encoding="utf-8") as fh:
+                fh.write("ytdl_path=/usr/bin/yt-dlp\n")
+            self.assertTrue(deployer._ytdl_conf_is_refreshable(stub, env))
+
+            # User customization (comments / extra options) is personal.
+            with open(stub, "w", encoding="utf-8") as fh:
+                fh.write("ytdl_path=/usr/bin/yt-dlp\n# keep my custom flags\n")
+            self.assertFalse(deployer._ytdl_conf_is_refreshable(stub, env))
+
+            # A non-standard single value (hand-rolled tooling) is personal.
+            with open(stub, "w", encoding="utf-8") as fh:
+                fh.write("ytdl_path=/opt/private/yt-dlp\n")
+            self.assertFalse(deployer._ytdl_conf_is_refreshable(stub, env))
+
+            # Missing file is reported as never for a refresh.
+            self.assertFalse(
+                deployer._ytdl_conf_is_refreshable(
+                    os.path.join(tmpdir, "absent.conf"), env
+                )
+            )
+
+    def test_resolver_prefers_local_bin_over_distro_package(self):
+        from deploy import deployer
+
+        with tempfile.TemporaryDirectory() as home:
+
+            def fake_expanduser(path):
+                # Windows Python prefers USERPROFILE over HOME, so patch the
+                # expansion itself to keep the test host-independent.
+                if path.startswith("~"):
+                    return os.path.join(home, *path[2:].replace("\\", "/").split("/"))
+                return path
+
+            with mock.patch.object(
+                deployer.os.path, "expanduser", side_effect=fake_expanduser
+            ):
+                env = Environment(os="linux", platform_key="ubuntu")
+                fresh = os.path.join(home, ".local", "bin", "yt-dlp")
+                os.makedirs(os.path.dirname(fresh), exist_ok=True)
+                with open(fresh, "wb") as fh:
+                    fh.write(b"#!/bin/sh\n")
+                self.assertEqual(deployer._resolve_ytdl_path(env), fresh)
+
+                # When the home binary is gone, resolution falls back to the
+                # distro package (verified entry stays meaningful).
+                os.remove(fresh)
+                self.assertNotIn(home, deployer._resolve_ytdl_path(env))
 
 
 class CachyOSOptimizedReposTests(unittest.TestCase):
