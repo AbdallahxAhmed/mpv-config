@@ -280,7 +280,8 @@ class TestThumbfastSeekWatchdogAndPipeline(unittest.TestCase):
         """stop_seek_watchdog must be called in check_new_thumb, clear, file_load, shutdown, and quit."""
         for fn_name in ["check_new_thumb", "clear", "file_load", "shutdown", "quit"]:
             match = re.search(
-                rf"local function {fn_name}\([^)]*\)\n(.*?)^end",
+                rf"(?:local function {fn_name}|function {fn_name}|{fn_name} = function)"
+                rf"\([^)]*\)\n(.*?)^end",
                 self.thumbfast_lua,
                 re.MULTILINE | re.DOTALL,
             )
@@ -616,7 +617,10 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
 
     def test_extractor_headers_preserved_across_file_loaded(self):
         """yt-dlp extractor headers must not be cleared in file_load, and must reset on start-file."""
-        file_load_idx = self.thumbfast_lua.find("local function file_load()")
+        # file_load is the hoisted forward declaration: the storyboard fallback
+        # calls it before its definition below (nil-global crash regression)
+        self.assertIn("local file_load\n", self.thumbfast_lua)
+        file_load_idx = self.thumbfast_lua.find("function file_load()")
         self.assertNotEqual(file_load_idx, -1)
         file_load_body = self.thumbfast_lua[file_load_idx : file_load_idx + 1500]
         self.assertNotIn("cached_user_agent = nil", file_load_body)
@@ -652,6 +656,28 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
             "desired_overlay = false must precede if script_name then return end",
         )
         self.assertIn('mp.msg.trace("CLEAR received show="', clear_body)
+
+    def test_storyboard_fallback_guard_and_ipc_script_rewritten_per_socket(self):
+        """The storyboard fallback must resolve the hoisted file_load (never a nil
+        global), must not re-attempt storyboards for a path that already fell back,
+        and must rewrite the IPC client script whenever the socket path changes."""
+        self.assertIn("local file_load\n", self.thumbfast_lua)
+        self.assertIn("local storyboard_fallback_done\n", self.thumbfast_lua)
+        self.assertIn('storyboard_fallback_done = properties["path"]', self.thumbfast_lua)
+        # both re-attempt sites (idle watch_changes + json-subprocess observer)
+        self.assertEqual(
+            self.thumbfast_lua.count('storyboard_fallback_done ~= properties["path"]'), 2
+        )
+        # socket path changes per file load; script_written must reset there so
+        # later generations get their client script (permanent pipe open failed)
+        fl_idx = self.thumbfast_lua.find("function file_load()")
+        self.assertNotEqual(fl_idx, -1)
+        self.assertIn("script_written = false", self.thumbfast_lua[fl_idx : fl_idx + 400])
+        rp_idx = self.thumbfast_lua.find("local function respawn_thumbnailer(")
+        self.assertNotEqual(rp_idx, -1)
+        self.assertIn("script_written = false", self.thumbfast_lua[rp_idx : rp_idx + 1200])
+        # the client-script write step must still be gated on script_written
+        self.assertIn("elseif not script_written then", self.thumbfast_lua)
 
 
 if __name__ == "__main__":

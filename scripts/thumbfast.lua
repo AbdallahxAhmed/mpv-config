@@ -925,6 +925,8 @@ local function respawn_thumbnailer(seek_time)
     options.socket = base_socket .. "_" .. file_seq
     options.thumbnail = base_thumbnail .. "_" .. file_seq
     thumbnail_path = options.thumbnail
+    -- socket path changed: the next spawn must write its IPC client script
+    script_written = false
     if winapi then
         winapi.update_socket(options.socket)
     end
@@ -1403,6 +1405,15 @@ local function parse_lavfi_crop(filters)
     end
 end
 
+-- Forward declarations: the storyboard attempt can fall back to regular
+-- thumbnailing from a callback compiled before file_load's body exists; a
+-- bare name there would resolve to a nil global and kill the whole script
+-- (attempt to call a nil value). The sticky fallback path guard keeps the
+-- idle/property-driven watchers below from re-attempting storyboards forever
+-- on a video that has no usable storyboard data.
+local file_load
+local storyboard_fallback_done
+
 local function watch_changes()
     if not dirty or not properties["video-out-params"] then return end
     dirty = false
@@ -1415,7 +1426,7 @@ local function watch_changes()
         last_crop ~= properties["video-crop"]
     -- TODO: add flipping detection
 
-    if resized_storyboard or not using_storyboards then
+    if resized_storyboard or (not using_storyboards and storyboard_fallback_done ~= properties["path"]) then
         storyboard_transpose = rotate % 180 == 90
         parse_lavfi_crop(vf_reset)
         -- TODO: honor options.spawn_first, where we only start fetching thumbnails on hover?
@@ -1545,7 +1556,7 @@ local function update_property(name, value)
             end
         end
 
-        if not using_storyboards then
+        if not using_storyboards and storyboard_fallback_done ~= properties["path"] then
             dirty = true
             setup_storyboards()
         end
@@ -2054,7 +2065,9 @@ function setup_storyboards()
                 end
             end
 
-            -- fall back to regular thumbnailing
+            -- fall back to regular thumbnailing; notice the per-path guard so
+            -- the idle/property watchers do not re-attempt storyboards forever
+            storyboard_fallback_done = properties["path"]
             file_load()
         end)
         -- we are in a state where we decided yeah let's try storyboards
@@ -2062,7 +2075,12 @@ function setup_storyboards()
     end
 end
 
-local function file_load()
+function file_load()
+    -- The IPC client script is written once per socket path. The socket path
+    -- changes with every file load (file_seq bump); leaving script_written
+    -- set would give every later generation --scripts=<never-written .run>
+    -- and no working IPC channel (permanent pipe open failed).
+    script_written = false
     clear()
     spawned = false
     dirty = true

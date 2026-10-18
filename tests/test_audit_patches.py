@@ -1491,7 +1491,10 @@ class TestAuditPatches(unittest.TestCase):
         with open(tf, "r", encoding="utf-8") as f:
             tf_content = f.read()
         self.assertIn("user-data/mpv/ytdl/json-subprocess-result", tf_content)
-        self.assertIn("resized_storyboard or not using_storyboards", tf_content)
+        # storyboard re-attempts are guarded per path so a video without usable
+        # storyboard data cannot hot-loop the idle/property observers
+        self.assertIn('not using_storyboards and storyboard_fallback_done ~= properties["path"]', tf_content)
+        self.assertIn('storyboard_fallback_done = properties["path"]', tf_content)
 
         with open(sp, "r", encoding="utf-8") as f:
             sp_content = f.read()
