@@ -8,12 +8,15 @@ detected environment.
 
 import json
 import os
+import queue
 import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import urllib.request
 import zipfile
 
@@ -38,6 +41,14 @@ PKG_TIMEOUT = 1800  # seconds
 #   babysitting.
 _APT_OPTIONS = ("-o", "Acquire::ForceIPv4=true", "-o", "Acquire::Retries=3")
 
+# Seconds of output silence before _run prints a heartbeat line that
+# shows elapsed time and the remaining budget — the anti-"frozen spinner".
+_HEARTBEAT_INTERVAL = 15
+
+# How long the pump loop waits per slice; keeps the loop responsive right
+# after EOF (proc.poll() can lag process exit, so EOF is trusted instead).
+_POLL_SLICE = 0.2
+
 # The PPA used to bring the latest stable mpv to Ubuntu/Mint (installer
 # branch in the registry). Direct HTTPS registration below reads its
 # signing key via Launchpad's public API, so it stays in one place.
@@ -46,26 +57,105 @@ PPA_ARCHIVE = "mpv"
 
 
 def _run(cmd, check=True, env=None, timeout=300):
-    """Run a command, showing output. Returns success bool."""
+    """Run a command showing live output; returns success bool.
+
+    WHY streamed with a heartbeat: package managers can go silent for
+    minutes (apt between mirror fetches, curl over a stalled route) and
+    the old fire-and-forget runner showed only a spinner — the user saw a
+    frozen "Installing mpv…" with zero signal of whether anything moved.
+    The command's own lines stream through as they appear; during silence
+    a heartbeat line ticks with elapsed time and the current timeout
+    budget, so "working" and "hung" are never indistinguishable.
+    """
+    start = time.monotonic()
+    print(f"  $ {' '.join(cmd)}", flush=True)
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            check=check,
-            timeout=timeout,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
-            # Don't capture — let user see install progress
         )
-        if not check and result.returncode != 0:
-            return False
-        return True
-    except subprocess.CalledProcessError:
-        return False
     except FileNotFoundError:
         ui.error(f"Command not found: {cmd[0]}")
         return False
-    except subprocess.TimeoutExpired:
-        ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+    except OSError as exc:
+        ui.error(f"Could not start {cmd[0]}: {exc}")
         return False
+
+    lines = queue.Queue()
+    reader = threading.Thread(
+        target=_pump_lines, args=(proc.stdout, lines), daemon=True
+    )
+    reader.start()
+
+    deadline = None if timeout is None else start + timeout
+    got_eof = False
+
+    try:
+        while not got_eof and proc.poll() is None:
+            try:
+                item = lines.get(timeout=_POLL_SLICE)
+            except queue.Empty:
+                elapsed = int(time.monotonic() - start)
+                print(
+                    f"      ... running {elapsed}s / limit {timeout}s",
+                    flush=True,
+                )
+                if timeout is not None and elapsed >= timeout:
+                    proc.kill()
+                    proc.wait()
+                    ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+                    return False
+                continue
+            if item is None:
+                # The child closed its output — trust EOF rather than racing
+                # proc.poll(), which can lag process exit by a few ms and
+                # otherwise cost one full heartbeat interval of dead waiting.
+                got_eof = True
+                break
+            print(f"      {item}", flush=True)
+            if deadline is not None and time.monotonic() >= deadline:
+                proc.kill()
+                proc.wait()
+                ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+                return False
+        # Drain what the child wrote after the last poll / before EOF.
+        time.sleep(0.05)
+        while True:
+            try:
+                item = lines.get_nowait()
+            except queue.Empty:
+                break
+            if item is not None:
+                print(f"      {item}", flush=True)
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.wait()
+        ui.warn(f"Interrupted: {' '.join(cmd)}")
+        raise
+
+    elapsed = int(time.monotonic() - start)
+    print(f"      (finished in {elapsed}s)", flush=True)
+    if proc.returncode != 0 and check:
+        return False
+    return True
+
+
+def _pump_lines(stream, sink):
+    """Drain a child's stdout into a queue; None marks end-of-stream."""
+    try:
+        for line in iter(stream.readline, ""):
+            sink.put(line.rstrip("\r\n"))
+    finally:
+        try:
+            stream.close()
+        except Exception:
+            pass
+        sink.put(None)
 
 
 def _ensure_pipx(env):
@@ -706,6 +796,7 @@ def _direct_ppa_register():
         ui.warn("No Ubuntu series codename in /etc/os-release — direct PPA registration unavailable.")
         return False
     ui.step(f"Registering PPA directly for series {series} (HTTPS/IPv4-only path)...")
+    ui.step("Fetching the PPA signing-key fingerprint (Launchpad API, HTTPS/IPv4)...")
     ok, body = _capture(
         [
             "curl",
@@ -724,6 +815,7 @@ def _direct_ppa_register():
         ui.warn("PPA metadata is missing its signing key fingerprint — direct registration failed.")
         return False
     fingerprint = fp_match.group(1)
+    ui.step("Downloading the PPA signing key (HTTPS keyserver, IPv4)...")
     ok, armor = _capture(
         [
             "curl",
@@ -806,6 +898,9 @@ def _install_mpv_latest(env):
         )
         return _mpv_install_gate(installed)
 
+    ui.step(
+        "Registering ppa:ubuntuhandbook1/mpv (tool attempt, 5-min cap, then an IPv4-only fallback)..."
+    )
     added = False
     if shutil.which("add-apt-repository"):
         # -n: register the source only; the cache refresh below is ours.
@@ -815,6 +910,9 @@ def _install_mpv_latest(env):
             timeout=300,
         )
     if not added:
+        ui.info(
+            "Tool attempt did not register the PPA — trying the HTTPS/IPv4-only path..."
+        )
         added = _direct_ppa_register()
     if not added and not shutil.which("add-apt-repository"):
         # Last resort: bootstrap the standard tool and let it try once.
@@ -834,13 +932,14 @@ def _install_mpv_latest(env):
             "Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build."
         )
     ui.step(
-        "Refreshing apt cache (single pass; can take a few minutes on slow networks)..."
+        "Refreshing apt cache (single pass; the PPA index downloads over IPv4)..."
     )
     _run(
         ["sudo", "apt-get", "update", *_APT_OPTIONS],
         check=False,
         timeout=PKG_TIMEOUT,
     )
+    ui.step("Installing mpv from the PPA (apt shows its own download progress)...")
     installed = _run(
         ["sudo", "apt-get", "install", "-y", *_APT_OPTIONS, "mpv"],
         timeout=PKG_TIMEOUT,
@@ -1349,9 +1448,11 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     # Install core
     for name in to_install:
         try:
-            with ui.spinner(f"Installing {name}..."):
-                dep_info = SYSTEM_DEPS.get(name, {})
-                ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
+            # Plain step + streamed command output (see _run): a rich spinner
+            # here redraws over apt's own progress lines and reads as "frozen".
+            ui.step(f"Installing {name}...")
+            dep_info = SYSTEM_DEPS.get(name, {})
+            ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})
@@ -1382,9 +1483,9 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     # Install optional (don't fail the whole process)
     for name in optional_missing:
         try:
-            with ui.spinner(f"Installing {name} (optional)..."):
-                dep_info = SYSTEM_DEPS.get(name, {})
-                ok = _install_one(name, dep_info, env)
+            ui.step(f"Installing {name} (optional)...")
+            dep_info = SYSTEM_DEPS.get(name, {})
+            ok = _install_one(name, dep_info, env)
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})

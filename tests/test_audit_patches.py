@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -964,6 +965,91 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(len(add_attempts), 1)
         self.assertTrue(any("software-properties-common" in c for c in joined))
         self.assertFalse(any("add-apt-repository" in c and "-y -n" not in c for c in joined))
+
+    def test_run_streams_output_echo_and_finish_line(self):
+        """Long commands echo, stream raw child output, and close cleanly."""
+        from deploy import installer
+
+        child = "print('streamed-line-1'); print('streamed-line-2')"
+        buf = []
+        with mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+            ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
+        joined = "\n".join(buf)
+        self.assertTrue(ok)
+        self.assertIn("streamed-line-1", joined)
+        self.assertIn("streamed-line-2", joined)
+        self.assertIn("  $ ", joined)
+        self.assertIn("(finished in", joined)
+        # A fast command must NOT ooze heartbeat noise.
+        self.assertNotIn("... running ", joined)
+
+    def test_run_heartbeat_reports_silence(self):
+        """A silent-but-working step prints elapsed ticks instead of dead air."""
+        from deploy import installer
+
+        child = "import time; time.sleep(0.6)"
+        buf = []
+        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.05), \
+                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+            ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
+        joined = "\n".join(buf)
+        ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
+        self.assertTrue(ok)
+        self.assertGreaterEqual(len(ticks), 2)
+        self.assertIn("(finished in", joined)
+
+    def test_run_timeout_kills_process_and_reports(self):
+        """Stuck children are killed at budget; the failure says why."""
+        from deploy import installer
+
+        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.2), \
+                mock.patch.object(installer.ui, "error") as err:
+            ok = installer._run(
+                [sys.executable, "-c", "import time; time.sleep(30)"], check=False, timeout=1
+            )
+        self.assertFalse(ok)
+        self.assertTrue(err.called)
+        err_text = " ".join(str(c) for c in err.call_args.args)
+        self.assertIn("timed out after 1s", err_text)
+
+    def test_run_file_not_found_contract(self):
+        """A missing binary stays a clean False with an explanation."""
+        from deploy import installer
+
+        with mock.patch.object(installer.ui, "error") as err:
+            ok = installer._run(["definitely_not_a_real_cmd_XYZ"], check=True)
+        self.assertFalse(ok)
+        err_text = " ".join(str(c) for c in err.call_args.args)
+        self.assertIn("Command not found", err_text)
+
+    def test_install_loops_announce_with_steps_not_spinner(self):
+        """Install loops stream output; no spinner may redraw over it."""
+        import inspect
+
+        from deploy import installer
+
+        src = inspect.getsource(installer.install_deps)
+        self.assertIn('ui.step(f"Installing {name}...")', src)
+        self.assertIn('ui.step(f"Installing {name} (optional)...")', src)
+        self.assertNotIn("ui.spinner", src)
+
+    def test_mpv_flow_breadcrumbs_exist(self):
+        """Every mpv stage prints what it is doing before doing it."""
+        import inspect
+
+        from deploy import installer
+
+        src = inspect.getsource(installer._install_mpv_latest)
+        for marker in (
+            "Registering ppa:ubuntuhandbook1/mpv",
+            "HTTPS/IPv4-only path",
+            "Refreshing apt cache",
+            "Installing mpv from the PPA",
+        ):
+            self.assertIn(marker, src)
+        direct = inspect.getsource(installer._direct_ppa_register)
+        self.assertIn("signing-key fingerprint", direct)
+        self.assertIn("signing key", direct)
 
     def test_mpv_repo_source_parses_pacman_output(self):
         """pacman -Qi 'Repository:' is extracted; missing pacman yields ''."""
