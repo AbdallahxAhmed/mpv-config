@@ -998,6 +998,22 @@ class TestAuditPatches(unittest.TestCase):
         self.assertGreaterEqual(len(ticks), 2)
         self.assertIn("(finished in", joined)
 
+    def test_run_heartbeat_respects_interval_spacing(self):
+        """Heartbeats fire per interval, NOT per poll slice (no 5x/second spam)."""
+        from deploy import installer
+
+        child = "import time; time.sleep(0.6)"
+        buf = []
+        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.5), \
+                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+            ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
+        joined = "\n".join(buf)
+        ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
+        self.assertTrue(ok)
+        # Poll slices fire at 0.2s granularity: beats can only appear once the
+        # FULL 0.5s interval has elapsed — one at ~0.6s, nothing before.
+        self.assertEqual(len(ticks), 1)
+
     def test_run_timeout_kills_process_and_reports(self):
         """Stuck children are killed at budget; the failure says why."""
         from deploy import installer
@@ -1050,6 +1066,18 @@ class TestAuditPatches(unittest.TestCase):
         direct = inspect.getsource(installer._direct_ppa_register)
         self.assertIn("signing-key fingerprint", direct)
         self.assertIn("signing key", direct)
+
+    def test_install_deps_warms_up_sudo_before_installs(self):
+        """One password prompt up-front; package steps never stop mid-flow."""
+        import inspect
+
+        from deploy import installer
+
+        src = inspect.getsource(installer.install_deps)
+        self.assertIn("Preauthenticating sudo", src)
+        warm_up_at = src.index('["sudo", "-v"]')
+        loop_at = src.index("for name in to_install:")
+        self.assertLess(warm_up_at, loop_at)
 
     def test_mpv_repo_source_parses_pacman_output(self):
         """pacman -Qi 'Repository:' is extracted; missing pacman yields ''."""

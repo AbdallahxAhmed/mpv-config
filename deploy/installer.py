@@ -94,17 +94,24 @@ def _run(cmd, check=True, env=None, timeout=300):
 
     deadline = None if timeout is None else start + timeout
     got_eof = False
+    last_beat = start
 
     try:
         while not got_eof and proc.poll() is None:
             try:
                 item = lines.get(timeout=_POLL_SLICE)
             except queue.Empty:
-                elapsed = int(time.monotonic() - start)
-                print(
-                    f"      ... running {elapsed}s / limit {timeout}s",
-                    flush=True,
-                )
+                now = time.monotonic()
+                elapsed = int(now - start)
+                # ONE line per _HEARTBEAT_INTERVAL — the poll slice fires
+                # 5x/s, and a heartbeat on every slice drowned the sudo
+                # password prompt before it could be answered.
+                if now - last_beat >= _HEARTBEAT_INTERVAL:
+                    print(
+                        f"      ... running {elapsed}s / limit {timeout}s",
+                        flush=True,
+                    )
+                    last_beat = now
                 if timeout is not None and elapsed >= timeout:
                     proc.kill()
                     proc.wait()
@@ -1354,6 +1361,16 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     Returns list of result dicts.
     """
     ui.header("Installing System Dependencies")
+
+    # sudo credential warm-up: one password prompt UP-FRONT so none of the
+    # package-manager steps below stop mid-flow waiting for a password.
+    # (Runner:-loop heartbeats flooding right after a sudo prompt previously
+    # made this moment indistinguishable from a hang and got the run
+    # interrupted.) sudo caches credentials for ~15 minutes, covering the
+    # volume of the whole install phase.
+    if env.os == "linux" and not dry_run:
+        ui.info("Preauthenticating sudo — type your password if prompted (once for all install steps)...")
+        _run(["sudo", "-v"], check=False, timeout=120)
 
     # Determine what's needed
     # Core deps always, optional deps we just warn about
