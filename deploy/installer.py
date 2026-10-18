@@ -145,9 +145,19 @@ def _run(cmd, check=True, env=None, timeout=300):
         ui.warn(f"Interrupted: {' '.join(cmd)}")
         raise
 
+    # Reap the child BEFORE reading its exit code — proc.returncode stays
+    # None until wait() lands, and None != 0 would read success as failure.
+    rc = proc.wait()
+
     elapsed = int(time.monotonic() - start)
     print(f"      (finished in {elapsed}s)", flush=True)
-    if proc.returncode != 0 and check:
+    # Success = child's own exit code, in BOTH check modes. The pre-streaming
+    # runner behaved this way (check=False + returncode → bool) and callers
+    # build fallback logic on it: the add-apt-repository attempt must read as
+    # FAILED when Mint's fork rejects our options, or the HTTPS/IPv4 fallback
+    # never fires and the PPA silently never registers. `check` only ever
+    # meant "suppress the raise", not "lie about the result".
+    if rc != 0:
         return False
     return True
 

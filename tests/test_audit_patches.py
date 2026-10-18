@@ -966,6 +966,24 @@ class TestAuditPatches(unittest.TestCase):
         self.assertTrue(any("software-properties-common" in c for c in joined))
         self.assertFalse(any("add-apt-repository" in c and "-y -n" not in c for c in joined))
 
+    def test_run_check_false_yields_child_exit_code(self):
+        """(regression) check=False must not lie about a child's failure.
+
+        The streaming rewrite returned True for every check=False call,
+        which made a failed `add-apt-repository -n` (Mint's fork has no
+        such option) read as SUCCESS — the HTTPS/IPv4 fallback never ran
+        and the PPA silently stayed unregistered on the friend's machine.
+        """
+        from deploy import installer
+
+        ok = installer._run(
+            [sys.executable, "-c", "import sys; sys.exit(3)"], check=False, timeout=60
+        )
+        self.assertFalse(ok)
+
+        ok = installer._run([sys.executable, "-c", "pass"], check=False, timeout=60)
+        self.assertTrue(ok)
+
     def test_run_streams_output_echo_and_finish_line(self):
         """Long commands echo, stream raw child output, and close cleanly."""
         from deploy import installer
