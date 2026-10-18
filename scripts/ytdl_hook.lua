@@ -153,7 +153,17 @@ local function exec(args)
     -- surface the raw error string for diagnosis.
     if not result then
         if err and err ~= "" then
-            msg.error("subprocess command failed: " .. err)
+            -- Dump the exact argument list with Lua types: "invalid
+            -- parameter" means one item in args is not a string; this
+            -- names the item and its type/value verbatim.
+            local dump = {}
+            for i, v in ipairs(args) do
+                dump[#dump + 1] = i .. "=[" .. type(v) .. "]"
+                        .. (type(v) == "string" and v:sub(1, 60) or tostring(v))
+            end
+            msg.error("subprocess command failed: " .. err
+                      .. " (args: " .. table.concat(dump, " | ") .. ")")
+        end
         end
         return {status = -1, error_string = tostring(err or "init"), stdout = "", stderr = ""}
     end
