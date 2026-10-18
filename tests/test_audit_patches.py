@@ -734,16 +734,20 @@ class TestAuditPatches(unittest.TestCase):
         update_calls = [c for c in commands if c[:2] == ("sudo", "apt-get") and "update" in c]
         self.assertEqual(len(update_calls), 1)
         self.assertIn("Acquire::Retries=3", update_calls[0])
+        self.assertIn("Acquire::ForceIPv4=true", update_calls[0])
         install_calls = [c for c in commands if c[:2] == ("sudo", "apt-get") and "install" in c]
         self.assertEqual(len(install_calls), 1)
         self.assertIn("mpv", install_calls[0])
         self.assertIn("Acquire::Retries=3", install_calls[0])
-        # Package-manager steps never run under the default 300 s budget.
+        self.assertIn("Acquire::ForceIPv4=true", install_calls[0])
+        # The registration attempt is deliberately SHORT: healthy machines
+        # register in seconds and wedging attempts must fail fast into the
+        # HTTPS-only fallback instead of burning the half-hour budget.
         for cmd, timeout in calls:
-            for marker in ("apt-get", "add-apt-repository", "apt"):
-                if marker in cmd:
-                    self.assertEqual(timeout, installer.PKG_TIMEOUT)
-                    break
+            if "add-apt-repository" in cmd:
+                self.assertEqual(timeout, 300)
+            elif any(marker in cmd for marker in ("apt-get", "apt")):
+                self.assertEqual(timeout, installer.PKG_TIMEOUT)
 
     def test_install_mpv_latest_reports_below_minimum_as_failed(self):
         """Distro-0.37 'success' must not masquerade as a completed upgrade."""
@@ -776,6 +780,190 @@ class TestAuditPatches(unittest.TestCase):
         self.assertFalse(ok)
         self.assertTrue(warn.called)
         self.assertTrue(error.called)
+
+    def test_ubuntu_series_prefers_debian_family_codename(self):
+        """Mint renames VERSION_CODENAME; the PPA URL needs the Ubuntu base series."""
+        from deploy import installer
+
+        mint = 'ID=linuxmint\nVERSION_CODENAME="xia"\nUBUNTU_CODENAME=noble\n'
+        with mock.patch("builtins.open", mock.mock_open(read_data=mint)):
+            self.assertEqual(installer._ubuntu_series(), "noble")
+
+        plain = "ID=ubuntu\nVERSION_CODENAME=noble\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=plain)):
+            self.assertEqual(installer._ubuntu_series(), "noble")
+
+        with mock.patch("builtins.open", side_effect=OSError("no os-release")):
+            self.assertEqual(installer._ubuntu_series(), "")
+
+    def test_direct_ppa_registers_via_https_only(self):
+        """Direct registration touches ONLY curl -4 HTTPS + gpg + a sources file."""
+        from deploy import installer
+
+        run_calls = []
+        net_calls = []
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            run_calls.append(tuple(cmd))
+            return True
+
+        def fake_capture(cmd, timeout=60):
+            net_calls.append(tuple(cmd))
+            joined = " ".join(cmd)
+            if "api.launchpad.net" in joined:
+                return True, '{"signing_key_fingerprint": "5E52F0DFE436AFEC51F07B8D3ABE0C0EB9EC1B6C"}'
+            if "keyserver.ubuntu.com/pks" in joined and "op=get" in joined:
+                return True, (
+                    "-----BEGIN PGP PUBLIC KEY BLOCK-----\narmor\n"
+                    "-----END PGP PUBLIC KEY BLOCK-----\n"
+                )
+            return False, ""
+
+        with mock.patch.object(installer, "_capture", side_effect=fake_capture), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
+                mock.patch.object(installer.ui, "step"), \
+                mock.patch.object(installer.ui, "success"):
+            self.assertTrue(installer._direct_ppa_register())
+
+        # Every network fetch is IPv4-forced curl over 443 — no HKP, no tool,
+        # and the keyserver search used the fingerprint the API returned.
+        self.assertEqual(
+            [c[:4] for c in net_calls],
+            [("curl", "-m", "30", "-4"), ("curl", "-m", "30", "-4")],
+        )
+        self.assertIn(
+            "op=get&search=0x5E52F0DFE436AFEC51F07B8D3ABE0C0EB9EC1B6C",
+            " ".join(net_calls[1]),
+        )
+        none_network = run_calls + net_calls
+        self.assertFalse(
+            any("add-apt-repository" in " ".join(c) for c in none_network)
+        )
+        dearmor = [c for c in run_calls if "--dearmor" in c]
+        self.assertEqual(len(dearmor), 1)
+        self.assertIn(
+            "/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", dearmor[0]
+        )
+        joined = [" ".join(c) for c in run_calls]
+        sources = [c for c in joined if "sources.list.d" in c]
+        self.assertEqual(len(sources), 1)
+        self.assertIn("/etc/apt/sources.list.d/ubuntuhandbook1-ubuntu-mpv-noble.list", sources[0])
+        self.assertIn("signed-by=/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", sources[0])
+        self.assertIn("noble main", sources[0])
+
+    def test_direct_ppa_register_failure_contract(self):
+        """Unparseable/missing metadata fails closed with an explanation."""
+        from deploy import installer
+
+        with mock.patch.object(installer, "_ubuntu_series", return_value=""), \
+                mock.patch.object(installer.ui, "warn") as warn:
+            self.assertFalse(installer._direct_ppa_register())
+        self.assertTrue(warn.called)
+
+        with mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
+                mock.patch.object(installer, "_capture", return_value=(True, "{}")), \
+                mock.patch.object(installer.ui, "warn") as warn, \
+                mock.patch.object(installer.ui, "step"):
+            self.assertFalse(installer._direct_ppa_register())
+        self.assertTrue(warn.called)
+
+        with mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
+                mock.patch.object(
+                    installer, "_capture", side_effect=[(False, ""), (False, "")]
+                ), \
+                mock.patch.object(installer.ui, "warn") as warn, \
+                mock.patch.object(installer.ui, "step"):
+            self.assertFalse(installer._direct_ppa_register())
+        self.assertEqual(warn.call_count, 1)
+
+    def test_install_mpv_latest_falls_back_to_direct_https(self):
+        """A broken add-apt-repository must never block the PPA — direct wins."""
+        from deploy import installer
+
+        calls = []
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            calls.append(tuple(cmd))
+            if "add-apt-repository" in cmd:
+                return False  # the tool path is wedged/failed on this box
+            return True
+
+        env = Environment(os="linux", distro="ubuntu")
+        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "_direct_ppa_register", return_value=True), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
+                mock.patch.object(installer.ui, "step"):
+            self.assertTrue(installer._install_mpv_latest(env))
+
+        commands = [list(c) for c in calls]
+        # One short tool attempt, one successful direct registration,
+        # then the usual single refresh + install.
+        self.assertEqual(len([c for c in commands if "add-apt-repository" in c]), 1)
+        update_calls = [c for c in commands if c[:2] == ["sudo", "apt-get"] and "update" in c]
+        self.assertEqual(len(update_calls), 1)
+        install_calls = [c for c in commands if c[:2] == ["sudo", "apt-get"] and "install" in c]
+        self.assertEqual(len(install_calls), 1)
+        self.assertIn("mpv", install_calls[0])
+
+    def test_install_mpv_latest_minimal_install_skips_tool_bootstrap(self):
+        """No add-apt-repository at all → direct HTTPS first, no big bootstrap."""
+        from deploy import installer
+
+        calls = []
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            calls.append(tuple(cmd))
+            return True
+
+        env = Environment(os="linux", distro="ubuntu")
+        with mock.patch.object(installer.shutil, "which", return_value=None), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "_direct_ppa_register", return_value=True), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
+                mock.patch.object(installer.ui, "step"), \
+                mock.patch.object(installer.ui, "success"):
+            self.assertTrue(installer._install_mpv_latest(env))
+
+        joined = [" ".join(c) for c in calls]
+        self.assertFalse(any("add-apt-repository" in c for c in joined))
+        self.assertFalse(any("software-properties-common" in c for c in joined))
+        self.assertTrue(any("apt-get" in c and "update" in c for c in joined))
+        self.assertTrue(any("apt-get" in c and "install" in c and " mpv" in c for c in joined))
+
+    def test_install_mpv_latest_direct_failure_uses_tool_last_resort(self):
+        """If direct registration fails, bootstrap the standard tool and retry."""
+        from deploy import installer
+
+        calls = []
+        add_attempts = []
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            calls.append(tuple(cmd))
+            if "add-apt-repository" in cmd:
+                add_attempts.append(tuple(cmd))
+                return True  # the freshly bootstrapped tool works
+            return True
+
+        env = Environment(os="linux", distro="ubuntu")
+        with mock.patch.object(
+                installer.shutil, "which",
+                side_effect=[None, None, "/usr/bin/add-apt-repository"]), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "_direct_ppa_register", return_value=False), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
+                mock.patch.object(installer.ui, "step"), \
+                mock.patch.object(installer.ui, "warn"):
+            self.assertTrue(installer._install_mpv_latest(env))
+
+        joined = [" ".join(c) for c in calls]
+        self.assertEqual(len(add_attempts), 1)
+        self.assertTrue(any("software-properties-common" in c for c in joined))
+        self.assertFalse(any("add-apt-repository" in c and "-y -n" not in c for c in joined))
 
     def test_mpv_repo_source_parses_pacman_output(self):
         """pacman -Qi 'Repository:' is extracted; missing pacman yields ''."""

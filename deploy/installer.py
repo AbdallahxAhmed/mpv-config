@@ -9,6 +9,7 @@ detected environment.
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,21 @@ from deploy.registry import MPV_MINIMUM_VERSION, SYSTEM_DEPS
 # (report: mpv PPA setup "times out and eventually not installed"). Package
 # installs/updates/PPA setup get a 30-minute budget instead.
 PKG_TIMEOUT = 1800  # seconds
+
+# Apt transport options applied to EVERY apt call in this module:
+# - ForceIPv4: some struggling-Mint-class networks resolve Launchpad to AAAA
+#   records whose route black-holes (curl -4 succeeded, everything else
+#   hung for minutes). Forcing IPv4 makes apt match the proven-working
+#   transport; on healthy networks it is harmless.
+# - Retries=3: flaky/constrained networks still converge without human
+#   babysitting.
+_APT_OPTIONS = ("-o", "Acquire::ForceIPv4=true", "-o", "Acquire::Retries=3")
+
+# The PPA used to bring the latest stable mpv to Ubuntu/Mint (installer
+# branch in the registry). Direct HTTPS registration below reads its
+# signing key via Launchpad's public API, so it stays in one place.
+PPA_OWNER = "ubuntuhandbook1"
+PPA_ARCHIVE = "mpv"
 
 
 def _run(cmd, check=True, env=None, timeout=300):
@@ -61,7 +77,8 @@ def _ensure_pipx(env):
     if env.os == "linux":
         if env.distro in ("ubuntu", "debian", "mint", "pop"):
             return _run(
-                ["sudo", "apt", "install", "-y", "pipx"], timeout=PKG_TIMEOUT
+                ["sudo", "apt", "install", "-y", *_APT_OPTIONS, "pipx"],
+                timeout=PKG_TIMEOUT,
             )
         elif env.distro == "fedora":
             return _run(
@@ -635,6 +652,128 @@ def _mpv_install_gate(installed_ok):
     return True
 
 
+def _capture(cmd, timeout=60):
+    """Run a command capturing output; returns (ok, stdout_text)."""
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    return proc.returncode == 0, (proc.stdout or "")
+
+
+def _ubuntu_series():
+    """Ubuntu base-series codename ('noble', 'jammy', …) from /etc/os-release.
+
+    Mint/Pop rename VERSION_CODENAME after themselves ('wilma', …), so the
+    Debian-family UBUNTU_CODENAME key is preferred — it is what the PPA's
+    dists/ layout actually uses.
+    """
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as fh:
+            content = fh.read()
+    except OSError:
+        return ""
+    for key in ("UBUNTU_CODENAME", "VERSION_CODENAME"):
+        match = re.search(rf'^{key}="?([^"\n]+)"?\s*$', content, re.MULTILINE)
+        if match:
+            return match.group(1).strip().lower()
+    return ""
+
+
+def _direct_ppa_register():
+    """Register ppa:ubuntuhandbook1/mpv using ONLY plain HTTPS over IPv4.
+
+    WHY it exists: the struggling Mint machine proved https://
+    ppa.launchpadcontent.net answers 200 over IPv4 while every dependent
+    step of add-apt-repository can still hang — minimal installs lack the
+    tool entirely, and its Python-side negotiation (Launchpad API + HKP
+    keyserver) is exactly what IPv6-blackholed networks stall for minutes
+    on. This rebuilds the same result with the proven transport:
+
+      1. curl -4 → Launchpad API for the PPA's signing key fingerprint.
+      2. curl -4 → keyserver HTTPS armor for that fingerprint.
+      3. gpg --dearmor into /usr/share/keyrings (signed-by keyring).
+      4. Write the signed-by sources file for the detected series.
+    """
+    series = _ubuntu_series()
+    if not series:
+        ui.warn("No Ubuntu series codename in /etc/os-release — direct PPA registration unavailable.")
+        return False
+    ui.step(f"Registering PPA directly for series {series} (HTTPS/IPv4-only path)...")
+    ok, body = _capture(
+        [
+            "curl",
+            "-m",
+            "30",
+            "-4",
+            "-fsSL",
+            f"https://api.launchpad.net/1.0/~{PPA_OWNER}/+archive/ubuntu/{PPA_ARCHIVE}",
+        ]
+    )
+    if not ok:
+        ui.warn("Launchpad API unreachable even over IPv4 — direct registration failed.")
+        return False
+    fp_match = re.search(r'"signing_key_fingerprint":\s*"([0-9a-fA-F]{40})"', body)
+    if not fp_match:
+        ui.warn("PPA metadata is missing its signing key fingerprint — direct registration failed.")
+        return False
+    fingerprint = fp_match.group(1)
+    ok, armor = _capture(
+        [
+            "curl",
+            "-m",
+            "30",
+            "-4",
+            "-fsSL",
+            f"https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x{fingerprint}",
+        ]
+    )
+    if not ok or "BEGIN PGP PUBLIC KEY BLOCK" not in armor:
+        ui.warn("Signing key not obtainable over the HTTPS keyserver — direct registration failed.")
+        return False
+    keyring = f"/usr/share/keyrings/{PPA_OWNER}-{PPA_ARCHIVE}-archive-keyring.gpg"
+    armor_path = ""
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".asc", delete=False) as fh:
+            fh.write(armor)
+            armor_path = fh.name
+        if not _run(
+            ["sudo", "gpg", "--batch", "--yes", "--dearmor", "--output", keyring, armor_path],
+            check=False,
+        ):
+            ui.warn("Could not write the PPA keyring — direct registration failed.")
+            return False
+    finally:
+        if armor_path and os.path.isfile(armor_path):
+            try:
+                os.unlink(armor_path)
+            except OSError:
+                pass
+    sources_path = f"/etc/apt/sources.list.d/{PPA_OWNER}-ubuntu-{PPA_ARCHIVE}-{series}.list"
+    sources_line = (
+        f"deb [signed-by={keyring}] "
+        f"https://ppa.launchpadcontent.net/{PPA_OWNER}/{PPA_ARCHIVE}/ubuntu {series} main\n"
+    )
+    if not _run(
+        [
+            "/bin/sh",
+            "-c",
+            f"printf '%s' {shlex.quote(sources_line)} | sudo tee {shlex.quote(sources_path)} >/dev/null",
+        ],
+        check=False,
+    ):
+        ui.warn("Could not write the PPA sources file — direct registration failed.")
+        return False
+    ui.success(f"PPA registered directly → {sources_path}")
+    return True
+
+
 def _install_mpv_latest(env):
     """Install or upgrade mpv to the latest stable release (classic .deb).
 
@@ -645,31 +784,51 @@ def _install_mpv_latest(env):
     series, so the PPA works there too).  Debian has no matching PPA series
     and stays on its own apt build.
 
-    Why not let add-apt-repository refresh the cache itself: its built-in
-    `apt update` refreshes EVERY configured apt source (was the step that
-    timed out past 300 s on the friend's machine), so we add the PPA with
-    -n/--no-update and run exactly ONE update ourselves, with the long
-    PKG_TIMEOUT budget and on-the-wire retries for flaky networks.
+    Registration order (struggling-Mint diagnostics drove this):
+      1. add-apt-repository with a SHORT budget — healthy machines register
+         in seconds; a wedging attempt (IPv6-blackhole / minimal install)
+         must fail fast, not burn the half-hour budget.
+      2. _direct_ppa_register — HTTPS/IPv4-only rebuild of the same result,
+         needing neither the tool nor its Python-side negotiation.
+      3. Installing software-properties-common + one more tool attempt —
+         only when both of the above failed.
+    The cache refresh that follows is exactly ONE apt-get update (add-apt-
+    repository's own refresh would re-update every configured source and
+    was the step that timed out past 300 s originally).
     """
     if env.os == "linux" and _os_release_id() not in ("ubuntu", "linuxmint", "pop", ""):
         # Debian & derivatives: ubuntuhandbook1's PPA has no matching
         # series there — stay on the distro's own mpv build.
         installed = _run(
-            ["sudo", "apt", "install", "-y", "mpv"], check=False, timeout=PKG_TIMEOUT
-        )
-        return _mpv_install_gate(installed)
-    if not shutil.which("add-apt-repository"):
-        _run(
-            ["sudo", "apt-get", "install", "-y", "software-properties-common"],
+            ["sudo", "apt", "install", "-y", *_APT_OPTIONS, "mpv"],
             check=False,
             timeout=PKG_TIMEOUT,
         )
-    added = _run(
+        return _mpv_install_gate(installed)
+
+    added = False
+    if shutil.which("add-apt-repository"):
         # -n: register the source only; the cache refresh below is ours.
-        ["sudo", "add-apt-repository", "-y", "-n", "ppa:ubuntuhandbook1/mpv"],
-        check=False,
-        timeout=PKG_TIMEOUT,
-    )
+        added = _run(
+            ["sudo", "add-apt-repository", "-y", "-n", f"ppa:{PPA_OWNER}/{PPA_ARCHIVE}"],
+            check=False,
+            timeout=300,
+        )
+    if not added:
+        added = _direct_ppa_register()
+    if not added and not shutil.which("add-apt-repository"):
+        # Last resort: bootstrap the standard tool and let it try once.
+        _run(
+            ["sudo", "apt-get", "install", "-y", *_APT_OPTIONS, "software-properties-common"],
+            check=False,
+            timeout=PKG_TIMEOUT,
+        )
+        if shutil.which("add-apt-repository"):
+            added = _run(
+                ["sudo", "add-apt-repository", "-y", "-n", f"ppa:{PPA_OWNER}/{PPA_ARCHIVE}"],
+                check=False,
+                timeout=300,
+            )
     if not added:
         ui.warn(
             "Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build."
@@ -678,12 +837,12 @@ def _install_mpv_latest(env):
         "Refreshing apt cache (single pass; can take a few minutes on slow networks)..."
     )
     _run(
-        ["sudo", "apt-get", "update", "-o", "Acquire::Retries=3"],
+        ["sudo", "apt-get", "update", *_APT_OPTIONS],
         check=False,
         timeout=PKG_TIMEOUT,
     )
     installed = _run(
-        ["sudo", "apt-get", "install", "-y", "-o", "Acquire::Retries=3", "mpv"],
+        ["sudo", "apt-get", "install", "-y", *_APT_OPTIONS, "mpv"],
         timeout=PKG_TIMEOUT,
     )
     return _mpv_install_gate(installed)
@@ -705,7 +864,9 @@ def _install_uv(name, info, env):
             ):
                 return True
         elif env.distro in ("ubuntu", "debian", "mint", "pop"):
-            if _run(["sudo", "apt", "install", "-y", "uv"], timeout=PKG_TIMEOUT):
+            if _run(
+                ["sudo", "apt", "install", "-y", *_APT_OPTIONS, "uv"], timeout=PKG_TIMEOUT
+            ):
                 return True
         elif env.distro == "fedora":
             if _run(["sudo", "dnf", "install", "-y", "uv"], timeout=PKG_TIMEOUT):
@@ -863,7 +1024,10 @@ def _install_one(name, dep_info, env, mpv_version=None):
         )
 
     elif method == "apt":
-        return _run(["sudo", "apt", "install", "-y", info["pkg"]], timeout=PKG_TIMEOUT)
+        return _run(
+            ["sudo", "apt", "install", "-y", *_APT_OPTIONS, info["pkg"]],
+            timeout=PKG_TIMEOUT,
+        )
 
     elif method == "ppa":
         # Ubuntu/Mint apt repos ship ancient mpv (Noble: 0.37) that fails on
