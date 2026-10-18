@@ -984,22 +984,69 @@ class TestAuditPatches(unittest.TestCase):
         ok = installer._run([sys.executable, "-c", "pass"], check=False, timeout=60)
         self.assertTrue(ok)
 
-    def test_run_streams_output_echo_and_finish_line(self):
-        """Long commands echo, stream raw child output, and close cleanly."""
+    def test_run_quiet_mode_echoes_command_but_captures_output(self):
+        """Quiet mode: the command echoes once; output lines do not flood."""
         from deploy import installer
 
-        child = "print('streamed-line-1'); print('streamed-line-2')"
+        buf = []
+        with tempfile.TemporaryDirectory() as td:
+            payload = os.path.join(td, "payload.txt")
+            with open(payload, "w", encoding="utf-8") as fh:
+                fh.write("streamed-line-1\nstreamed-line-2\n")
+            child = f"import sys\n[print(l) for l in open({payload!r})]"
+            with mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+                ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
+        joined = "\n".join(buf)
+        self.assertTrue(ok)
+        self.assertIn("  $ ", joined)
+        # Captured, not printed: the feed stays readable even when the child
+        # (apt/pacman) produces walls of text.
+        self.assertNotIn("streamed-line-1", joined)
+        self.assertNotIn("streamed-line-2", joined)
+        # A fast command must NOT ooze heartbeat noise, and the old
+        # per-command "(finished in …)" trailer is gone from quiet mode.
+        self.assertNotIn("... running ", joined)
+        self.assertNotIn("(finished in", joined)
+
+    def test_run_failure_shows_short_tail_only(self):
+        """A failed command reveals a bounded tail — diagnosis without a flood."""
+        from deploy import installer
+
+        child = (
+            "for i in range(10): print(f'noise-{i}')\n"
+            "print('important-1')\n"
+            "print('important-2')\n"
+            "print('important-3')\n"
+            "import sys; sys.exit(3)"
+        )
         buf = []
         with mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
+        self.assertFalse(ok)
+        # 16 lines captured, only the last _TAIL_SHOW surface (bounded).
+        self.assertIn("⌄ last 6 of 13 output lines:", joined)
+        self.assertIn("│ important-3", joined)
+        self.assertIn("│ important-1", joined)
+        self.assertNotIn("noise-0", joined)
+
+    def test_run_verbose_streams_everything(self):
+        """MPV_VERBOSE=1 restores full live streaming (diagnosis mode)."""
+        from deploy import installer
+
+        child = "print('streamed-line-1'); print('streamed-line-2')"
+        buf = []
+        with mock.patch.dict(os.environ, {"MPV_VERBOSE": "1"}), \
+                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+            ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
+        joined = "\n".join(buf)
         self.assertTrue(ok)
-        self.assertIn("streamed-line-1", joined)
-        self.assertIn("streamed-line-2", joined)
+        # The lines stream as they appear (twice: echo + live lines are hard
+        # to distinguish in a join, so assert the per-line prefix exists).
+        streamed = [l for l in joined.splitlines() if l.startswith("      streamed-line-")]
+        self.assertEqual(len(streamed), 2)
         self.assertIn("  $ ", joined)
         self.assertIn("(finished in", joined)
-        # A fast command must NOT ooze heartbeat noise.
-        self.assertNotIn("... running ", joined)
 
     def test_run_heartbeat_reports_silence(self):
         """A silent-but-working step prints elapsed ticks instead of dead air."""
@@ -1014,7 +1061,6 @@ class TestAuditPatches(unittest.TestCase):
         ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
         self.assertTrue(ok)
         self.assertGreaterEqual(len(ticks), 2)
-        self.assertIn("(finished in", joined)
 
     def test_run_heartbeat_respects_interval_spacing(self):
         """Heartbeats fire per interval, NOT per poll slice (no 5x/second spam)."""

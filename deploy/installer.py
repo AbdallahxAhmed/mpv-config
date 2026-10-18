@@ -6,6 +6,7 @@ and github_asset (direct GitHub release downloads) based on the
 detected environment.
 """
 
+import collections
 import json
 import os
 import queue
@@ -49,6 +50,24 @@ _HEARTBEAT_INTERVAL = 15
 # after EOF (proc.poll() can lag process exit, so EOF is trusted instead).
 _POLL_SLICE = 0.2
 
+# Quiet-by-default output discipline for _run (professional feed):
+# - command echoes once, compact and truncated;
+# - child output is CAPTURED — package managers ship walls of text
+#   (apt fetch lines, pacman -Syu unpack logs) that drown the narrative;
+# - silence still ticks a heartbeat so "working" and "hung" differ;
+# - failure prints ONLY a short tail of recent output (bounded).
+# MPV_VERBOSE=1 restores full live streaming for interactive diagnosis.
+_VERBOSE_ON = ("1", "true", "yes")
+_TAIL_KEEP = 40        # recent lines retained in memory for diagnostics
+_TAIL_SHOW = 6         # lines shown after a failed command
+_CMD_ECHO_LIMIT = 120  # command echo truncation width
+
+# Output that matters for interaction (password prompts, confirm prompts)
+# is forwarded immediately even in quiet mode — never swallowed.
+_PROMPT_RE = re.compile(
+    r"\[sudo\]\s*password|\[[ynYN]/[npNP]\]|Overwrite\?|\(y/n\)"
+)
+
 # The PPA used to bring the latest stable mpv to Ubuntu/Mint (installer
 # branch in the registry). Direct HTTPS registration below reads its
 # signing key via Launchpad's public API, so it stays in one place.
@@ -56,19 +75,51 @@ PPA_OWNER = "ubuntuhandbook1"
 PPA_ARCHIVE = "mpv"
 
 
-def _run(cmd, check=True, env=None, timeout=300):
-    """Run a command showing live output; returns success bool.
+def _verbose():
+    """MPV_VERBOSE=1 switches _run to full live streaming (diagnosis mode)."""
+    return os.environ.get("MPV_VERBOSE", "").strip().lower() in _VERBOSE_ON
 
-    WHY streamed with a heartbeat: package managers can go silent for
-    minutes (apt between mirror fetches, curl over a stalled route) and
-    the old fire-and-forget runner showed only a spinner — the user saw a
-    frozen "Installing mpv…" with zero signal of whether anything moved.
-    The command's own lines stream through as they appear; during silence
-    a heartbeat line ticks with elapsed time and the current timeout
-    budget, so "working" and "hung" are never indistinguishable.
+
+def _echo_command(cmd):
+    """Print the command once, compact and truncated to a tidy line."""
+    text = shlex.join(cmd)
+    if len(text) > _CMD_ECHO_LIMIT:
+        text = text[: _CMD_ECHO_LIMIT - 1].rstrip() + "…"
+    print(f"  $ {text}", flush=True)
+
+
+def _show_captures(tail, seen_lines, verbose):
+    """After a failed command, surface a short tail of its captured output."""
+    if verbose:
+        return  # everything already streamed live
+    shown = list(tail)[-_TAIL_SHOW:]
+    if not shown:
+        return
+    suppressed = seen_lines - len(shown)
+    if suppressed > 0:
+        print(
+            f"      ⌄ last {len(shown)} of {seen_lines} output lines:",
+            flush=True,
+        )
+    else:
+        print("      ⌄ output:", flush=True)
+    for line in shown:
+        print(f"      │ {line}", flush=True)
+
+
+def _run(cmd, check=True, env=None, timeout=300):
+    """Run a command with tidy, low-noise live feedback; returns success bool.
+
+    WHY still heartbeat-based: package managers can go silent for minutes
+    (apt between mirror fetches, curl over a stalled route) and the old
+    fire-and-forget runner showed only a spinner — "working" and "hung"
+    must never be indistinguishable. Quiet mode keeps that guarantee
+    without flooding the feed: the command echoes once, output is
+    captured, and failure reveals a short tail of what went wrong.
     """
+    verbose = _verbose()
     start = time.monotonic()
-    print(f"  $ {' '.join(cmd)}", flush=True)
+    _echo_command(cmd)
     try:
         proc = subprocess.Popen(
             cmd,
@@ -92,9 +143,20 @@ def _run(cmd, check=True, env=None, timeout=300):
     )
     reader.start()
 
+    tail = collections.deque(maxlen=_TAIL_KEEP)
+    seen_lines = 0
     deadline = None if timeout is None else start + timeout
     got_eof = False
     last_beat = start
+
+    def on_line(item):
+        nonlocal seen_lines
+        seen_lines += 1
+        tail.append(item)
+        # Interaction-critical prompts are always forwarded; everything
+        # else streams only in verbose mode.
+        if verbose or _PROMPT_RE.search(item):
+            print(f"      {item}", flush=True)
 
     try:
         while not got_eof and proc.poll() is None:
@@ -116,6 +178,7 @@ def _run(cmd, check=True, env=None, timeout=300):
                     proc.kill()
                     proc.wait()
                     ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+                    _show_captures(tail, seen_lines, verbose)
                     return False
                 continue
             if item is None:
@@ -124,11 +187,12 @@ def _run(cmd, check=True, env=None, timeout=300):
                 # otherwise cost one full heartbeat interval of dead waiting.
                 got_eof = True
                 break
-            print(f"      {item}", flush=True)
+            on_line(item)
             if deadline is not None and time.monotonic() >= deadline:
                 proc.kill()
                 proc.wait()
                 ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
+                _show_captures(tail, seen_lines, verbose)
                 return False
         # Drain what the child wrote after the last poll / before EOF.
         time.sleep(0.05)
@@ -138,7 +202,7 @@ def _run(cmd, check=True, env=None, timeout=300):
             except queue.Empty:
                 break
             if item is not None:
-                print(f"      {item}", flush=True)
+                on_line(item)
     except KeyboardInterrupt:
         proc.kill()
         proc.wait()
@@ -149,17 +213,19 @@ def _run(cmd, check=True, env=None, timeout=300):
     # None until wait() lands, and None != 0 would read success as failure.
     rc = proc.wait()
 
-    elapsed = int(time.monotonic() - start)
-    print(f"      (finished in {elapsed}s)", flush=True)
+    success = rc == 0
+    if not success:
+        _show_captures(tail, seen_lines, verbose)
+    if verbose:
+        elapsed = int(time.monotonic() - start)
+        print(f"      (finished in {elapsed}s, exit {rc})", flush=True)
     # Success = child's own exit code, in BOTH check modes. The pre-streaming
     # runner behaved this way (check=False + returncode → bool) and callers
     # build fallback logic on it: the add-apt-repository attempt must read as
     # FAILED when Mint's fork rejects our options, or the HTTPS/IPv4 fallback
-    # never fires and the PPA silently never registers. `check` only ever
-    # meant "suppress the raise", not "lie about the result".
-    if rc != 0:
-        return False
-    return True
+    # never fires. `check` only ever meant "suppress the raise", not
+    # "lie about the result".
+    return success
 
 
 def _pump_lines(stream, sink):
