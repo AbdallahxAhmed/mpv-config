@@ -299,8 +299,24 @@ def _patch_mpv_conf(
             audit_log.record_note(
                 "display_mode", "auto → fixed (vrr requires explicit --display-mode vrr)"
             )
+    # Safety: Intel Haswell-or-older iGPUs have incomplete Mesa Vulkan drivers
+    # that initialize fine but render video magenta ("Haswell Vulkan support
+    # is incomplete"). An api priority list cannot fix this because the
+    # broken Vulkan still initializes first — force the complete OpenGL path.
+    effective_gpu_api = defaults.get("gpu_api", "auto")
+    if getattr(env, "legacy_vulkan_gpu", False) and effective_gpu_api == "vulkan":
+        effective_gpu_api = "opengl"
+        ui.warn(
+            "Legacy Intel iGPU detected — Vulkan renders magenta there; "
+            "forcing gpu-api=opengl."
+        )
+        if audit_log:
+            audit_log.record_note(
+                "gpu_api_forced_opengl",
+                "legacy Intel iGPU detected — forced gpu-api=opengl",
+            )
     replacements = {
-        "{{GPU_API}}": defaults.get("gpu_api", "auto"),
+        "{{GPU_API}}": effective_gpu_api,
         "{{HWDEC}}": defaults.get("hwdec", "auto"),
         "{{VO}}": defaults.get("vo", "gpu-next"),
         "{{SHADER_SEP}}": shader_sep,
@@ -858,6 +874,37 @@ def deploy(
                 audit_log.record_file(
                     os.path.join(config_dir, name), "copy", "ok", "transaction committed"
                 )
+        # Repair stale options/bindings in previously deployed configs. The
+        # deployer preserves existing mpv.conf/input.conf/script-opts, so
+        # without these migrations an old broken install stays broken even
+        # after the templates are fixed.
+        migration_targets = (
+            (
+                "migrate-input-conf",
+                os.path.join(config_dir, "input.conf"),
+                lambda p: _migrate_input_conf(p, audit_log=audit_log),
+            ),
+            (
+                "migrate-mpv-conf",
+                os.path.join(config_dir, "mpv.conf"),
+                lambda p: _migrate_mpv_conf(p, env=env, audit_log=audit_log),
+            ),
+            (
+                "migrate-uosc-conf",
+                os.path.join(config_dir, "script-opts", "uosc.conf"),
+                lambda p: _migrate_uosc_conf(p, audit_log=audit_log),
+            ),
+        )
+        for migration_name, migration_path, migrate_fn in migration_targets:
+            try:
+                if migrate_fn(migration_path):
+                    results.append(
+                        {"name": migration_name, "status": "ok", "detail": "repaired stale config"}
+                    )
+            except Exception as exc:
+                results.append(
+                    {"name": migration_name, "status": "warn", "detail": str(exc)}
+                )
         # Apply uosc Timeline mouse-leave patch to ensure thumbnail cleanup on window exit
         try:
             from pathlib import Path
@@ -1045,6 +1092,39 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
                 "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist\n"
             )
 
+    # 5. Fix bindings mpv rejects on every version:
+    #    a) CTRL+0 shader clear: change-list needs the empty-string value
+    #       ('clr ""'); a bare 'clr' fails with
+    #       "change-list: required argument value not set".
+    updated_content = re.sub(
+        r"(change-list[ \t]+glsl-shaders[ \t]+)clr(?=[ \t]*;)",
+        r'\1clr ""',
+        updated_content,
+    )
+
+    #    b) Subtitle background-box toggle bound to 'لا' — two codepoints
+    #       (U+0644 U+0627). mpv cannot register multi-codepoint key names and
+    #       rejects it with "Unknown key 'لا'". Rebind to the single-codepoint
+    #       'ب' unless that key is already in use.
+    if re.search(r"^[ \t]*لا[ \t]+", updated_content, re.MULTILINE):
+        if re.search(r"^[ \t]*ب[ \t]+", updated_content, re.MULTILINE):
+            # 'ب' already bound — the 'لا' line duplicates the intent; drop it.
+            updated_content = re.sub(
+                r"^[ \t]*لا[ \t]+[^\r\n]*\r?\n?",
+                "",
+                updated_content,
+                flags=re.MULTILINE,
+            )
+        else:
+            updated_content = re.sub(
+                r"^[ \t]*لا([ \t]+)",
+                r"ب\1",
+                updated_content,
+                flags=re.MULTILINE,
+            )
+        # Keep the explanatory comment honest.
+        updated_content = updated_content.replace("— لا = b", "— ب = b")
+
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
@@ -1058,6 +1138,100 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         return True
 
     return False
+
+
+def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
+    """Repair option problems in a deployed mpv.conf (preserved by deploy()).
+
+    1. Renames --override-display-fps → --display-fps-override (mpv 0.37+);
+       the old name still parses but warns on every launch.
+    2. On legacy Intel iGPUs (Haswell or older) a template-patched
+       gpu-api=vulkan renders video magenta — swap it to opengl, matching
+       what fresh deployments compute in _patch_mpv_conf.
+    """
+    if not os.path.isfile(mpv_conf_path):
+        return False
+    with open(mpv_conf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    updated = re.sub(
+        r"^([ \t]*)override-display-fps([ \t]*=)",
+        r"\1display-fps-override\2",
+        content,
+        flags=re.MULTILINE,
+    )
+    if env is not None and getattr(env, "legacy_vulkan_gpu", False):
+        updated = re.sub(
+            r"^([ \t]*)gpu-api[ \t]*=[ \t]*vulkan\b[^\r\n]*$",
+            lambda m: m.group(1) + "gpu-api".ljust(26) + "= opengl",
+            updated,
+            flags=re.MULTILINE,
+        )
+    # Comment out options REMOVED by newer mpv (they hard-fail parsing
+    # there). Both sub-ass-vsfilter-aspect-compat and
+    # sub-ass-vsfilter-blur-compat were replaced by sub-ass-use-video-data;
+    # when the conf has neither, the canonical replacement is inserted
+    # directly above the first commented line so it lands in the same
+    # (global) options section.
+    already_has_sub_ass_use_video_data = re.search(
+        r"^[ \t]*sub-ass-use-video-data[ \t]*=", updated, re.MULTILINE
+    )
+    updated, removed_sub_ass = re.subn(
+        r"^[ \t]*sub-ass-vsfilter-(?:aspect|blur)-compat[ \t]*=[^\r\n]*$",
+        lambda m: "# removed in newer mpv — was: " + m.group(0).strip(),
+        updated,
+        flags=re.MULTILINE,
+    )
+    if removed_sub_ass and not already_has_sub_ass_use_video_data:
+        updated = re.sub(
+            r"^([ \t]*# removed in newer mpv)",
+            lambda m: "sub-ass-use-video-data = aspect-ratio\n" + m.group(1),
+            updated,
+            count=1,
+            flags=re.MULTILINE,
+        )
+    if updated == content:
+        return False
+    with open(mpv_conf_path, "w", encoding="utf-8") as f:
+        f.write(updated)
+    if audit_log:
+        audit_log.record_file(
+            mpv_conf_path,
+            "modify",
+            "ok",
+            "repaired mpv.conf options (renames / GPU-API safety)",
+        )
+    return True
+
+
+def _migrate_uosc_conf(uosc_conf_path, audit_log=None):
+    """Drop uosc.conf keys removed upstream, with a comment instead of silence.
+
+    volume_max was removed in uosc 5.13.0 — the volume widget now follows
+    mpv's `volume-max` option, so the stale key printed
+    "[uosc] unknown key 'volume_max'" on every launch.
+    """
+    if not os.path.isfile(uosc_conf_path):
+        return False
+    with open(uosc_conf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    updated, removed = re.subn(
+        r"^[ \t]*volume_max[ \t]*=[^\r\n]*\r?\n?",
+        "",
+        content,
+        flags=re.MULTILINE,
+    )
+    if not removed:
+        return False
+    with open(uosc_conf_path, "w", encoding="utf-8") as f:
+        f.write(updated)
+    if audit_log:
+        audit_log.record_file(
+            uosc_conf_path,
+            "modify",
+            "ok",
+            "removed volume_max (dropped in uosc 5.13)",
+        )
+    return True
 
 
 def _extract_overrides(content, defaults):

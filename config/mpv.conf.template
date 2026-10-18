@@ -198,7 +198,7 @@ video-timing-offset       = 0.01
 [wayland-144hz-fix]
 profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"
 profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and string.find(p["options/gpu-context"] or "", "wayland") ~= nil
-override-display-fps      = 143.981
+display-fps-override      = 143.981
 profile-restore           = copy
 
 #######################################################################################

@@ -212,7 +212,12 @@ local function closest_thumbnail(tbl, target)
     end
 end
 
-local winapi = {}
+-- Windows-only FFI helper. Stays false on Linux/macOS so every
+-- `if winapi then` guard below is a no-op on non-Windows systems.
+-- (An empty table is truthy in Lua: `winapi = {}` made check_new_thumb crash
+--  on Linux with "attempt to call field 'drain_pipe' (a nil value)", which
+--  killed the script and disabled thumbnails entirely.)
+local winapi = false
 
 
 local file

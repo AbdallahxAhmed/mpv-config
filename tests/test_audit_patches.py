@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -144,7 +145,9 @@ class TestAuditPatches(unittest.TestCase):
 
         wayland = content.split("\n[wayland-144hz-fix]\n")[1].split("\n[protocol.file]\n")[0]
         self.assertIn('(p["display-fps"] or 0) > 140', wayland)
-        self.assertIn("override-display-fps      = 143.981", wayland)
+        # --override-display-fps was renamed to --display-fps-override in
+        # mpv 0.37; the old name only emits a deprecation warning now.
+        self.assertIn("display-fps-override      = 143.981", wayland)
         self.assertIn("profile-restore           = copy", wayland)
 
     def test_input_conf_dynaudnorm_and_limiter(self):
@@ -212,6 +215,228 @@ class TestAuditPatches(unittest.TestCase):
                 new_content,
             )
             self.assertNotIn("dynaudnorm=f=250:g=31:p=0.5", new_content)
+
+    def test_migrate_input_conf_fixes_shader_clear_and_ligature_key(self):
+        """CTRL+0 'clr' and the two-codepoint 'لا' key are rejected by every mpv."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                'CTRL+0 no-osd change-list glsl-shaders clr; show-text "Shaders Cleared"\n'
+                "# Subtitle background box toggle — لا = b\n"
+                'لا       cycle-values sub-back-color "#B3080808" "#00000000"\n'
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            # change-list needs the empty-string value ('clr ""'); a bare
+            # 'clr' fails with "required argument value not set".
+            self.assertIn(
+                'change-list glsl-shaders clr ""; show-text "Shaders Cleared"',
+                new_content,
+            )
+            # 'لا' is two codepoints (U+0644 U+0627); mpv rejects
+            # multi-codepoint key names with "Unknown key 'لا'".
+            self.assertIn(
+                'ب       cycle-values sub-back-color "#B3080808" "#00000000"',
+                new_content,
+            )
+            self.assertNotIn("لا", new_content)
+
+            # Idempotent for these two fixes specifically.
+            self.assertNotIn("clr;", new_content)
+
+    def test_migrate_mpv_conf_renames_override_display_fps(self):
+        from deploy.deployer import _migrate_mpv_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            old_content = (
+                "[wayland-144hz-fix]\n"
+                'profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"\n'
+                "override-display-fps      = 143.981\n"
+                "profile-restore           = copy\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_mpv_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("display-fps-override      = 143.981", new_content)
+            self.assertNotIn("override-display-fps", new_content)
+
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+
+        # Missing file is a no-op.
+        self.assertFalse(_migrate_mpv_conf(os.path.join(tmpdir, "never-written.conf")))
+
+    def test_migrate_mpv_conf_forces_opengl_on_legacy_intel(self):
+        """Haswell-era Intel: patched gpu-api=vulkan renders magenta → opengl."""
+        from deploy.detector import Environment
+        from deploy.deployer import _migrate_mpv_conf
+
+        env = Environment(
+            os="linux", platform_key="ubuntu", gpu_vendor="intel", legacy_vulkan_gpu=True
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            old_content = (
+                "gpu-api                  = vulkan\n"
+                "vo                        = gpu-next\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_mpv_conf(conf_path, env=env)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("= opengl", new_content)
+            self.assertNotIn("vulkan", new_content)
+            self.assertIn("vo                        = gpu-next", new_content)
+
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path, env=env))
+
+        # Healthy GPUs are untouched.
+        healthy = Environment(os="linux", platform_key="arch", gpu_vendor="nvidia")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write("gpu-api                  = vulkan\n")
+            self.assertFalse(_migrate_mpv_conf(conf_path, env=healthy))
+
+    def test_patched_mpv_conf_forces_opengl_on_legacy_intel(self):
+        from deploy.detector import Environment
+        from deploy.deployer import _patch_mpv_conf
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template = os.path.join(repo_root, "config", "mpv.conf.template")
+        env = Environment(
+            os="linux", platform_key="ubuntu", gpu_vendor="intel", legacy_vulkan_gpu=True
+        )
+        defaults = {"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "", "vo": "gpu-next"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = os.path.join(tmpdir, "mpv.conf")
+            _patch_mpv_conf(template, dest, env, "linux-like", defaults)
+            with open(dest, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # "gpu-api".ljust(26) is the template's alignment for this key.
+            self.assertIn("gpu-api".ljust(26) + "= opengl", content)
+            self.assertNotIn("{{GPU_API}}", content)
+
+    def test_migrate_mpv_conf_comments_removed_sub_ass_option(self):
+        from deploy.deployer import _migrate_mpv_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            old_content = (
+                "sub-ass-vsfilter-aspect-compat = 'no'\n"
+                "sub-ass-use-video-data = aspect-ratio\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_mpv_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertEqual(
+                re.search(
+                    r"^[ \t]*sub-ass-vsfilter-aspect-compat[ \t]*=", new_content, re.MULTILINE
+                ),
+                None,
+                "active removed-option line still present",
+            )
+            self.assertIn(
+                "# removed in newer mpv — was: sub-ass-vsfilter-aspect-compat = 'no'",
+                new_content,
+            )
+            self.assertIn("sub-ass-use-video-data = aspect-ratio", new_content)
+
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+
+        # Without the replacement option present, the canonical one is
+        # inserted right above the commented-out line (global section).
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            old_content = "sub-ass-vsfilter-aspect-compat = 'no'\nosd-font = \"Segoe UI\"\n"
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            self.assertTrue(_migrate_mpv_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn(
+                "sub-ass-use-video-data = aspect-ratio\n"
+                "# removed in newer mpv — was: sub-ass-vsfilter-aspect-compat = 'no'",
+                new_content,
+            )
+            self.assertIn('osd-font = "Segoe UI"', new_content)
+
+    def test_parse_mpv_version(self):
+        """Distro and dev-build version strings both parse."""
+        from deploy.detector import _parse_mpv_version
+
+        self.assertEqual(_parse_mpv_version("mpv 0.37.0-1ubuntu4"), (0, 37, 0))
+        self.assertEqual(_parse_mpv_version("mpv v0.41.0-934-g9f9f8c4dd"), (0, 41, 0))
+        self.assertEqual(_parse_mpv_version("mpv 0.40.0"), (0, 40, 0))
+        self.assertEqual(_parse_mpv_version("mpv 0.39.0 (C) 2000-2025"), (0, 39, 0))
+        self.assertIsNone(_parse_mpv_version("no version text here"))
+
+    def test_migrate_uosc_conf_removes_volume_max(self):
+        from deploy.deployer import _migrate_uosc_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "uosc.conf")
+            old_content = (
+                "volume=right\n"
+                "volume_size=40\n"
+                "volume_border=1\n"
+                "volume_step=1\n"
+                "volume_max=200\n"
+                "volume_persistency=\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_uosc_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            # volume_max was removed in uosc 5.13 (widget follows mpv's
+            # volume-max); stale copies log "[uosc] unknown key 'volume_max'".
+            self.assertNotIn("volume_max", new_content)
+            self.assertIn("volume_step=1", new_content)
+            self.assertIn("volume_persistency=", new_content)
+
+            # Second run is a no-op.
+            self.assertFalse(_migrate_uosc_conf(conf_path))
+
+        self.assertFalse(_migrate_uosc_conf(os.path.join(tmpdir, "never-written.conf")))
 
     def test_input_conf_mouse_right_click_bindings(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

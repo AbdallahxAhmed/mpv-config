@@ -7,12 +7,13 @@ OS, distro, display server, GPU, package manager, installed tools.
 
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 from deploy import ui
 
@@ -37,7 +38,52 @@ class Environment:
     pip_cmd: str = "pip"  # "pip" | "pip3"
     has_git: bool = False
     has_avx2: bool = False  # CPU supports AVX2 (x86_64-v3)
+    # Intel Haswell-or-older iGPU present: Mesa Vulkan drivers for these
+    # are incomplete and render video magenta instead of failing.
+    legacy_vulkan_gpu: bool = False
+    # Parsed from `mpv --version`, e.g. (0, 37, 0); None when unknown.
+    mpv_version: Optional[Tuple[int, int, int]] = None
     installed: Dict[str, bool] = field(default_factory=dict)
+
+
+def _parse_mpv_version(text):
+    """Parse 'mpv 0.37.0-1ubuntu4 …' / 'mpv v0.41.0-934-g…' → (0, 37, 0)/(0, 41, 0)."""
+    m = re.search(r"mpv\s+v?(\d+)\.(\d+)(?:\.(\d+))?", text)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3) or 0))
+
+
+# lspci device-name fragments for Intel iGPUs whose Mesa Vulkan drivers are
+# incomplete/broken. They do not fail to initialize — mpv happily plays
+# through them and small/correct-rendering differences become broken color
+# output ("MESA-INTEL: warning: Haswell Vulkan support is incomplete" plus a
+# magenta frame). A gpu-api priority list cannot help because the broken
+# Vulkan still initializes first, so these must not be given Vulkan.
+LEGACY_VULKAN_INTEL_PATTERNS = (
+    "haswell",
+    "4th gen core processor integrated",
+    "xeon e3-1200 v3",  # Haswell-era Xeon iGPU
+    "ivy bridge",
+    "ivybridge",
+    "3rd gen core processor",
+    "2nd gen core processor",
+    "sandy bridge",
+)
+
+
+def _legacy_vulkan_intel_gpu():
+    """True when an Intel Haswell-or-older iGPU is present (Linux, via lspci)."""
+    if platform.system() != "Linux":
+        return False
+    try:
+        r = subprocess.run(["lspci"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if r.returncode != 0:
+        return False
+    output = (r.stdout or "").lower()
+    return any(pattern in output for pattern in LEGACY_VULKAN_INTEL_PATTERNS)
 
 
 def _run_silent(cmd):
@@ -543,6 +589,17 @@ def detect():
         # Git
         env.has_git = _which("git")
 
+        # Legacy Intel iGPU whose Vulkan drivers are incomplete (render bug, not init failure)
+        if env.os == "linux":
+            env.legacy_vulkan_gpu = _legacy_vulkan_intel_gpu()
+            if env.legacy_vulkan_gpu:
+                rows.append(
+                    [
+                        "legacy Intel Vulkan iGPU",
+                        "detected — forcing OpenGL rendering (Vulkan renders magenta on these)",
+                    ]
+                )
+
         # Config dir
         env.config_dir = _resolve_config_dir(env.os)
         rows.append(["mpv config dir", env.config_dir])
@@ -552,6 +609,11 @@ def detect():
 
         for name, info in SYSTEM_DEPS.items():
             env.installed[name] = _check_installed(name, info)
+            if name == "mpv" and env.installed.get(name):
+                _, output = _run_silent(["mpv", "--version"])
+                env.mpv_version = _parse_mpv_version(output)
+                if env.mpv_version:
+                    rows.append(["mpv version", ".".join(map(str, env.mpv_version))])
 
     # Output detection results
     ui.table("Detection Results", ["Property", "Value"], rows)

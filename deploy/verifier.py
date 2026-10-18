@@ -66,6 +66,15 @@ def verify(config_dir, env):
 
     ui.step("Checking binaries...")
     check_binary("mpv", ["mpv", "--version"])
+    from deploy.registry import MPV_MINIMUM_VERSION
+
+    if env.mpv_version is not None:
+        check(
+            f"mpv version >= {'.'.join(map(str, MPV_MINIMUM_VERSION))}",
+            env.mpv_version >= MPV_MINIMUM_VERSION,
+            f"installed {'.'.join(map(str, env.mpv_version))}"
+            + (" — upgrade needed" if env.mpv_version < MPV_MINIMUM_VERSION else ""),
+        )
     check_binary("ffmpeg", ["ffmpeg", "-version"])
     if env.os == "windows":
         check_binary("ffprobe", ["ffprobe", "-version"])

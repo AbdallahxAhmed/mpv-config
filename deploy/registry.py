@@ -228,7 +228,10 @@ SYSTEM_DEPS = {
             "bin_names": ["mpv.exe"],
         },
         "arch": {"method": "pacman", "pkg": "mpv"},
-        "ubuntu": {"method": "apt", "pkg": "mpv"},
+        # Ubuntu/Mint apt repos ship ancient mpv (Noble: 0.37) that fails on
+        # clipboard-monitor and sub-ass-use-video-data.  "ppa" adds
+        # ppa:ubuntuhandbook1/mpv for the latest stable build (installer.py).
+        "ubuntu": {"method": "ppa", "pkg": "mpv"},
         "fedora": {"method": "dnf", "pkg": "mpv"},
         "macos": {"method": "brew", "pkg": "mpv"},
         "verify": ["mpv", "--version"],
@@ -359,6 +362,16 @@ SYSTEM_DEPS = {
 import platform
 
 MPV_PROFILE_DEFAULT = "windows-like" if platform.system() == "Windows" else "linux-like"
+
+# ─── mpv version policy ──────────────────────────────────────────────────
+# The templates use options that only exist in recent mpv: clipboard-monitor
+# landed in 0.40, sub-ass-use-video-data in 0.39.  Instead of forking the
+# config per distro release, the installer upgrades mpv itself until it meets
+# this floor: on Ubuntu/Mint it adds ppa:ubuntuhandbook1/mpv (latest stable
+# .debs for 22.04/24.04/25.x, classic packages not sandboxed); Arch/Fedora/
+# macOS distro packages already track upstream; Windows always installs the
+# latest zhongfly daily build.
+MPV_MINIMUM_VERSION = (0, 40, 0)
 
 MPV_EXPERIENCE_PROFILES = {
     # Cross-platform baseline intended to make behavior as consistent as possible.

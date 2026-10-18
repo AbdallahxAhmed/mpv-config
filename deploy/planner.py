@@ -13,7 +13,7 @@ import os
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from deploy import ui
-from deploy.registry import SCRIPTS, SHADERS, SYSTEM_DEPS
+from deploy.registry import MPV_MINIMUM_VERSION, SCRIPTS, SHADERS, SYSTEM_DEPS
 
 if TYPE_CHECKING:
     from deploy.detector import Environment
@@ -55,14 +55,32 @@ def build_install_plan(env: "Environment") -> List[PlanEntry]:
     for name in core_deps + optional_deps:
         is_optional = name in optional_deps
         if env.installed.get(name, False):
-            plan.append(
-                PlanEntry(
-                    "package",
-                    "skip",
-                    name,
-                    "already installed — no change",
+            if (
+                name == "mpv"
+                and env.mpv_version is not None
+                and env.mpv_version < MPV_MINIMUM_VERSION
+            ):
+                # Mirror installer.install_deps: a distro build below the
+                # config's minimum is "installed" but must be upgraded.
+                plan.append(
+                    PlanEntry(
+                        "package",
+                        "install",
+                        name,
+                        f"installed {'.'.join(map(str, env.mpv_version))} < required "
+                        f"{'.'.join(map(str, MPV_MINIMUM_VERSION))} — upgrade via "
+                        "ppa:ubuntuhandbook1/mpv",
+                    )
                 )
-            )
+            else:
+                plan.append(
+                    PlanEntry(
+                        "package",
+                        "skip",
+                        name,
+                        "already installed — no change",
+                    )
+                )
         else:
             dep_info = SYSTEM_DEPS.get(name, {})
             pkg_info = dep_info.get(env.platform_key) or dep_info.get("all") or {}

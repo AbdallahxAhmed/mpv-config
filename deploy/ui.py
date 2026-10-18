@@ -267,9 +267,23 @@ def summary(results):
         _print(f"\n{'=' * 56}\n")
 
 
+def is_interactive():
+    """True when stdin is a TTY — i.e. safe to prompt without an EOF crash."""
+    try:
+        return sys.stdin.isatty()
+    except Exception:
+        return False
+
+
 def confirm(text):
     if _RICH_AVAILABLE:
-        return Confirm.ask(f"[yellow]?[/yellow] {text}")
+        try:
+            return Confirm.ask(f"[yellow]?[/yellow] {text}")
+        except (EOFError, KeyboardInterrupt):
+            # Piped sessions (curl | bash) cannot answer prompts; treat as
+            # "no" instead of crashing with "Fatal error: EOF when reading a line".
+            print()
+            return False
     else:
         try:
             reply = input(f"  {_C.YELLOW}?{_C.RESET} {text} [Y/n] ").strip().lower()

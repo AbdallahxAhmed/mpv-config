@@ -75,7 +75,7 @@ CTRL+5 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.
 CTRL+6 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C+A (Denoise + Sharp)"
 
 # **----- اختصار لإلغاء جميع المؤثرات -----**
-CTRL+0 no-osd change-list glsl-shaders clr; show-text "Shaders Cleared"
+CTRL+0 no-osd change-list glsl-shaders clr ""; show-text "Shaders Cleared"
 
 
 # **----- اختصارات مفيدة إضافية (تم التصحيح) -----**
@@ -184,8 +184,11 @@ G        script-binding sponsorblock_submit_segment
 # Subtitle sync (autosubsync) — ى = n (syNc)
 ى        script-binding autosubsync-menu
 
-# Subtitle background box toggle — لا = b
-لا       cycle-values sub-back-color "#B3080808" "#00000000"
+# Subtitle background box toggle — ب = b
+# NOTE: mpv cannot register multi-codepoint key names. The old binding used
+# 'لا' — two codepoints (U+0644 U+0627) — so mpv rejected it with
+# "Unknown key 'لا'" on every version. 'ب' is a single codepoint and binds.
+ب       cycle-values sub-back-color "#B3080808" "#00000000"
 
 # Instant play from clipboard — Ctrl+ر = Ctrl+v
 Ctrl+ر           script-binding smart_paste/paste-to-open

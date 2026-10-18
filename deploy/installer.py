@@ -17,7 +17,7 @@ import urllib.request
 import zipfile
 
 from deploy import ui
-from deploy.registry import SYSTEM_DEPS
+from deploy.registry import MPV_MINIMUM_VERSION, SYSTEM_DEPS
 
 
 def _run(cmd, check=True, env=None):
@@ -576,6 +576,50 @@ def _install_direct_url(name, info, env):
     return True
 
 
+def _os_release_id():
+    """First ID= from /etc/os-release ('ubuntu', 'linuxmint', 'debian', …)."""
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("ID="):
+                    return line.split("=", 1)[1].strip().strip('"').lower()
+    except OSError:
+        pass
+    return ""
+
+
+def _install_mpv_latest(env):
+    """Install or upgrade mpv to the latest stable release (classic .deb).
+
+    Ubuntu/Mint repos ship outdated mpv (Noble: 0.37) that lacks options the
+    templates use (clipboard-monitor, sub-ass-use-video-data).
+    ppa:ubuntuhandbook1/mpv publishes the latest stable mpv for Ubuntu
+    22.04/24.04/25.x on amd64/arm64 (Mint 22.x/21.x uses the Ubuntu base
+    series, so the PPA works there too).  Debian has no matching PPA series
+    and stays on its own apt build.
+    """
+    if env.os == "linux" and _os_release_id() not in ("ubuntu", "linuxmint", "pop", ""):
+        # Debian & derivatives: ubuntuhandbook1's PPA has no matching
+        # series there — stay on the distro's own mpv build.
+        return _run(["sudo", "apt", "install", "-y", "mpv"])
+    if not shutil.which("add-apt-repository"):
+        _run(
+            ["sudo", "apt-get", "install", "-y", "software-properties-common"],
+            check=False,
+        )
+    added = _run(
+        ["sudo", "add-apt-repository", "-y", "ppa:ubuntuhandbook1/mpv"], check=False
+    )
+    if added:
+        # Mint and some derivatives do not refresh the cache automatically.
+        _run(["sudo", "apt-get", "update"], check=False)
+    else:
+        ui.warn(
+            "Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build."
+        )
+    return _run(["sudo", "apt-get", "install", "-y", "mpv"])
+
+
 def _install_uv(name, info, env):
     """Install uv with OS-specific fallbacks."""
     if shutil.which("uv"):
@@ -745,6 +789,11 @@ def _install_one(name, dep_info, env, mpv_version=None):
 
     elif method == "apt":
         return _run(["sudo", "apt", "install", "-y", info["pkg"]])
+
+    elif method == "ppa":
+        # Ubuntu/Mint apt repos ship ancient mpv (Noble: 0.37) that fails on
+        # options this config requires — see _install_mpv_latest.
+        return _install_mpv_latest(env)
 
     elif method == "dnf":
         return _run(["sudo", "dnf", "install", "-y", info["pkg"]])
@@ -978,7 +1027,21 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
 
     for name in core_deps:
         if env.installed.get(name, False):
-            already_ok.append(name)
+            if (
+                name == "mpv"
+                and env.mpv_version is not None
+                and env.mpv_version < MPV_MINIMUM_VERSION
+            ):
+                # "Installed" but below the config's minimum (e.g. a distro
+                # build) — force an upgrade instead of skipping.
+                version_str = ".".join(map(str, env.mpv_version))
+                ui.warn(
+                    f"mpv {version_str} is older than required "
+                    f"{'.'.join(map(str, MPV_MINIMUM_VERSION))} — will upgrade"
+                )
+                to_install.append(name)
+            else:
+                already_ok.append(name)
         else:
             to_install.append(name)
 
@@ -1022,11 +1085,16 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
                 audit_log.record_package(name, False, "install", "skipped", "dry run")
         return results
 
-    # Confirm
+    # Confirm — never prompt in non-interactive sessions (curl | bash):
+    # prompts there crash with "EOF when reading a line". Non-interactive
+    # installs auto-proceed, matching cmd_install's plan confirmation.
     if to_install:
-        if not ui.confirm(
-            f"Install {len(to_install)} core + {len(optional_missing)} optional packages?"
-        ):
+        proceed = True
+        if ui.is_interactive():
+            proceed = ui.confirm(
+                f"Install {len(to_install)} core + {len(optional_missing)} optional packages?"
+            )
+        if not proceed:
             ui.warn("Skipping dependency installation")
             for name in to_install:
                 results.append({"name": name, "status": "skipped", "detail": "user skipped"})

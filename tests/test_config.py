@@ -71,10 +71,10 @@ class TestConfig(unittest.TestCase):
                 f"Subtitle parameter {param} expected {expected}, got {settings[param]}",
             )
 
-    def test_uosc_template_volume_max_is_200(self):
+    def test_uosc_template_volume_max_is_removed(self):
+        """uosc 5.13 removed volume_max — the widget follows mpv's volume-max."""
         settings = _parse_conf(self.uosc_template)
-        self.assertIn("volume_max", settings)
-        self.assertEqual(settings["volume_max"], "200")
+        self.assertNotIn("volume_max", settings)
 
     def test_uosc_controls_has_subtitles_and_audio(self):
         settings = _parse_conf(self.uosc_template)
@@ -204,8 +204,8 @@ class TestConfig(unittest.TestCase):
             self.skipTest("Active %APPDATA%\\mpv\\script-opts\\uosc.conf not found")
 
         settings = _parse_conf(self.active_uosc_conf)
-        self.assertIn("volume_max", settings)
-        self.assertEqual(settings["volume_max"], "200")
+        # uosc 5.13 removed volume_max; stale copies log "unknown key".
+        self.assertNotIn("volume_max", settings)
 
     def test_active_mpv_conf_user_volume_max(self):
         if not self.active_user_conf or not os.path.isfile(self.active_user_conf):
