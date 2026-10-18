@@ -7,6 +7,7 @@ OS, distro, display server, GPU, package manager, installed tools.
 
 import os
 import platform
+import ctypes.util
 import re
 import shlex
 import shutil
@@ -41,6 +42,9 @@ class Environment:
     # Intel Haswell-or-older iGPU present: Mesa Vulkan drivers for these
     # are incomplete and render video magenta instead of failing.
     legacy_vulkan_gpu: bool = False
+    # libcuda present (nvdec hardware decode; ships with nvidia-utils on
+    # Linux). False = auto-safe silently drops to software decode.
+    has_libcuda: bool = False
     # Parsed from `mpv --version`, e.g. (0, 37, 0); None when unknown.
     mpv_version: Optional[Tuple[int, int, int]] = None
     installed: Dict[str, bool] = field(default_factory=dict)
@@ -567,6 +571,21 @@ def detect():
         else:
             ui.warn("GPU vendor not detected — using safe defaults (gpu_api=auto, hwdec=auto)")
             env.gpu_vendor = ""
+
+        # CUDA runtime: nvdec (the Linux counterpart of the Windows
+        # d3d11va in-VRAM path) needs libcuda, which comes with the NVIDIA
+        # driver's userland (nvidia-utils on Arch/CachyOS). Without it,
+        # hwdec=auto-safe silently falls back to software decode.
+        if env.os == "linux" and env.gpu_vendor == "nvidia":
+            env.has_libcuda = ctypes.util.find_library("cuda") is not None
+            rows.append(
+                [
+                    "nvdec CUDA runtime",
+                    "available (libcuda)"
+                    if env.has_libcuda
+                    else "MISSING — no libcuda; nvdec unavailable, playback uses CPU/software",
+                ]
+            )
 
         # AVX2
         env.has_avx2 = _detect_avx2()

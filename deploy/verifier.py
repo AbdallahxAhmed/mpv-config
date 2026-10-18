@@ -75,6 +75,22 @@ def verify(config_dir, env):
             f"installed {'.'.join(map(str, env.mpv_version))}"
             + (" — upgrade needed" if env.mpv_version < MPV_MINIMUM_VERSION else ""),
         )
+    # nvdec needs libcuda (NVIDIA userland driver). Informational only: mpv
+    # still plays via auto-safe fallbacks, so a missing driver stack must not
+    # abort a deployment — but without it the machine loses the Windows-grade
+    # zero-copy decode path.
+    if env.os == "linux" and env.gpu_vendor == "nvidia":
+        if getattr(env, "has_libcuda", False):
+            check("cuda runtime (nvdec in-VRAM decode)", True, "libcuda available")
+        else:
+            results.append(
+                {
+                    "name": "cuda runtime (nvdec in-VRAM decode)",
+                    "status": "skipped",
+                    "detail": "no libcuda — install the NVIDIA userland driver "
+                    "(Arch/CachyOS: sudo pacman -S nvidia-utils) and reinstall",
+                }
+            )
     check_binary("ffmpeg", ["ffmpeg", "-version"])
     if env.os == "windows":
         check_binary("ffprobe", ["ffprobe", "-version"])
