@@ -17,6 +17,7 @@ import urllib.request
 import zipfile
 
 from deploy import ui
+from deploy.detector import probe_mpv_version
 from deploy.registry import MPV_MINIMUM_VERSION, SYSTEM_DEPS
 
 # WHY: package-manager operations legitimately run far longer than the
@@ -601,6 +602,39 @@ def _os_release_id():
     return ""
 
 
+def _mpv_install_gate(installed_ok):
+    """Post-install honesty gate for the mpv upgrade path.
+
+    apt can "successfully" install the DISTRO build (Ubuntu 24.04: 0.37)
+    while the upgrade itself failed — that is below MPV_MINIMUM_VERSION and
+    must not be reported as ok (a green step after an unfulfilled upgrade
+    promise hides the problem). Returning False routes the flow into the
+    tolerate-mpv branch, which explains the adapted config and how to
+    complete the upgrade.
+    """
+    if not installed_ok:
+        return False
+    version = probe_mpv_version()
+    if version is None or version < MPV_MINIMUM_VERSION:
+        if version is None:
+            detail = "no mpv detected after install — the upgrade did not take effect"
+        else:
+            detail = (
+                f"still version {'.'.join(map(str, version))} — the PPA upgrade did not "
+                "take effect (add-apt-repository could not reach ppa.launchpadcontent.net)"
+            )
+        ui.warn(
+            f"{detail}; deploying a config adapted to the installed mpv. Retry later, "
+            "or upgrade mpv manually and re-run `mpv-config install` to restore the "
+            "full option set."
+        )
+        if version is None:
+            # Nothing to adapt to — genuinely failed.
+            ui.error("mpv is not installed; playback will not work until it is.")
+        return False
+    return True
+
+
 def _install_mpv_latest(env):
     """Install or upgrade mpv to the latest stable release (classic .deb).
 
@@ -620,9 +654,10 @@ def _install_mpv_latest(env):
     if env.os == "linux" and _os_release_id() not in ("ubuntu", "linuxmint", "pop", ""):
         # Debian & derivatives: ubuntuhandbook1's PPA has no matching
         # series there — stay on the distro's own mpv build.
-        return _run(
+        installed = _run(
             ["sudo", "apt", "install", "-y", "mpv"], check=False, timeout=PKG_TIMEOUT
         )
+        return _mpv_install_gate(installed)
     if not shutil.which("add-apt-repository"):
         _run(
             ["sudo", "apt-get", "install", "-y", "software-properties-common"],
@@ -647,10 +682,11 @@ def _install_mpv_latest(env):
         check=False,
         timeout=PKG_TIMEOUT,
     )
-    return _run(
+    installed = _run(
         ["sudo", "apt-get", "install", "-y", "-o", "Acquire::Retries=3", "mpv"],
         timeout=PKG_TIMEOUT,
     )
+    return _mpv_install_gate(installed)
 
 
 def _install_uv(name, info, env):

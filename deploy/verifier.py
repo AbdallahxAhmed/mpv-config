@@ -5,6 +5,7 @@ correctness. See docs/AUDIT.md for the manual playback validation checklist.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,74 @@ def _run_check(cmd):
         return True
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _read_os_release_text():
+    """Raw /etc/os-release text, '' when unusable (bootstraps no distro tricks)."""
+    try:
+        with open("/etc/os-release", "r", encoding="utf-8") as stream:
+            return stream.read()
+    except OSError:
+        return ""
+
+
+def _mpv_repo_source():
+    """Which repo the installed mpv came from (`pacman -Qi mpv` → 'Repository:').
+
+    '' when pacman/mpv is unavailable or output is unparseable.
+    """
+    try:
+        proc = subprocess.run(
+            ["pacman", "-Qi", "mpv"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    match = re.search(r"^Repository\s*:\s*(\S+)", proc.stdout or "", re.MULTILINE)
+    return match.group(1) if match else ""
+
+
+def _mpv_optimization_row(env):
+    """Verifier row confirming the installed mpv is an x86-64-v3/v4 build.
+
+    CachyOS rebuilds the whole extra repo for v3/v4 CPUs (cachyos-extra-v3
+    carries e.g. mpv 1:0.41.0-...-x86_64_v3). pacman prefers those repos by
+    pacman.conf order, so a normal CachyOS install just gets the optimized
+    build — but an mpv installed earlier from plain `extra` is retained by
+    `--needed` even on an optimized machine. This row confirms the good
+    case and otherwise points at the exact repair command. Pure-Arch
+    machines have no optimized repos: the check stays out of their way.
+    (Linux/Arch mpv packages are not name-tagged 'v3' like Windows's
+    mpv-x86_64-v3 assets — the repo source is the signal there.)
+
+    Returns the result row, or None when the check does not apply.
+    """
+    if env.os != "linux" or env.distro != "arch":
+        return None
+    if not shutil.which("mpv") or not shutil.which("pacman"):
+        return None
+    if "cachyos" not in _read_os_release_text().lower():
+        return None  # plain Arch/EndeavourOS/Manjaro: no optimized repos exist
+    repo = _mpv_repo_source()
+    if not repo:
+        return None  # cannot read source; don't invent a verdict
+    if "cachyos" in repo and ("v3" in repo or "v4" in repo):
+        return {
+            "name": "mpv optimized build (x86-64-v3/v4)",
+            "status": "ok",
+            "detail": f"installed from {repo}",
+        }
+    return {
+        "name": "mpv optimized build (x86-64-v3/v4)",
+        "status": "skipped",
+        "detail": f"installed from '{repo}' — baseline build; on CachyOS run "
+        "`sudo pacman -Syyu mpv` with the cachyos-v3 repos enabled to switch to "
+        "the x86-64-v3 optimized build",
+    }
 
 
 def verify(config_dir, env):
@@ -123,6 +192,9 @@ def verify(config_dir, env):
                     "(Arch/CachyOS: sudo pacman -S nvidia-utils) and reinstall",
                 }
             )
+    mpv_build_row = _mpv_optimization_row(env)
+    if mpv_build_row is not None:
+        results.append(mpv_build_row)
     check_binary("ffmpeg", ["ffmpeg", "-version"])
     if env.os == "windows":
         check_binary("ffprobe", ["ffprobe", "-version"])

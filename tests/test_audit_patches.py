@@ -721,6 +721,7 @@ class TestAuditPatches(unittest.TestCase):
         with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
                 mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
                 mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
                 mock.patch.object(installer.ui, "step"):
             installer._install_mpv_latest(env)
 
@@ -743,6 +744,92 @@ class TestAuditPatches(unittest.TestCase):
                 if marker in cmd:
                     self.assertEqual(timeout, installer.PKG_TIMEOUT)
                     break
+
+    def test_install_mpv_latest_reports_below_minimum_as_failed(self):
+        """Distro-0.37 'success' must not masquerade as a completed upgrade."""
+        from deploy import installer
+
+        def fake_run(cmd, check=True, env=None, timeout=300):
+            return True  # every apt step "succeeds", but apt only has 0.37
+
+        env = Environment(os="linux", distro="ubuntu")
+        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 37, 0)):
+            with mock.patch.object(installer.ui, "warn") as warn, \
+                    mock.patch.object(installer.ui, "step"):
+                ok = installer._install_mpv_latest(env)
+
+        self.assertFalse(ok)  # routes into the tolerate-mpv + sanitizer flow
+        warn.assert_called_once()  # exactly one explanation, not red herrings
+
+        # Nothing installed at all is also honest failure.
+        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
+                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
+                mock.patch.object(installer, "_run", side_effect=fake_run), \
+                mock.patch.object(installer, "probe_mpv_version", return_value=None):
+            with mock.patch.object(installer.ui, "warn") as warn, \
+                    mock.patch.object(installer.ui, "error") as error, \
+                    mock.patch.object(installer.ui, "step"):
+                ok = installer._install_mpv_latest(env)
+        self.assertFalse(ok)
+        self.assertTrue(warn.called)
+        self.assertTrue(error.called)
+
+    def test_mpv_repo_source_parses_pacman_output(self):
+        """pacman -Qi 'Repository:' is extracted; missing pacman yields ''."""
+        from deploy import verifier
+
+        def fake_run(cmd, **kwargs):
+            return mock.Mock(
+                returncode=0,
+                stdout=(
+                    "Name            : mpv\n"
+                    "Repository      : cachyos-extra-v3\n"
+                    "Version         : 1:0.41.0-6.1\n"
+                ),
+                stderr="",
+            )
+
+        with mock.patch.object(verifier.subprocess, "run", side_effect=fake_run):
+            self.assertEqual(verifier._mpv_repo_source(), "cachyos-extra-v3")
+
+        with mock.patch.object(
+            verifier.subprocess, "run", side_effect=OSError("no pacman")
+        ):
+            self.assertEqual(verifier._mpv_repo_source(), "")
+
+    def test_mpv_optimization_row_variants(self):
+        """CachyOS machines get the v3 verdict; pure Arch is silently skipped."""
+        from deploy import verifier
+
+        arch_env = Environment(os="linux", distro="arch")
+        windows_env = Environment(os="windows", distro="arch")
+
+        # Not a Linux/Arch context → no row at all.
+        self.assertIsNone(verifier._mpv_optimization_row(windows_env))
+
+        # CachyOS + mpv from the v3 repo → positive, explicit confirmation.
+        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
+                mock.patch.object(verifier, "_read_os_release_text", return_value='ID=cachyos\nID_LIKE="arch"\n'), \
+                mock.patch.object(verifier, "_mpv_repo_source", return_value="cachyos-extra-v3"):
+            row = verifier._mpv_optimization_row(arch_env)
+        self.assertEqual(row, {"name": "mpv optimized build (x86-64-v3/v4)", "status": "ok", "detail": "installed from cachyos-extra-v3"})
+
+        # mpv previously installed from plain `extra` → skipped + repair command.
+        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
+                mock.patch.object(verifier, "_read_os_release_text", return_value="ID=cachyos\n"), \
+                mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"):
+            row = verifier._mpv_optimization_row(arch_env)
+        self.assertEqual(row and row["status"], "skipped")
+        self.assertIn("pacman -Syyu mpv", (row or {}).get("detail", ""))
+
+        # Pure Arch (no cachyos in os-release) → no opinion.
+        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
+                mock.patch.object(verifier, "_read_os_release_text", return_value="ID=arch\n"), \
+                mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"):
+            self.assertIsNone(verifier._mpv_optimization_row(arch_env))
 
     def test_migrate_uosc_conf_removes_volume_max(self):
         from deploy.deployer import _migrate_uosc_conf
