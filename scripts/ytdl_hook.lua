@@ -139,19 +139,23 @@ local function platform_is_windows()
 end
 
 local function exec(args)
-    local result = mp.command_native({
+    local result, err = mp.command_native({
         _name = "subprocess",
         args = args,
         capture_stdout = true,
         capture_stderr = true,
     })
-    -- mpv >= 0.40 returns null when the subprocess could not even be
-    -- spawned (missing/broken executable). Older versions returned a
-    -- table carrying error_string == "init" — the contract the yt-dlp
-    -- search loop in run_ytdl_hook relies on. Normalize here so callers
-    -- never index nil ("attempt to index local 'result' (a nil value)").
+    -- mp.command_native returns (nil, err) when the command itself fails.
+    -- Per the manual a spawn failure should surface inside the result table
+    -- (negative status + error_string "init"), but some builds surface it as
+    -- (nil, err) instead — normalize BOTH to the table contract the search
+    -- loop relies on ("attempt to index local 'result' (a nil value)"), and
+    -- surface the raw error string for diagnosis.
     if not result then
-        return {status = -1, error_string = "init", stdout = "", stderr = ""}
+        if err and err ~= "" then
+            msg.error("subprocess command failed: " .. err)
+        end
+        return {status = -1, error_string = tostring(err or "init"), stdout = "", stderr = ""}
     end
     return result
 end

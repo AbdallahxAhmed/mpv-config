@@ -38,7 +38,9 @@ local function run(config)
             h.calls[#h.calls+1]=snap
             -- mpv >= 0.40 returns null when the process cannot be spawned.
             if config.broken_then_good and c.args[1]=='/broken/yt-dlp' then
-                return {status=-1,error_string='init',stdout='',stderr=''}
+                -- Friend's-observed shape: command itself fails, err string
+                -- compensates — exec() must normalize, not crash.
+                return nil, 'init'
             end
             if config.nil_subprocess then return nil end
             return {status=0,stdout='fixture',stderr=''}
