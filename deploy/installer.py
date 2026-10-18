@@ -332,8 +332,25 @@ def _select_release_asset(release, patterns):
 
 
 def _download_asset(url, dest_path):
-    """Download an asset to dest_path."""
-    urllib.request.urlretrieve(url, dest_path)
+    """Download an asset to dest_path atomically (tmp file + rename).
+
+    Never leaves a half-written binary at dest when a download dies
+    mid-flight — a truncated yt-dlp/alass would spawn-fail inside mpv until
+    the next successful deploy.
+    """
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=".mpvdl-", dir=os.path.dirname(dest_path) or "."
+    )
+    os.close(tmp_fd)
+    try:
+        urllib.request.urlretrieve(url, tmp_path)
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _extract_zip(archive_path, dest_dir):
@@ -758,6 +775,7 @@ def _install_github_release_file(name, info, env):
     else:
         _add_to_path(install_dir)
 
+    _write_refresh_stamp(info)
     ui.success(f"{name}: installed to {dest_path}")
     return True
 
@@ -786,6 +804,7 @@ def _install_direct_url(name, info, env):
     else:
         _add_to_path(install_dir)
 
+    _write_refresh_stamp(info)
     ui.success(f"{name}: installed to {dest_path}")
     return True
 
@@ -1656,6 +1675,44 @@ def uninstall_deps(env, remove_python=False, dry_run=False, pre_existing_pkgs=No
     return results
 
 
+def _dep_dest(info):
+    """Absolute binary path that a file-based install method produces (or None)."""
+    install_dir = info.get("install_dir")
+    dest_name = info.get("dest_name")
+    if install_dir and dest_name:
+        return os.path.join(install_dir, dest_name)
+    return None
+
+
+def _write_refresh_stamp(info):
+    """Record a file-method install as "fresh" (sidecar <binary>.stamp file)."""
+    dest = _dep_dest(info)
+    if not dest or not os.path.isfile(dest):
+        return
+    try:
+        with open(dest + ".stamp", "w", encoding="utf-8") as fh:
+            fh.write(str(int(time.time())))
+    except OSError:
+        pass
+
+
+def _dep_is_fresh(info, refresh_days):
+    """True when the file-method binary exists AND was installed < refresh_days.
+
+    A binary without a stamp (e.g. apt's frozen /usr/bin/yt-dlp) counts as
+    STALE so the file-based installer gets the chance to shadow it with a
+    current build — YouTube extractor rules go stale weekly.
+    """
+    dest = _dep_dest(info)
+    if not dest:
+        return False
+    try:
+        stamp_mtime = os.stat(dest + ".stamp").st_mtime
+    except OSError:
+        return False
+    return (time.time() - stamp_mtime) < refresh_days * 86400
+
+
 def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     """
     Install all missing system dependencies.
@@ -1706,7 +1763,20 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
                 )
                 to_install.append(name)
             else:
-                already_ok.append(name)
+                # Time-boxed self-refresh: extractor-class tools that
+                # upstream services (YouTube) break on a weekly cadence
+                # must not skip installs forever just because a stale
+                # binary happens to exist (entries carry "refresh_days").
+                info = SYSTEM_DEPS.get(name, {}).get(env.platform_key) or {}
+                refresh_days = info.get("refresh_days")
+                if refresh_days and not _dep_is_fresh(info, refresh_days):
+                    ui.info(
+                        f"{name}: refreshing (older than {refresh_days} days — "
+                        "goes stale too fast to trust)"
+                    )
+                    to_install.append(name)
+                else:
+                    already_ok.append(name)
         else:
             to_install.append(name)
 

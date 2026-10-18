@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -1876,6 +1877,105 @@ class AlassInstallerTests(unittest.TestCase):
 
             self.assertFalse(ok)
             m_dl.assert_not_called()
+
+
+class YtDlpFreshnessTests(unittest.TestCase):
+    """yt-dlp: standalone GitHub binary on Ubuntu/Fedora + 7-day self-refresh."""
+
+    def test_ubuntu_fedora_use_standalone_binary(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        for key in ("ubuntu", "fedora"):
+            info = SYSTEM_DEPS["yt-dlp"][key]
+            self.assertEqual(info["method"], "github_release_file")
+            self.assertEqual(info["dest_name"], "yt-dlp")
+            self.assertEqual(info["refresh_days"], 7)
+            self.assertNotIn("~", info["install_dir"])
+
+    def test_asset_pattern_matches_x86_and_not_arm(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        patterns = SYSTEM_DEPS["yt-dlp"]["ubuntu"]["asset_patterns"]
+        self.assertTrue(any(re.match(p, "yt-dlp_linux") for p in patterns))
+        self.assertFalse(any(re.match(p, "yt-dlp_linux_aarch64") for p in patterns))
+
+    def test_windows_entry_carries_refresh_days(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        self.assertEqual(SYSTEM_DEPS["yt-dlp"]["windows"]["refresh_days"], 7)
+
+    def test_freshness_stamp_matrix(self):
+        from deploy import installer
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            info = {"install_dir": tmpdir, "dest_name": "yt-dlp"}
+            dest = os.path.join(tmpdir, "yt-dlp")
+
+            # No binary at all.
+            self.assertFalse(installer._dep_is_fresh(info, 7))
+
+            # Binary exists but no stamp (apt-installed class) → stale.
+            with open(dest, "wb") as fh:
+                fh.write(b"ELF")
+            self.assertFalse(installer._dep_is_fresh(info, 7))
+
+            # A refresh install stamps it → fresh within the window.
+            installer._write_refresh_stamp(info)
+            self.assertTrue(os.path.isfile(dest + ".stamp"))
+            self.assertTrue(installer._dep_is_fresh(info, 7))
+
+            # Stamp older than the window → stale again.
+            old = time.time() - 8 * 86400
+            os.utime(dest + ".stamp", (old, old))
+            self.assertFalse(installer._dep_is_fresh(info, 7))
+
+    def test_install_deps_refresh_gate_requeues_stale_launcher(self):
+        from deploy import installer
+
+        env = Environment(
+            os="linux",
+            platform_key="ubuntu",
+            installed={
+                "mpv": True,
+                "yt-dlp": True,
+                "ffmpeg": True,
+                "python": True,
+                "uv": True,
+            },
+            mpv_version=(0, 41, 0),
+        )
+        with mock.patch.object(installer, "_dep_is_fresh", return_value=False):
+            results = installer.install_deps(env, dry_run=True)
+
+        by_name = {r["name"]: r for r in results}
+        # Everything already present stays "already installed"…
+        self.assertEqual(by_name["mpv"]["status"], "ok")
+        self.assertEqual(by_name["ffmpeg"]["status"], "ok")
+        # …but the stale yt-dlp is requeued (dry run → planned, not run).
+        self.assertEqual(by_name["yt-dlp"]["status"], "skipped")
+        self.assertEqual(by_name["yt-dlp"]["detail"], "dry run")
+
+    def test_install_deps_refresh_gate_respects_fresh_stamp(self):
+        from deploy import installer
+
+        env = Environment(
+            os="linux",
+            platform_key="ubuntu",
+            installed={
+                "mpv": True,
+                "yt-dlp": True,
+                "ffmpeg": True,
+                "python": True,
+                "uv": True,
+            },
+            mpv_version=(0, 41, 0),
+        )
+        with mock.patch.object(installer, "_dep_is_fresh", return_value=True):
+            results = installer.install_deps(env, dry_run=True)
+
+        by_name = {r["name"]: r for r in results}
+        self.assertEqual(by_name["yt-dlp"]["status"], "ok")
+        self.assertEqual(by_name["yt-dlp"]["detail"], "already installed")
 
 
 class CachyOSOptimizedReposTests(unittest.TestCase):

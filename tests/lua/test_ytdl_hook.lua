@@ -32,6 +32,8 @@ local function run(config)
         command_native=function(c)
             if c[1]=='expand-path' then return '/config/yt-dlp.exe' end
             assert(c._name=='subprocess'); h.calls[#h.calls+1]=c.args
+            -- mpv >= 0.40 returns null when the process cannot be spawned.
+            if config.nil_subprocess then return nil end
             return {status=0,stdout='fixture',stderr=''}
         end,
         commandv=function(...) h.commands[#h.commands+1]={...} end,
@@ -96,4 +98,16 @@ test('metadata cache and visibility are per-file',function()
     eq(h.props['user-data/mpv/ytdl/source-url'],nil); eq(h.props['user-data/mpv/ytdl/is-youtube'],nil)
 end)
 test('local files never invoke yt-dlp',function() eq(#run({url='/media/local.mkv'}).calls,0) end)
+test('mpv >= 0.40 null subprocess result normalizes instead of crashing',function()
+    -- Regression: on mpv >= 0.40 a spawn failure (bad ytdl_path candidate)
+    -- makes command_native return null; without normalization the hook
+    -- crashed at 'if result.killed_by_us' ("client removed during hook
+    -- handling", then "Failed to recognize file format").
+    local h=run({nil_subprocess=true})
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].status,-1)
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].error_string,'init')
+    -- stream-open-filename untouched and no EDL rewrite: a graceful
+    -- "youtube-dl failed" path, not a script crash.
+    eq(h.edl,'https://youtu.be/video')
+end)
 print('Hook tests passed: '..total)

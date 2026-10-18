@@ -139,12 +139,21 @@ local function platform_is_windows()
 end
 
 local function exec(args)
-    return mp.command_native({
+    local result = mp.command_native({
         _name = "subprocess",
         args = args,
         capture_stdout = true,
         capture_stderr = true,
     })
+    -- mpv >= 0.40 returns null when the subprocess could not even be
+    -- spawned (missing/broken executable). Older versions returned a
+    -- table carrying error_string == "init" — the contract the yt-dlp
+    -- search loop in run_ytdl_hook relies on. Normalize here so callers
+    -- never index nil ("attempt to index local 'result' (a nil value)").
+    if not result then
+        return {status = -1, error_string = "init", stdout = "", stderr = ""}
+    end
+    return result
 end
 
 -- return true if it was explicitly set on the command line
@@ -1122,7 +1131,9 @@ local function run_ytdl_hook(url)
         msg.error(ytdl_err)
         local err = "youtube-dl failed: "
         if result.error_string and result.error_string == "init" then
-            err = err .. "not found or not enough permissions"
+            err = err .. "binary failed to start (tried: " .. tostring(command[1])
+                  .. ") — not found or not enough permissions; check "
+                  .. "script-opts/ytdl_hook.conf (ytdl_path)"
         elseif parse_err then
             err = err .. "failed to parse JSON data: " .. parse_err
         else

@@ -15,11 +15,12 @@ WINDOWS_UV_DIR = os.path.join(WINDOWS_MPV_DIR, "uv")
 WINDOWS_FFSUBSYNC_DIR = os.path.join(WINDOWS_MPV_DIR, "ffsubsync")
 WINDOWS_ALASS_DIR = os.path.join(WINDOWS_MPV_DIR, "alass")
 WINDOWS_FFMPEG_BIN_DIR = os.path.join(WINDOWS_FFMPEG_DIR, "bin")
-# alass on Linux is a standalone GitHub release binary (kaegi/alass). It goes
-# into the user's PATH dir; Ubuntu/Fedora add ~/.local/bin to PATH via the
-# profile when it exists. Installer also symlinks it into /usr/local/bin
-# if the current PATH cannot see it.
-LINUX_ALASS_DIR = os.path.expanduser("~/.local/bin")
+# Standalone GitHub binaries (alass, yt-dlp on distros with frozen packages)
+# go into the user's own PATH dir; Ubuntu/Fedora add ~/.local/bin to PATH
+# via the profile when it exists. The installer also symlinks into
+# /usr/local/bin when the current PATH cannot see the binary yet.
+LINUX_BIN_DIR = os.path.expanduser("~/.local/bin")
+LINUX_ALASS_DIR = LINUX_BIN_DIR
 
 SCRIPTS = [
     {
@@ -245,6 +246,10 @@ SYSTEM_DEPS = {
         "verify": ["mpv", "--version"],
     },
     "yt-dlp": {
+        # arch keeps pacman (tracks current). Windows/Ubu-class distros:
+        # the standalone GitHub binary, refreshed at most every 7 days —
+        # YouTube changes break old extractors weekly and apt/fedora ship
+        # frozen ancient versions.
         "windows": {
             "method": "direct_url",
             "url": "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
@@ -252,10 +257,28 @@ SYSTEM_DEPS = {
             "dest_name": "yt-dlp.exe",
             "ensure_in_dir": WINDOWS_YTDLP_DIR,
             "bin_names": ["yt-dlp.exe"],
+            "refresh_days": 7,
         },
         "arch": {"method": "pacman", "pkg": "yt-dlp", "prefer_optimized_repo": True},
-        "ubuntu": {"method": "apt", "pkg": "yt-dlp"},  # was pip
-        "fedora": {"method": "dnf", "pkg": "yt-dlp"},
+        # x86_64 hosts only: yt-dlp_linux is the official standalone build
+        # (bundle includes its own Python). ARM hosts would want
+        # yt-dlp_linux_aarch64 instead — not a target machine today.
+        "ubuntu": {
+            "method": "github_release_file",
+            "repo": "yt-dlp/yt-dlp",
+            "asset_patterns": [r"^yt-dlp_linux$", r"^yt-dlp$"],
+            "install_dir": LINUX_BIN_DIR,
+            "dest_name": "yt-dlp",
+            "refresh_days": 7,
+        },
+        "fedora": {
+            "method": "github_release_file",
+            "repo": "yt-dlp/yt-dlp",
+            "asset_patterns": [r"^yt-dlp_linux$", r"^yt-dlp$"],
+            "install_dir": LINUX_BIN_DIR,
+            "dest_name": "yt-dlp",
+            "refresh_days": 7,
+        },
         "macos": {"method": "brew", "pkg": "yt-dlp"},
         "verify": ["yt-dlp", "--version"],
     },

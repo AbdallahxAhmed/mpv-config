@@ -37,6 +37,52 @@ def _read_os_release_text():
         return ""
 
 
+# yt-dlp floor: extracts keep working only against recent builds. The
+# deployer self-refreshes (registry refresh_days) — this row only REPORTS
+# stale installs (old dpkg/fedora packages, missed refreshes).
+_YTDLP_MINIMUM = (2025, 1, 1)
+
+
+def _ytdlp_freshness_row(env):
+    """Soft informational row: is the yt-dlp the hook will spawn recent?
+
+    Returns a result row or None when yt-dlp is absent/version unparseable.
+    """
+    from deploy.deployer import _resolve_ytdl_path
+
+    resolved = _resolve_ytdl_path(env)
+    binary = resolved if os.path.isabs(resolved) else shutil.which(resolved) or resolved
+    if not shutil.which(binary) and not os.path.isfile(binary):
+        return None
+    try:
+        proc = subprocess.run(
+            [binary, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(
+        r"(\d{4})\.(\d{2})\.(\d{2})",
+        (proc.stdout or "") + (proc.stderr or ""),
+    )
+    if not match:
+        return None
+    version = tuple(int(part) for part in match.groups())
+    row_name = f"yt-dlp recent enough (>= {'.'.join(map(str, _YTDLP_MINIMUM))})"
+    label = ".".join(map(str, version))
+    if version >= _YTDLP_MINIMUM:
+        return {"name": row_name, "status": "ok", "detail": label}
+    return {
+        "name": row_name,
+        "status": "skipped",
+        "detail": f"installed {label} — old builds break against current YouTube; "
+        "re-run the deployer to refresh (prefers the standalone GitHub binary)",
+    }
+
+
 def _mpv_repo_source():
     """Which repo the installed mpv came from (`pacman -Qi mpv` → 'Repository:').
 
@@ -202,6 +248,9 @@ def verify(config_dir, env):
     from deploy.deployer import _resolve_ytdl_path
 
     check_binary("yt-dlp", [_resolve_ytdl_path(env), "--version"])
+    ytdlp_fresh_row = _ytdlp_freshness_row(env)
+    if ytdlp_fresh_row is not None:
+        results.append(ytdlp_fresh_row)
     check_binary("python", [env.python_cmd, "--version"])
     # uv is an installer convenience, not a required mpv runtime dependency.
     check_binary("uv", ["uv", "--version"], optional=True)
