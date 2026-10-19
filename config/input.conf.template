@@ -156,43 +156,43 @@ n    script-binding autosubsync-menu
 # OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
 b    script-binding sub_backdrop/toggle
 
-# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
+# ─── Arabic Bilingual Twin Bindings (Arabic 102 AZERTY layout) ────
+# Ground truth, probed from the deployed keyboard layout (00000C01):
+#   b → لا (lam+alef, TWO codepoints), f → ب, j → ت, l → م, p → ح,
+#   a → ش, c → ؤ, n → ى, y → غ.
+# mpv binds single codepoints only, so 'لا' can never bind. Worse, mpv
+# receives the lam-alef sequence as two unicode events, so any binding on
+# ل or ا makes the physical b key fire it while typing — that is why
+# SponsorBlock used to pop on b. Those characters are left unbound on
+# purpose; the twins below live on safe letters that appear in no
+# lam-alef composite (ا ا آ أ إ are the composite glyphs).
+# Ctrl/Alt/Shift + Arabic char can never match either: Windows turns
+# every ctrl+letter into a control code which mpv names "ctrl+b" etc.,
+# so the Latin twins own every modified combo (Ctrl+c, Ctrl+v, Ctrl+n...).
+#
 # Subtitles menu (uosc) — ؤ = c
 ؤ        script-binding uosc/subtitles
-
-# YouTube auto-subtitles on-demand menu — Ctrl+ؤ = Ctrl+c
-Ctrl+ؤ   script-binding ytdl_sub_menu/open
 
 # Audio tracks & dubs menu (uosc) — ش = a
 ش        script-binding uosc/audio
 
-# History (memo) — ا = h (History)
-ا        script-binding memo-history
+# History (memo) — ح = h (physical P in Arabic layout)
+ح        script-binding memo-history
 
-# SponsorBlock voting — ﻻ = B (Upvote), ﻵ / Ctrl+ﻻ = Downvote
-ﻻ        script-binding sponsorblock_upvote
-Ctrl+ﻻ   script-binding sponsorblock_downvote
-ﻵ        script-binding sponsorblock_downvote
+# Subtitle sync (autosubsync) — ى = n
+ى        script-binding autosubsync-menu
 
-# SponsorBlock segment marking / submission — ل = g, Shift+ل / إ = G
-ل        script-binding sponsorblock_set_segment
-Shift+ل  script-binding sponsorblock_submit_segment
-إ        script-binding sponsorblock_submit_segment
+# Subtitle background box toggle — ب = b (physical F in Arabic layout)
+# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
+ب       script-binding sub_backdrop/toggle
+
+# SponsorBlock segment marking / submission — ت = g (physical J), م = G (physical L)
+ت        script-binding sponsorblock_set_segment
+م        script-binding sponsorblock_submit_segment
 
 # Explicit Latin bindings for SponsorBlock segment marking
 g        script-binding sponsorblock_set_segment
 G        script-binding sponsorblock_submit_segment
 
-# Subtitle sync (autosubsync) — ى = n (syNc)
-ى        script-binding autosubsync-menu
-
-# Subtitle background box toggle — ب = b
-# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
-# NOTE: mpv cannot register multi-codepoint key names. The old binding used
-# 'لا' — two codepoints (U+0644 U+0627) — so mpv rejected it with
-# "Unknown key 'لا'" on every version. 'ب' is a single codepoint and binds.
-ب       script-binding sub_backdrop/toggle
-
-# Instant play from clipboard — Ctrl+ر = Ctrl+v
-Ctrl+ر           script-binding smart_paste/paste-to-open
-Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist
+# Instant play from clipboard — Ctrl+ر was retired: Windows control codes
+# make it unreachable; Latin Ctrl+v / Ctrl+Shift+v cover it.

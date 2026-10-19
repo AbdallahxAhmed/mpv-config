@@ -1547,7 +1547,10 @@ class TestAuditPatches(unittest.TestCase):
 
             self.assertIn("Ctrl+v           script-binding smart_paste/paste-to-open", new_content)
             self.assertIn("Ctrl+V           script-binding smart_paste/paste-to-open", new_content)
-            self.assertIn("Ctrl+ر           script-binding smart_paste/paste-to-open", new_content)
+            # Modified Arabic-char combos are unreachable on Windows — the
+            # layout probe proved ctrl+letter arrives as a control code mpv
+            # names "ctrl+b" etc. — so Ctrl+ر declarations are retired.
+            self.assertNotIn("Ctrl+ر", new_content)
             self.assertNotIn('loadfile "${clipboard/text:${clipboard}}"', new_content)
             self.assertNotIn('loadfile "${clipboard}"', new_content)
 
@@ -1598,12 +1601,23 @@ class TestAuditPatches(unittest.TestCase):
         with open(input_template, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("ا        script-binding memo-history", content)
+        self.assertIn("ح        script-binding memo-history", content)
+        self.assertIn("ؤ        script-binding uosc/subtitles", content)
+        self.assertIn("ش        script-binding uosc/audio", content)
         self.assertIn("ى        script-binding autosubsync-menu", content)
-        self.assertIn("ﻻ        script-binding sponsorblock_upvote", content)
-        self.assertIn("ﻵ        script-binding sponsorblock_downvote", content)
-        self.assertIn("ل        script-binding sponsorblock_set_segment", content)
-        self.assertIn("Ctrl+ر           script-binding smart_paste/paste-to-open", content)
+        self.assertIn("ب       script-binding sub_backdrop/toggle", content)
+        self.assertIn("ت        script-binding sponsorblock_set_segment", content)
+        self.assertIn("م        script-binding sponsorblock_submit_segment", content)
+        # lam-alef composite glyphs and unreachable modified combos must stay
+        # unbound (the physical b key emits ل+ا as two unicode events). Active
+        # lines only — comments legitimately mention the retired keys.
+        active_keys = [
+            line.split(None, 1)[0]
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        for hazard in ("ا", "ل", "إ", "ﻻ", "ﻵ", "Shift+ل", "Ctrl+ؤ", "Ctrl+ر", "Ctrl+Shift+ر"):
+            self.assertNotIn(hazard, active_keys)
 
     def test_migrate_input_conf_appends_arabic_twins(self):
         from deploy.deployer import _migrate_input_conf
@@ -1620,10 +1634,17 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 new_content = f.read()
 
-            self.assertIn("ا        script-binding memo-history", new_content)
+            self.assertIn("ح        script-binding memo-history", new_content)
+            self.assertIn("ؤ        script-binding uosc/subtitles", new_content)
+            self.assertIn("ش        script-binding uosc/audio", new_content)
+            self.assertIn("ت        script-binding sponsorblock_set_segment", new_content)
+            self.assertIn("م        script-binding sponsorblock_submit_segment", new_content)
             self.assertIn("ى        script-binding autosubsync-menu", new_content)
-            self.assertIn("ﻻ        script-binding sponsorblock_upvote", new_content)
-            self.assertIn("Ctrl+ر           script-binding smart_paste/paste-to-open", new_content)
+            self.assertNotIn("ا        script-binding", new_content)
+            self.assertNotIn("ل        script-binding", new_content)
+            self.assertNotIn("إ        script-binding", new_content)
+            self.assertNotIn("ﻻ", new_content)
+            self.assertNotIn("Ctrl+ر", new_content)
 
     def test_vendored_scripts_exist_and_patched(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

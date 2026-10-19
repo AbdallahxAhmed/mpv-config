@@ -154,8 +154,22 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
                 'lavfi=[alimiter=limit=0.9:level=false]" ""',
                 content,
             )
-            # Rule 6 must never invent a script binding for other keys/CIFs.
-            self.assertNotIn("sub_backdrop", content)
+            # Rule 6 must never invent a script binding for other keys/CIFs:
+            # no sub-back-color cycle-values line may appear, and the ensure-
+            # twins append may only add the documented sub_backdrop twin
+            # (this fixture has no b/ب at all).
+            self.assertNotIn("cycle-values sub-back-color", content)
+            backdrops = [
+                line
+                for line in content.splitlines()
+                if "sub_backdrop" in line
+            ]
+            for line in backdrops:
+                self.assertEqual(
+                    line.split(None, 2)[:2],
+                    ["ب", "script-binding"],
+                    "unexpected rewrite of unrelated binding: %r" % line,
+                )
 
 
 if __name__ == "__main__":

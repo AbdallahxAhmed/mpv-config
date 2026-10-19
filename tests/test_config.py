@@ -176,9 +176,12 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(bindings.get("c"), "script-binding uosc/subtitles")
         self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
         self.assertEqual(bindings.get("Ctrl+c"), "script-binding ytdl_sub_menu/open")
-        self.assertEqual(bindings.get("Ctrl+ؤ"), "script-binding ytdl_sub_menu/open")
         self.assertEqual(bindings.get("a"), "script-binding uosc/audio")
         self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")
+        # Windows control codes make modified Arabic-char combos unreachable
+        # (the layout probe shows ctrl+letter arrives as "\x02"-style codes),
+        # so only the Latin Ctrl+c twin of the YouTube sub menu exists.
+        self.assertNotIn("Ctrl+ؤ", bindings)
 
     def test_active_mpv_conf_volume_max_and_subtitles(self):
         if not self.active_mpv_conf or not os.path.isfile(self.active_mpv_conf):

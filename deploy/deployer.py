@@ -1013,6 +1013,11 @@ def deploy(
                 os.path.join(config_dir, "script-opts", "uosc.conf"),
                 lambda p: _migrate_uosc_conf(p, audit_log=audit_log),
             ),
+            (
+                "migrate-smartskip-conf",
+                os.path.join(config_dir, "script-opts", "SmartSkip.conf"),
+                lambda p: _migrate_smartskip_conf(p, audit_log=audit_log),
+            ),
         )
         for migration_name, migration_path, migrate_fn in migration_targets:
             try:
@@ -1164,67 +1169,12 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         )
         updated_content = updated_content.rstrip() + "\n" + smart_clipboard_block
 
-    # 4. Migrate / ensure Arabic bilingual twin keybindings
-    updated_content = re.sub(
-        r"^[ \t]*Ctrl\+(?:Shift\+)?(?:ر|Ø±)[ \t]+loadfile[^\r\n]*\r?\n?",
-        "",
-        updated_content,
-        flags=re.MULTILINE,
-    )
-    if not re.search(r"^[ \t]*ا[ \t]+script-binding", updated_content, re.MULTILINE):
-        arabic_bindings = (
-            "\n# ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───\n"
-            "# History (memo) — ا = h (History)\n"
-            "ا        script-binding memo-history\n\n"
-            "# SponsorBlock voting — ﻻ = B (Upvote), Shift+ﻻ / ﻵ = Shift+B (Downvote)\n"
-            "ﻻ        script-binding sponsorblock_upvote\n"
-            "Ctrl+ﻻ   script-binding sponsorblock_downvote\n"
-            "ﻵ        script-binding sponsorblock_downvote\n\n"
-            "# SponsorBlock segment marking / submission — ل = g, Shift+ل / إ = G\n"
-            "ل        script-binding sponsorblock_set_segment\n"
-            "Shift+ل  script-binding sponsorblock_submit_segment\n"
-            "إ        script-binding sponsorblock_submit_segment\n\n"
-            "# Explicit Latin bindings for SponsorBlock segment marking\n"
-            "g        script-binding sponsorblock_set_segment\n"
-            "G        script-binding sponsorblock_submit_segment\n\n"
-            "# Subtitle sync (autosubsync) — ى = n (syNc)\n"
-            "ى        script-binding autosubsync-menu\n\n"
-            "# Instant play from clipboard — Ctrl+ر = Ctrl+v\n"
-            "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
-            "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist\n"
-        )
-        updated_content = updated_content.rstrip() + "\n" + arabic_bindings
-    else:
-        ctrl_ar_match = re.search(
-            r"^[ \t]*Ctrl\+(?:ر|Ø±)[ \t]+([^\r\n#]+)", updated_content, re.MULTILINE
-        )
-        if not ctrl_ar_match or "smart_paste" not in ctrl_ar_match.group(1):
-            updated_content = re.sub(
-                r"^[ \t]*Ctrl\+(?:Shift\+)?(?:ر|Ø±)[ \t]+[^\r\n]+\r?\n?",
-                "",
-                updated_content,
-                flags=re.MULTILINE,
-            )
-            updated_content = updated_content.rstrip() + (
-                "\n# Instant play from clipboard — Ctrl+ر = Ctrl+v\n"
-                "Ctrl+ر           script-binding smart_paste/paste-to-open\n"
-                "Ctrl+Shift+ر     script-binding smart_paste/paste-to-playlist\n"
-            )
-
-    # 5. Fix bindings mpv rejects on every version:
-    #    a) CTRL+0 shader clear: change-list needs the empty-string value
-    #       ('clr ""'); a bare 'clr' fails with
-    #       "change-list: required argument value not set".
-    updated_content = re.sub(
-        r"(change-list[ \t]+glsl-shaders[ \t]+)clr(?=[ \t]*;)",
-        r'\1clr ""',
-        updated_content,
-    )
-
-    #    b) Subtitle background-box toggle bound to 'لا' — two codepoints
-    #       (U+0644 U+0627). mpv cannot register multi-codepoint key names and
-    #       rejects it with "Unknown key 'لا'". Rebind to the single-codepoint
-    #       'ب' unless that key is already in use.
+    # 4-pre. Subtitle background-box toggle bound to 'لا' — two codepoints
+    #    (U+0644 U+0627). mpv cannot register multi-codepoint key names and
+    #    rejects it with "Unknown key 'لا'" on every version. Rebind to the
+    #    single-codepoint 'ب' unless that key is already in use. This must
+    #    run BEFORE the rule-4 hazard cleanup so the legacy intent converts
+    #    instead of being deleted wholesale.
     if re.search(r"^[ \t]*لا[ \t]+", updated_content, re.MULTILINE):
         if re.search(r"^[ \t]*ب[ \t]+", updated_content, re.MULTILINE):
             # 'ب' already bound — the 'لا' line duplicates the intent; drop it.
@@ -1244,11 +1194,88 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         # Keep the explanatory comment honest.
         updated_content = updated_content.replace("— لا = b", "— ب = b")
 
+    # 4. Arabic twin hygiene (layout-probed).
+    #    Ground truth from probing the deployed 00000C01 (Arabic 102 AZERTY)
+    #    layout: the physical b key emits the two-codepoint lam-alef sequence
+    #    U+0644 U+0627, and mpv receives it as two unicode events — any
+    #    binding on a component glyph (ل/ا, or آ/أ/إ from the shifted
+    #    composites) fires while the user types lam-alef. That is how the
+    #    physical b key used to pop SponsorBlock marking. Presentation forms
+    #    (U+FExx like ﻻ) are never emitted and were dead code. Modified
+    #    Arabic combos never fire either: Windows turns ctrl+letter into a
+    #    control code that mpv names "ctrl+b", so Ctrl+ر / Ctrl+ؤ style
+    #    declarations are unreachable on every layout.
+    #    Delete all such lines, then make sure each safe twin exists once.
+    hazard_glyphs = re.compile(r"[\u0627\u0622\u0623\u0625\u0644\uFE70-\uFEFF]")
+    arabic_script = re.compile(r"[\u0600-\u06FF\uFE70-\uFEFF]")
+    kept_lines = []
+    for line in updated_content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            kept_lines.append(line)
+            continue
+        key = stripped.split(None, 1)[0]
+        plain_hazard = "+" not in key and hazard_glyphs.search(key) is not None
+        combo_hazard = "+" in key and arabic_script.search(key) is not None
+        if plain_hazard or combo_hazard:
+            continue
+        kept_lines.append(line)
+    updated_content = "\n".join(kept_lines) + "\n"
+
+    #    Safe twins: single-codepoint letters that no lam-alef composite on
+    #    the deployed layout can emit (ل ا آ أ إ excluded). Ensure each is
+    #    bound exactly once; appending tolerates a mismatched command since
+    #    later rules (5b/6) re-key legacy 'ب' cycle-values forms.
+    safe_twins = (
+        ("ؤ", "script-binding uosc/subtitles"),
+        ("ش", "script-binding uosc/audio"),
+        ("ى", "script-binding autosubsync-menu"),
+        ("ح", "script-binding memo-history"),
+        ("ت", "script-binding sponsorblock_set_segment"),
+        ("م", "script-binding sponsorblock_submit_segment"),
+        ("ب", "script-binding sub_backdrop/toggle"),
+    )
+    bound_keys = {
+        line.split(None, 1)[0]
+        for line in updated_content.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    missing_twins = [(key, cmd) for key, cmd in safe_twins if key not in bound_keys]
+    if missing_twins:
+        block = (
+            "\n# ─── Arabic Bilingual Twin Bindings (Arabic 102 AZERTY layout) ───\n"
+            "# Safe letters only: b emits the lam-alef pair (ل+ا) so ligature\n"
+            "# glyphs stay unbound, and ctrl/alt/shift+Arabic chars never fire\n"
+            "# (Windows control codes) — Latin bindings own modified combos.\n"
+        )
+        per_twin_comments = {
+            "ؤ": "# Subtitles menu (uosc) — ؤ = c\n",
+            "ش": "# Audio tracks & dubs menu (uosc) — ش = a\n",
+            "ى": "# Subtitle sync (autosubsync) — ى = n\n",
+            "ح": "# History (memo) — ح = h\n",
+            "ت": "# SponsorBlock segment marking — ت = g\n",
+            "م": "# SponsorBlock segment submission — م = G\n",
+            "ب": "# Subtitle background box toggle — ب = b\n",
+        }
+        for key, cmd in missing_twins:
+            block += per_twin_comments[key] + f"{key:<9}{cmd}\n"
+        updated_content = updated_content.rstrip() + "\n" + block
+
+    # 5. Fix bindings mpv rejects on every version:
+    #    a) CTRL+0 shader clear: change-list needs the empty-string value
+    #       ('clr ""'); a bare 'clr' fails with
+    #       "change-list: required argument value not set".
+    updated_content = re.sub(
+        r"(change-list[ \t]+glsl-shaders[ \t]+)clr(?=[ \t]*;)",
+        r'\1clr ""',
+        updated_content,
+    )
+
     # 6. The subtitle background-box toggle moved into its own script
     #    (scripts/sub_backdrop.lua), whose OSD shows a readable
     #    "Subtitle backdrop: on/off" instead of mpv's raw
     #    "sub-back-color = #B3080808" feedback. Rebind every legacy
-    #    cycle-values form under b/ب (rule 5 already turned 'لا' into 'ب').
+    #    cycle-values form under b/ب (4-pre already turned 'لا' into 'ب').
     updated_content, backdrop_n = re.subn(
         r'^([ \t]*(?:b|ب)[ \t]+)cycle-values[ \t]+sub-back-color[ \t]+"([^"]*)"[ \t]+"([^"]*)"[ \t]*$',
         r"\1script-binding sub_backdrop/toggle",
@@ -1265,6 +1292,28 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             if marker in updated_content and (marker + osd_note) not in updated_content:
                 updated_content = updated_content.replace(marker, marker + osd_note, 1)
 
+    # 7. Collapse duplicate identical active binding lines. Old append-style
+    #    migrations could bind the same key+command twice; duplicate entries
+    #    are noise at best and a conflict risk at worst.
+    kept_lines = []
+    seen_signatures = set()
+    dedupe_changed = False
+    for line in updated_content.splitlines():
+        stripped = line.strip()
+        signature = None
+        if stripped and not stripped.startswith("#"):
+            parts = stripped.split(None, 1)
+            if len(parts) == 2:
+                signature = re.sub(r"\s+", " ", parts[0]) + "\x1f" + re.sub(r"\s+", " ", parts[1])
+        if signature is not None:
+            if signature in seen_signatures:
+                dedupe_changed = True
+                continue
+            seen_signatures.add(signature)
+        kept_lines.append(line)
+    if dedupe_changed:
+        updated_content = "\n".join(kept_lines) + "\n"
+
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
@@ -1274,6 +1323,70 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
                 "modify",
                 "ok",
                 "migrated input.conf bindings (F8, mouse, clipboard, arabic)",
+            )
+        return True
+
+    return False
+
+
+def _migrate_smartskip_conf(conf_path, audit_log=None):
+    """Re-key SmartSkip's unreachable/unsafe Arabic twins onto safe letters.
+
+    Layout ground truth (probed on the deployed 00000C01 Arabic 102 AZERTY):
+    modified combos (ctrl/alt/shift + Arabic char) never produce char events
+    — Windows converts ctrl+letter to a control code mpv names "ctrl+b" — so
+    'ctrl+ز', 'alt+ز', 'shift+ى', 'alt+ى' and 'ctrl+ى' can never fire. The
+    plain 'إ' twin is unsafe because Shift+T emits the two-codepoint لإ
+    sequence whose second glyph is إ, which would trigger the countdown
+    prompt while typing. The replacements below are single-codepoint letters
+    that appear in no lam-alef composite and stay free of other bindings.
+    """
+    if not os.path.isfile(conf_path):
+        return False
+
+    with open(conf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    updated = content
+    replacements = (
+        (
+            'toggle_autoskip_keybind=["ctrl+.", "ctrl+ز"]',
+            'toggle_autoskip_keybind=["ctrl+.", "ز"]',
+        ),
+        (
+            'toggle_category_autoskip_keybind=["alt+.", "alt+ز"]',
+            'toggle_category_autoskip_keybind=["alt+.", "د"]',
+        ),
+        (
+            'proceed_autoskip_countdown_keybind=["enter", "y", "إ", "غ"]',
+            'proceed_autoskip_countdown_keybind=["enter", "y", "غ"]',
+        ),
+        (
+            'add_chapter_keybind=["shift+n", "shift+ى", "آ"]',
+            'add_chapter_keybind=["shift+n", "ء"]',
+        ),
+        (
+            'remove_chapter_keybind=["alt+n", "alt+ى"]',
+            'remove_chapter_keybind=["alt+n", "ق"]',
+        ),
+        (
+            'write_chapters_keybind=["ctrl+n", "ctrl+ى"]',
+            'write_chapters_keybind=["ctrl+n", "ك"]',
+        ),
+    )
+
+    for old, new in replacements:
+        updated = updated.replace(old, new)
+
+    if updated != content:
+        with open(conf_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        if audit_log:
+            audit_log.record_file(
+                conf_path,
+                "modify",
+                "ok",
+                "re-keyed SmartSkip Arabic twins to safe single-codepoint keys",
             )
         return True
 
