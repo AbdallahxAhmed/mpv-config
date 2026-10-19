@@ -320,8 +320,15 @@ def _patch_mpv_conf(
 ):
     """Patch mpv.conf.template with profile-aware + platform-required values."""
     linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
-    border_value = "no" if env.os == "windows" else "yes"
     native_fs_value = "no" if env.os == "linux" else ""
+    # Borderless on every OS so uosc's top bar (title + window controls) is
+    # the one chrome everywhere. With border=yes the WM draws decorations and
+    # uosc hides its chrome (top_bar=no-border), which made Linux look
+    # different from Windows. uosc's min/max/close ride on mpv's
+    # window-minimized/window-maximized properties (mpv >= 0.38 implements
+    # them for X11/Wayland; unminimize is limited on Wayland — the taskbar
+    # still restores), and mpv handles window dragging on borderless windows.
+    border_value = "no"
     defaults = resolved_defaults
     required = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
     with open(template_path, "r", encoding="utf-8") as f:

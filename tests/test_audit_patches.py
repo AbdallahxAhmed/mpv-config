@@ -103,6 +103,36 @@ class TestAuditPatches(unittest.TestCase):
             self.assertNotIn("d3d11-flip", linux_out)
             self.assertNotIn("d3d11-output-format", linux_out)
 
+    def test_borderless_uosc_chrome_on_every_platform(self):
+        """border=no must be deployed on every OS so uosc's title bar and
+        window controls are the single chrome everywhere (WM decorations off)."""
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        cases = [
+            ("windows", {"os": "windows", "platform_key": "windows", "gpu_vendor": "nvidia"}),
+            ("arch", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "nvidia"}),
+            # the Mint friend's actual platform family
+            ("ubuntu", {"os": "linux", "platform_key": "ubuntu", "distro": "mint", "gpu_vendor": "intel"}),
+            ("fedora", {"os": "linux", "platform_key": "fedora", "distro": "fedora", "gpu_vendor": "amd"}),
+            ("macos", {"os": "macos", "platform_key": "macos", "gpu_vendor": "apple"}),
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for tag, kwargs in cases:
+                dest = os.path.join(tmpdir, f"{tag}_mpv.conf")
+                env = Environment(**kwargs)
+                _patch_mpv_conf(
+                    template_file,
+                    dest,
+                    env,
+                    selected_profile="native",
+                    resolved_defaults={"gpu_api": "d3d11" if env.os == "windows" else "opengl"},
+                )
+                with open(dest, "r", encoding="utf-8") as f:
+                    out = f.read()
+                self.assertIn("border                    = no", out, f"missing borderless on {tag}")
+                self.assertNotIn("border                    = yes", out, f"WM decorations on {tag}")
+
     def test_template_profile_cond_nil_safe(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         template_file = os.path.join(repo_root, "config", "mpv.conf.template")
