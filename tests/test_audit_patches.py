@@ -111,7 +111,10 @@ class TestAuditPatches(unittest.TestCase):
 
         cases = [
             ("windows", {"os": "windows", "platform_key": "windows", "gpu_vendor": "nvidia"}),
-            ("arch", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "nvidia"}),
+            # x11: Arch/Manjaro/CachyOS family (os-release check collapses to "arch")
+            ("arch-x11", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "nvidia"}),
+            # wayland on the same family (CachyOS default is a Wayland DE)
+            ("arch-wayland", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "amd", "display": "wayland"}),
             # the Mint friend's actual platform family
             ("ubuntu", {"os": "linux", "platform_key": "ubuntu", "distro": "mint", "gpu_vendor": "intel"}),
             ("fedora", {"os": "linux", "platform_key": "fedora", "distro": "fedora", "gpu_vendor": "amd"}),
@@ -132,6 +135,82 @@ class TestAuditPatches(unittest.TestCase):
                     out = f.read()
                 self.assertIn("border                    = no", out, f"missing borderless on {tag}")
                 self.assertNotIn("border                    = yes", out, f"WM decorations on {tag}")
+
+    def test_patched_mpv_conf_legacy_intel_omits_vk_gpu_context(self):
+        """Arch/CachyOS legacy Intel: gpu-api is forced to opengl there, so an
+        auto-resolved Vulkan gpu-context (x11vk/waylandvk) must not ship."""
+        from deploy.detector import Environment
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        template_file = os.path.join(repo_root, "config", "mpv.conf.template")
+
+        for display in ("x11", "wayland"):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                env = Environment(
+                    os="linux",
+                    platform_key="arch",
+                    distro="arch",  # CachyOS reports as arch
+                    display=display,
+                    gpu_vendor="intel",
+                    legacy_vulkan_gpu=True,
+                )
+                dest = os.path.join(tmpdir, f"mpv_{display}.conf")
+                _patch_mpv_conf(
+                    template_file,
+                    dest,
+                    env,
+                    selected_profile="native",
+                    resolved_defaults={"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto"},
+                )
+                with open(dest, "r", encoding="utf-8") as f:
+                    out = f.read()
+                self.assertIn("= opengl", out, f"opengl not forced ({display})")
+                self.assertNotIn("x11vk", out, f"vk context leaked on x11 ({display})")
+                self.assertNotIn("waylandvk", out, f"vk context leaked on wayland ({display})")
+
+        # A non-legacy arch machine keeps the display-appropriate vk context.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = Environment(
+                os="linux", platform_key="arch", distro="arch",
+                display="wayland", gpu_vendor="nvidia",
+            )
+            dest = os.path.join(tmpdir, "mpv.conf")
+            _patch_mpv_conf(
+                template_file, dest, env,
+                selected_profile="native",
+                resolved_defaults={"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto"},
+            )
+            with open(dest, "r", encoding="utf-8") as f:
+                out = f.read()
+            self.assertIn("waylandvk", out)
+
+    def test_migrate_mpv_conf_legacy_intel_removes_vk_gpu_context(self):
+        """Existing machines: the gpu-api=opengl repair must also drop a stale
+        vk gpu-context line, which is uninitializable after the opengl force."""
+        from deploy.detector import Environment
+        from deploy.deployer import _migrate_mpv_conf
+
+        env = Environment(
+            os="linux", platform_key="arch", distro="arch",
+            gpu_vendor="intel", legacy_vulkan_gpu=True,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "gpu-api                  = vulkan\n"
+                    "gpu-context              = x11vk\n"
+                    "vo                       = gpu-next\n"
+                )
+            self.assertTrue(_migrate_mpv_conf(conf_path, env=env))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+            self.assertNotIn("x11vk", new_content)
+            self.assertNotIn("gpu-context", new_content)
+            self.assertIn("= opengl", new_content)
+            self.assertIn("vo                       = gpu-next", new_content)
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path, env=env))
 
     def test_template_profile_cond_nil_safe(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -353,6 +432,45 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write("gpu-api                  = vulkan\n")
             self.assertFalse(_migrate_mpv_conf(conf_path, env=healthy))
+
+    def test_migrate_mpv_conf_forces_borderless_for_uosc_chrome(self):
+        """Deployer-owned border rule: a deployed border=yes predating the
+        borderless policy keeps WM decorations forever (deploy() preserves
+        existing mpv.conf) — the migration repairs it to match fresh patches."""
+        from deploy.deployer import _migrate_mpv_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "osc                        = no\n"
+                    "border                    = yes\n"
+                    "vo                        = gpu-next\n"
+                )
+
+            self.assertTrue(_migrate_mpv_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("border                    = no", new_content)
+            self.assertNotIn("border                    = yes", new_content)
+            self.assertIn("osc                        = no\n", new_content)
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+
+        # Already-borderless and commented/other-border lines are untouched.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "border                    = no\n"
+                    "# border = yes\n"
+                    "timeline-border = 1\n"
+                )
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("# border = yes", content)
 
     def test_patched_mpv_conf_forces_opengl_on_legacy_intel(self):
         from deploy.detector import Environment

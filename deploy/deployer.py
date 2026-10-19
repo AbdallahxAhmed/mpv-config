@@ -353,9 +353,11 @@ def _patch_mpv_conf(
     # that initialize fine but render video magenta ("Haswell Vulkan support
     # is incomplete"). An api priority list cannot fix this because the
     # broken Vulkan still initializes first — force the complete OpenGL path.
+    forced_opengl = False
     effective_gpu_api = defaults.get("gpu_api", "auto")
     if getattr(env, "legacy_vulkan_gpu", False) and effective_gpu_api == "vulkan":
         effective_gpu_api = "opengl"
+        forced_opengl = True
         ui.warn(
             "Legacy Intel iGPU detected — Vulkan renders magenta there; "
             "forcing gpu-api=opengl."
@@ -363,7 +365,7 @@ def _patch_mpv_conf(
         if audit_log:
             audit_log.record_note(
                 "gpu_api_forced_opengl",
-                "legacy Intel iGPU detected — forced gpu-api=opengl",
+                "legacy Intel iGPU detected — forced opengl",
             )
     replacements = {
         "{{GPU_API}}": effective_gpu_api,
@@ -387,7 +389,12 @@ def _patch_mpv_conf(
     base_hwdec = defaults.get("hwdec", "auto")
     hwdec = base_hwdec
     if gpu_context == "auto":
-        if env.display == "wayland":
+        if forced_opengl:
+            # A "vk"-specific gpu-context resolves the Vulkan surface API;
+            # paired with forced opengl mpv cannot initialize the GL path
+            # there. Drop the context and let mpv pick a compatible one.
+            gpu_context = ""
+        elif env.display == "wayland":
             gpu_context = "waylandvk"
         elif env.display == "x11":
             gpu_context = "x11vk"
@@ -1263,16 +1270,31 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     3. Version adapt: comments out template options newer than the
        installed mpv, and restores previously commented ones once that
        mpv can actually parse them (upgrade-then-redeploy flow).
+    4. Re-asserts deployer-owned values whose policy changed in the repo
+       (currently: border=no — uosc draws title bar + window controls on
+       every OS/display; a deployed border=yes predating the change keeps
+       WM decorations alive forever). Anything personal belongs in
+       mpv.conf.user, which overrides mpv.conf and is never touched.
     """
     if not os.path.isfile(mpv_conf_path):
         return False
     with open(mpv_conf_path, "r", encoding="utf-8") as f:
         content = f.read()
     mpv_version = getattr(env, "mpv_version", None) if env is not None else None
+
+    border_fixed = 0
+    updated = content
+    if re.search(r"^[ \t]*border[ \t]*=[ \t]*yes\b[^\r\n]*$", updated, re.MULTILINE):
+        updated, border_fixed = re.subn(
+            r"^([ \t]*)border([ \t]*)=[ \t]*yes\b[^\r\n]*$",
+            lambda m: "border".ljust(26) + "= no",
+            updated,
+            flags=re.MULTILINE,
+        )
     updated = re.sub(
         r"^([ \t]*)override-display-fps([ \t]*=)",
         r"\1display-fps-override\2",
-        content,
+        updated,
         flags=re.MULTILINE,
     )
     if env is not None and getattr(env, "legacy_vulkan_gpu", False):
@@ -1282,6 +1304,20 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             updated,
             flags=re.MULTILINE,
         )
+        # A vk-specific gpu-context resolves the Vulkan surface API; paired
+        # with the forced opengl path above it cannot initialize. Delete the
+        # line so mpv picks a compatible context at runtime.
+        updated, removed_vk_ctx = re.subn(
+            r"^([ \t]*)gpu-context[ \t]*=[ \t]*(?:x11vk|waylandvk)[ \t]*[^\r\n]*\r?\n?",
+            "",
+            updated,
+            flags=re.MULTILINE,
+        )
+        if removed_vk_ctx and audit_log:
+            audit_log.record_note(
+                "gpu_context_removed",
+                "vk-specific gpu-context incompatible with forced opengl",
+            )
     # Comment out options REMOVED by newer mpv (they hard-fail parsing
     # there). Both sub-ass-vsfilter-aspect-compat and
     # sub-ass-vsfilter-blur-compat were replaced by sub-ass-use-video-data;
@@ -1337,6 +1373,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         f.write(updated)
     if audit_log:
         detail = "repaired mpv.conf options (renames / GPU-API safety)"
+        if border_fixed:
+            detail += f" — border → no ({border_fixed})"
         if restored_count:
             detail += f" — restored {restored_count} option(s) for upgraded mpv"
         if sanitized_count:
