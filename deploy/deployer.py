@@ -1244,6 +1244,27 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         # Keep the explanatory comment honest.
         updated_content = updated_content.replace("— لا = b", "— ب = b")
 
+    # 6. The subtitle background-box toggle moved into its own script
+    #    (scripts/sub_backdrop.lua), whose OSD shows a readable
+    #    "Subtitle backdrop: on/off" instead of mpv's raw
+    #    "sub-back-color = #B3080808" feedback. Rebind every legacy
+    #    cycle-values form under b/ب (rule 5 already turned 'لا' into 'ب').
+    updated_content, backdrop_n = re.subn(
+        r'^([ \t]*(?:b|ب)[ \t]+)cycle-values[ \t]+sub-back-color[ \t]+"([^"]*)"[ \t]+"([^"]*)"[ \t]*$',
+        r"\1script-binding sub_backdrop/toggle",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if backdrop_n:
+        osd_note = (
+            "# OSD shows \"Subtitle backdrop: on/off\" via scripts/sub_backdrop.lua\n"
+        )
+        marker_en = "# Subtitle background box toggle (Netflix / YouTube translucent box <-> transparent Cinema)\n"
+        marker_ar = "# Subtitle background box toggle — ب = b\n"
+        for marker in (marker_en, marker_ar):
+            if marker in updated_content and (marker + osd_note) not in updated_content:
+                updated_content = updated_content.replace(marker, marker + osd_note, 1)
+
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:
             f.write(updated_content)

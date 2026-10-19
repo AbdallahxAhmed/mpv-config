@@ -33,6 +33,7 @@
 # │ a           │  Audio tracks & dubs menu (uosc)                 │
 # │ h           │  History — open watch history (memo)             │
 # │ n           │  Subtitle syNc menu (autosubsync)                │
+# │ b           │  Subtitle backdrop box on/off (Netflix look)     │
 # │ RIGHT       │  Fast-forward (evafast)                          │
 # ├─────────────┼───────────────────────────────────────────────────┤
 # │             │  ⏭️  SmartSkip (>, <, ?, Ctrl/Shift/Alt+N)       │
@@ -152,7 +153,8 @@ Ctrl+B   script-binding sponsorblock_downvote
 n    script-binding autosubsync-menu
 
 # Subtitle background box toggle (Netflix / YouTube translucent box <-> transparent Cinema)
-b    cycle-values sub-back-color "#B3080808" "#00000000"
+# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
+b    script-binding sub_backdrop/toggle
 
 # ─── Arabic Bilingual Twin Bindings (Arabic 101/102 Layout) ───────
 # Subtitles menu (uosc) — ؤ = c
@@ -185,10 +187,11 @@ G        script-binding sponsorblock_submit_segment
 ى        script-binding autosubsync-menu
 
 # Subtitle background box toggle — ب = b
+# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
 # NOTE: mpv cannot register multi-codepoint key names. The old binding used
 # 'لا' — two codepoints (U+0644 U+0627) — so mpv rejected it with
 # "Unknown key 'لا'" on every version. 'ب' is a single codepoint and binds.
-ب       cycle-values sub-back-color "#B3080808" "#00000000"
+ب       script-binding sub_backdrop/toggle
 
 # Instant play from clipboard — Ctrl+ر = Ctrl+v
 Ctrl+ر           script-binding smart_paste/paste-to-open

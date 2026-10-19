@@ -12,6 +12,7 @@ suites = [
     "test_player_toolbar.lua",
     "test_caption_menu.lua",
     "test_smart_paste.lua",
+    "test_sub_backdrop.lua",
     "test_thumbfast.lua",
 ]
 

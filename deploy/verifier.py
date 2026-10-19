@@ -301,6 +301,7 @@ def verify(config_dir, env):
         "thumbfast",
         "SmartSkip",
         "smart-paste",
+        "sub_backdrop",
         "ytdl_hook",
         "ytdl-sub-menu",
         "sponsorblock",

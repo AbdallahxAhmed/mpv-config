@@ -357,10 +357,11 @@ class TestAuditPatches(unittest.TestCase):
             # 'لا' is two codepoints (U+0644 U+0627); mpv rejects
             # multi-codepoint key names with "Unknown key 'لا'".
             self.assertIn(
-                'ب       cycle-values sub-back-color "#B3080808" "#00000000"',
+                'ب       script-binding sub_backdrop/toggle',
                 new_content,
             )
             self.assertNotIn("لا", new_content)
+            self.assertNotIn("cycle-values sub-back-color", new_content)
 
             # Idempotent for these two fixes specifically.
             self.assertNotIn("clr;", new_content)
