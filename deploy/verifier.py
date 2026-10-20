@@ -328,10 +328,19 @@ def verify(config_dir, env):
         with open(os.path.join(config_dir, "script-opts", "stream_quality.conf"), "r", encoding="utf-8") as stream:
             quality_content = "\n".join(line for line in stream if not line.lstrip().startswith("#"))
         has_quality_value = "default_quality=" in quality_content
+        quality_value = next(
+            (
+                line.strip()
+                for line in quality_content.splitlines()
+                if line.strip().startswith("default_quality=")
+            ),
+            "",
+        )
         check(
             "stream_quality.conf default_quality line present",
             has_quality_value,
-            "script-opts/stream_quality.conf is missing a default_quality=<n> line",
+            quality_value
+            or "script-opts/stream_quality.conf is missing a default_quality=<n> line",
         )
 
     for relative in ("mpv.conf", "input.conf", "script-opts/autosubsync.conf"):
