@@ -355,7 +355,8 @@ class _InlineDownloadProgress:
 
     BAR_WIDTH = 24
 
-    def __init__(self, label, total=None, stdout=None, clock=time.monotonic, update_interval=0.1):
+    def __init__(self, label, total=None, stdout=None, clock=time.monotonic,
+                 update_interval=0.1, tick_interval=1.0):
         self.label = (label or "download")
         if len(self.label) > 40:
             self.label = self.label[:37] + "..."
@@ -366,11 +367,14 @@ class _InlineDownloadProgress:
         self._stdout = stdout if stdout is not None else sys.stdout
         self._clock = clock
         self._interval = max(0.0, update_interval)
+        self._tick_interval = max(0.0, tick_interval)
         self._done = 0
         self._started = None
         self._last_render = float("-inf")
         self._last_len = 0
         self._rendered = False
+        self._stop_ticks = None
+        self._tick_thread = None
         try:
             self._tty = bool(self._stdout.isatty())
         except Exception:
@@ -380,6 +384,54 @@ class _InlineDownloadProgress:
         """Anchor the elapsed-time base (called when the transfer begins)."""
         if self._started is None:
             self._started = self._clock()
+        self._stop_ticks_and_join()
+
+    def settle(self):
+        """First byte arrived: restart the elapsed clock on the body phase.
+
+        Speed/ETA then reflect the actual transfer rate instead of being
+        diluted by the (sometimes slow) connect time before it.
+        """
+        self._started = self._clock()
+        self._stop_ticks_and_join()
+
+    def start_connect_ticks(self):
+        """Liveness during the connect phase (DNS/TLS/CDN), where no bytes flow.
+
+        urlopen() blocks the main thread; a 30+ s connect previously looked
+        identical to a hang. A tick thread re-renders 'connecting Ns' every
+        second until the first byte arrives.
+        """
+        self._started = self._clock()
+        self._stop_ticks_and_join()
+        if not self._tty:
+            return
+        self._stop_ticks = threading.Event()
+        self._write_line(self._connect_line())
+        event = self._stop_ticks
+        self._tick_thread = threading.Thread(
+            target=self._tick_loop, args=(event,), daemon=True
+        )
+        self._tick_thread.start()
+
+    def _tick_loop(self, stop_event):
+        while not stop_event.wait(self._tick_interval):
+            self._write_line(self._connect_line())
+
+    def _connect_line(self):
+        elapsed = self._clock() - self._started
+        return f"> {self.label}  connecting" + (f" {int(elapsed)}s" if elapsed >= 1 else "")
+
+    def _stop_ticks_and_join(self):
+        event = self._stop_ticks
+        if event is None:
+            return
+        self._stop_ticks = None
+        event.set()
+        thread = self._tick_thread
+        self._tick_thread = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
 
     def update(self, chunk_size):
         """Account for one received chunk; render when the throttle allows."""
@@ -391,6 +443,7 @@ class _InlineDownloadProgress:
 
     def finish(self):
         """Final render at the real byte count, then close the line."""
+        self._stop_ticks_and_join()
         if not self._tty:
             return
         self._render()
@@ -400,6 +453,7 @@ class _InlineDownloadProgress:
 
     def abort(self):
         """Close the in-place line after a failure so logs stay readable."""
+        self._stop_ticks_and_join()
         if self._tty and self._rendered:
             self._stdout.write("\n")
             self._stdout.flush()
@@ -428,9 +482,15 @@ class _InlineDownloadProgress:
             parts.append(speed_text)
 
         line = "  ".join(parts)
+        self._write_line(line)
+
+    def _write_line(self, line):
+        """Overwrite the current console line in place (carriage return)."""
         pad = max(0, self._last_len - len(line))
         self._last_len = len(line)
         self._rendered = True
+        if not self._tty:
+            return
         try:
             self._stdout.write("\r" + line + " " * pad)
             self._stdout.flush()
@@ -461,10 +521,14 @@ def _download_asset(url, dest_path, label=None, stdout=None):
         url, headers={"User-Agent": "mpv-config installer", "Accept-Encoding": "identity"}
     )
     try:
+        # Liveness during the connect stretch (DNS/TLS/CDN), where no byte
+        # progress exists yet; must run before urlopen() so a stalled
+        # connection shows 'connecting Ns' instead of silence.
+        progress.start_connect_ticks()
         # 60 s connect/read timeout: a dead CDN connection cannot strand the
         # installer forever with no output either way.
         resp = urllib.request.urlopen(request, timeout=60)
-        progress.start()
+        progress.settle()
         try:
             length = resp.headers.get("Content-Length")
             try:

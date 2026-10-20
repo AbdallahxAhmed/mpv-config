@@ -7,6 +7,7 @@ import io
 import os
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -100,6 +101,39 @@ class InlineProgressTests(unittest.TestCase):
         progress.update(300)
         progress.abort()
         self.assertEqual(out.getvalue().count("\n"), 1)
+
+    def test_connect_ticks_show_liveness_before_first_byte(self):
+        progress, out, clock = _progress(total=1000, tick_interval=0.1)
+        progress.start_connect_ticks()
+        time.sleep(0.3)  # connect phase: only tick frames exist so far
+        self.assertIn("connecting", out.getvalue())
+        self.assertNotIn("%", out.getvalue())  # no fake progress while dialing
+
+        clock.advance(0.5)
+        progress.update(500)  # first byte: ticks stop, bar takes over
+        text = out.getvalue()
+        self.assertIn("50%", text)
+        self.assertIsNone(progress._tick_thread)  # tick thread joined
+
+    def test_connect_ticks_aborted_mid_connect_close_the_line(self):
+        progress, out, clock = _progress(total=1000, tick_interval=0.1)
+        progress.start_connect_ticks()
+        time.sleep(0.25)
+        progress.abort()
+        self.assertEqual(out.getvalue().count("\n"), 1)
+        self.assertIsNone(progress._tick_thread)
+
+    def test_connect_ticks_stay_silent_when_not_a_tty(self):
+        out = io.StringIO()
+        clock = _FakeClock()
+        progress = _InlineDownloadProgress(
+            "yt-dlp.exe", total=1000, stdout=out, clock=clock, tick_interval=0.1
+        )
+        progress.start_connect_ticks()
+        time.sleep(0.2)
+        progress.update(500)
+        progress.finish()
+        self.assertEqual(out.getvalue(), "")
 
 
 _BODY = b"x" * 262144  # one full 256 KiB chunk
