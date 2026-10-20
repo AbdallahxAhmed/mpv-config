@@ -21,6 +21,15 @@ local o = {
     ytdl_path = "",
 }
 
+-- ── Default streaming quality (single source of truth) ────────────────
+-- Read from script-opts/stream_quality.conf so mpv.conf stays free of a
+-- pinned ytdl-format. mpv.conf / mpv.conf.user `ytdl-format` still wins
+-- whenever it is set (the hook only builds a format when the option is
+-- empty). The default file ships `default_quality=1080`, which keeps the
+-- historic behavior; `0` means no cap (yt-dlp's own preference order).
+local stream_opts = { default_quality = "1080" }
+options.read_options(stream_opts, "stream_quality")
+
 local ytdl = {
     path = "",
     paths_to_search = {"yt-dlp", "yt-dlp_x86", "youtube-dl"},
@@ -43,6 +52,18 @@ if policy_path then
     else
         msg.warn("Stream policy unavailable; keeping all upstream formats")
     end
+end
+
+-- Default ytdl-format for streams, built from script-opts/stream_quality.conf.
+-- Never applied when someone set ytdl-format explicitly (mpv.conf.user or the
+-- Quality button): an empty option is the only trigger.
+local function default_stream_format()
+    if stream_policy and stream_policy.stream_default_format then
+        return stream_policy.stream_default_format(stream_opts.default_quality)
+    end
+    local q = tonumber(stream_opts.default_quality)
+    if not q or q <= 0 then return nil end
+    return string.format("bestvideo[height<=?%d]+bestaudio/best[height<=?%d]/best", q, q)
 end
 
 local chapter_list = {}
@@ -1029,6 +1050,17 @@ local function run_ytdl_hook(url)
     if mp.get_property("options/vid") == "no" and #format == 0 then
         format = "bestaudio/best"
         msg.verbose("Video disabled. Only using audio")
+    end
+
+    -- Streaming default cap comes from script-opts/stream_quality.conf —
+    -- mpv.conf no longer pins ytdl-format. Any explicit ytdl-format
+    -- (mpv.conf.user, or set for this file by the Quality button) still
+    -- wins: the hook only builds a format while the option stays empty.
+    if format == "" and not option_was_set("ytdl-format") then
+        format = default_stream_format() or ""
+        if format ~= "" then
+            msg.verbose("stream default quality", stream_opts.default_quality, "->", format)
+        end
     end
 
     if format ~= "" and format ~= "ytdl" then

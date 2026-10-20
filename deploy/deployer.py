@@ -599,6 +599,29 @@ def _normalize_windows_path(path):
     return os.path.normpath(path).replace("\\", "/")
 
 
+def _patch_stream_quality_conf(path, quality):
+    """Rewrite the default_quality value in stream_quality.conf, keeping comments.
+
+    Returns False when the file does not exist (caller decides about warnings).
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            lines = stream.read().splitlines()
+    except FileNotFoundError:
+        return False
+    replaced = False
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*default_quality\s*=", line):
+            lines[i] = f"default_quality={quality}"
+            replaced = True
+            break
+    if not replaced:
+        lines.append(f"default_quality={quality}")
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write("\n".join(lines) + "\n")
+    return True
+
+
 def _patch_autosubsync_conf(template_path, dest_path, env):
     """Patch autosubsync.conf.template with platform-specific paths."""
     defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
@@ -875,6 +898,7 @@ def deploy(
     mpv_profile=MPV_PROFILE_DEFAULT,
     anime_preset="A",
     scaler_tier="balanced",
+    stream_quality="1080",
     display_mode="fixed",
     dither_depth="auto",
     lockfile=None,
@@ -884,6 +908,9 @@ def deploy(
 
     Existing mpv.conf/input.conf/user overrides and script-opts are preserved.
     Profile flags seed NEW configurations; migration is an explicit command.
+    ``stream_quality`` likewise only patches a freshly deployed
+    script-opts/stream_quality.conf — a pre-existing one (player Quality menu
+    choice / hand edit) is personal and stays.
     Dependencies and Windows shortcuts are outside the filesystem transaction.
     """
     if dry_run:
@@ -938,6 +965,22 @@ def deploy(
         if os.path.isfile(ass_template) and not os.path.exists(ass_dest):
             _patch_autosubsync_conf(ass_template, ass_dest, env)
             newly_managed.append("script-opts/autosubsync.conf")
+        # --stream-quality seeds only FRESH stream_quality.conf files. A file
+        # that already existed (installed by a previous run, later chosen in
+        # the player's Quality menu or edited by hand) is personal and is
+        # never rewritten here.
+        quality_old = os.path.join(opts_old, "stream_quality.conf")
+        quality_dst = os.path.join(opts_dst, "stream_quality.conf")
+        if os.path.lexists(quality_old):
+            ui.info(
+                "Preserving existing script-opts/stream_quality.conf "
+                "(--stream-quality ignored for existing installs)."
+            )
+        elif stream_quality and os.path.isfile(quality_dst):
+            if _patch_stream_quality_conf(quality_dst, stream_quality):
+                if "script-opts/stream_quality.conf" not in newly_managed:
+                    newly_managed.append("script-opts/stream_quality.conf")
+                ui.info(f"Stream default quality: {stream_quality}")
         names.append("script-opts")
         selected, defaults = _resolve_mpv_profile(env, mpv_profile)
         if not os.path.lexists(os.path.join(config_dir, "mpv.conf")):
@@ -1425,6 +1468,29 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             updated,
             flags=re.MULTILINE,
         )
+    # The streaming quality default moved to script-opts/stream_quality.conf
+    # (scripts/ytdl_hook.lua builds ytdl-format from it). Only the exact
+    # template-generated lines are neutralized — anything the user changed
+    # by hand is personal and stays.
+    updated, removed_format = re.subn(
+        r'^[ \t]*ytdl-format[ \t]*=[ \t]*"?bestvideo\[height<=\?1080\]'
+        r"\+bestaudio/best\[height<=\?1080\]/best\"?[ \t]*$",
+        "# streaming default quality now lives in script-opts/stream_quality.conf",
+        updated,
+        flags=re.MULTILINE,
+    )
+    updated, fixed_format_sort = re.subn(
+        r"^([ \t]*)ytdl-raw-options-append([ \t]*)=[ \t]*format-sort=res:1080,vbr,abr[^\r\n]*$",
+        lambda m: m.group(1) + "ytdl-raw-options-append" + m.group(2) + "= format-sort=vbr,abr",
+        updated,
+        flags=re.MULTILINE,
+    )
+    if removed_format or fixed_format_sort:
+        if audit_log:
+            audit_log.record_note(
+                "stream_quality_default",
+                "ytdl-format pins moved to script-opts/stream_quality.conf",
+            )
     updated = re.sub(
         r"^([ \t]*)override-display-fps([ \t]*=)",
         r"\1display-fps-override\2",
@@ -1509,6 +1575,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         detail = "repaired mpv.conf options (renames / GPU-API safety)"
         if border_fixed:
             detail += f" — border → no ({border_fixed})"
+        if removed_format or fixed_format_sort:
+            detail += " — ytdl-format caps moved to stream_quality.conf"
         if restored_count:
             detail += f" — restored {restored_count} option(s) for upgraded mpv"
         if sanitized_count:
@@ -1718,6 +1786,9 @@ def cmd_install(args):
                     scaler_tier=args.scaler_tier,
                     display_mode=args.display_mode,
                     dither_depth=args.dither_depth,
+                    stream_quality=(
+                        "0" if getattr(args, "stream_quality", None) == "best" else args.stream_quality
+                    ),
                     lockfile=lockfile,
                     verify_callback=check_install,
                 )
@@ -2241,6 +2312,18 @@ def build_arg_parser():
         choices=["auto", "8", "10"],
         default=_DEPLOY_DEFAULTS["dither_depth"],
         help="dither depth: mpv auto-selection or explicit 8/10 bits (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--stream-quality",
+        dest="stream_quality",
+        choices=["best", "144", "240", "360", "480", "720", "1080", "1440", "2160", "4320"],
+        default=_DEPLOY_DEFAULTS["stream_quality"],
+        help=(
+            "default streaming quality ceiling in pixels, 'best' for no cap "
+            "(default: %(default)s). Seeds fresh deploys only — an existing "
+            "script-opts/stream_quality.conf (possibly changed in the player's "
+            "Quality menu) is always preserved."
+        ),
     )
     parser.add_argument(
         "--mpv-version",

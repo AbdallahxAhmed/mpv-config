@@ -108,10 +108,14 @@ screenshot-directory      = {{SCREENSHOT_DIR}}
 screenshot-template       = "%F_%P"
 
 # ─── ytdl ────────────────────────────────────────────────────────────
+# ytdl=no disables mpv's built-in hook; the vendored scripts/ytdl_hook.lua
+# runs unconditionally and BUILDS ytdl-format itself from the default
+# streaming quality in script-opts/stream_quality.conf (single source of
+# truth; no hard cap lives here anymore). An explicit ytdl-format in
+# mpv.conf.user still overrides it for every stream.
 ytdl                      = no
-ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
 ytdl-raw-options-append = no-playlist=
-ytdl-raw-options-append = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append = format-sort=vbr,abr
 ytdl-raw-options-append = socket-timeout=15
 
 # ─── Shader cache — critical for Anime4K first-frame speed ───────────
@@ -235,9 +239,10 @@ demuxer-max-back-bytes    = 800MiB
 demuxer-readahead-secs    = 60
 # video-sync and interpolation intentionally inherited from the base config
 # (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
-ytdl-format               = bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best
+# ytdl-format is built by scripts/ytdl_hook.lua from
+# script-opts/stream_quality.conf; no separate cap in this profile.
 ytdl-raw-options-append   = no-playlist=
-ytdl-raw-options-append   = format-sort=res:1080,vbr,abr
+ytdl-raw-options-append   = format-sort=vbr,abr
 ytdl-raw-options-append   = socket-timeout=15
 
 [protocol.http]

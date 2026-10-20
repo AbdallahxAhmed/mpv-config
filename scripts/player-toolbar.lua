@@ -16,6 +16,132 @@ if not ok_pol or type(policy) ~= 'table' then
     if not ok_pol or type(policy) ~= 'table' then policy = nil end
 end
 
+-- ── Default streaming quality (script-opts/stream_quality.conf) ──────
+-- The saved default is the single source of truth for new streams; the
+-- in-memory cached copy refreshes on every menu open / save / reset so
+-- hand-edited files need no restart.
+local quality_conf_name = 'script-opts/stream_quality.conf'
+local quality_default
+
+local function quality_conf_path()
+    local found = mp.find_config_file and mp.find_config_file(quality_conf_name)
+    if found then return found end
+    local config_dir = nil
+    if mp.get_config_dir then config_dir = mp.get_config_dir() end
+    if config_dir and config_dir ~= '' then
+        local sep = config_dir:sub(-1)
+        if sep ~= '/' and sep ~= '\\' then config_dir = config_dir .. '/' end
+        return config_dir .. quality_conf_name
+    end
+    if mp.find_config_file then
+        local probe = mp.find_config_file('mpv.conf')
+        if probe then
+            local base = probe:match('^(.*[/\\])[^/\\]+$')
+            if base then return base .. quality_conf_name end
+        end
+    end
+    return nil
+end
+
+local function read_default_quality()
+    local path = quality_conf_path()
+    if not path then return nil end
+    local f = io.open(path, 'r')
+    if not f then return nil end
+    local q
+    for line in f:lines() do
+        local v = line:match('^%s*default_quality%s*=%s*(%-?%d+)%s*$')
+        if v then q = tonumber(v) end
+    end
+    f:close()
+    return q
+end
+
+local function persist_default_quality(q)
+    local path = quality_conf_path()
+    if not path or not io.open then
+        msg.warn('Cannot save stream default: no writable config dir')
+        mp.osd_message('Default quality: could not save (no config dir)', 2)
+        return false
+    end
+    local lines = {}
+    local f = io.open(path, 'r')
+    if f then
+        for line in f:lines() do
+            if not line:match('^%s*default_quality%s*=') then lines[#lines + 1] = line end
+        end
+        f:close()
+    else
+        lines[#lines + 1] = '# Default streaming quality ceiling (height in pixels; 0 = no cap).'
+    end
+    lines[#lines + 1] = 'default_quality=' .. tostring(q)
+    local out = io.open(path, 'w')
+    if not out then
+        msg.warn('Cannot save stream default: write failed for ' .. tostring(path))
+        mp.osd_message('Default quality: could not save', 2)
+        return false
+    end
+    out:write(table.concat(lines, '\n'))
+    out:write('\n')
+    out:close()
+    quality_default = q
+    return true
+end
+
+quality_default = read_default_quality()
+
+local function default_quality_label()
+    if policy and policy.quality_label then
+        local l = policy.quality_label(nil, quality_default and quality_default > 0 and quality_default or nil)
+        if l then return l end
+    end
+    if not quality_default or quality_default <= 0 then return 'any resolution' end
+    if quality_default >= 2160 then return '4K (' .. quality_default .. 'p)' end
+    return quality_default .. 'p'
+end
+
+-- Replay the current entry and restore the position once the new load is up.
+local function reload_stream()
+    local duration = mp.get_property_native('duration')
+    local time_pos = mp.get_property('time-pos')
+    mp.command('playlist-play-index current')
+    if duration and duration > 0 and time_pos then
+        local function on_reload()
+            mp.unregister_event(on_reload)
+            pcall(mp.commandv, 'seek', time_pos, 'absolute')
+        end
+        mp.register_event('file-loaded', on_reload)
+    end
+end
+
+local function apply_default(silent)
+    -- Clear any per-session quality override; every load (including this
+    -- reload) resolves the default from stream_quality.conf again.
+    mp.set_property('ytdl-format', '')
+    reload_stream()
+    if not silent then
+        mp.osd_message('Quality: default (' .. default_quality_label() .. ')', 2)
+    end
+end
+
+local function save_default_quality()
+    local h = mp.get_property_number('height') or mp.get_property_number('dheight')
+    if not h or h <= 0 then
+        mp.osd_message('Save default: play a video first', 2)
+        return
+    end
+    if not persist_default_quality(h) then return end
+    local label = policy and policy.quality_label and policy.quality_label(nil, h) or (h .. 'p')
+    apply_default(true)
+    mp.osd_message('Default quality saved: ' .. label .. ' — future streams start at it', 2)
+end
+
+local function clear_default_quality()
+    if not persist_default_quality(0) then return end
+    apply_default(true)
+    mp.osd_message('Default quality: any resolution (no cap)', 2)
+end
+
 local function format_monogram(text)
     if not text or text == '' then return nil end
     local controls_size = (mp.get_opt and tonumber(mp.get_opt('uosc-controls_size'))) or 32
@@ -116,6 +242,10 @@ local function publish_quality(force)
 end
 local function open_quality_menu()
     local current_h = mp.get_property_number('height') or mp.get_property_number('dheight') or 0
+    -- Re-read the saved default so hand-edited conf files don't need a restart.
+    local cached = quality_default
+    quality_default = read_default_quality()
+    if quality_default == nil then quality_default = cached end
     local res_data = mp.get_property_native('user-data/mpv/ytdl/json-subprocess-result')
     local formats = nil
     if type(res_data) == 'table' and res_data.status == 0 and type(res_data.stdout) == 'string' then
@@ -152,6 +282,12 @@ local function open_quality_menu()
         end
     end
 
+    local is_current_default = quality_default and quality_default > 0 or false
+    local function join_hints(hints)
+        if hints[1] == nil then return nil end
+        if hints[2] == nil then return hints[1] end
+        return hints[1] .. ' · ' .. hints[2]
+    end
     local items = {}
     for _, info in ipairs(sorted_heights) do
         local h = info.height
@@ -163,13 +299,34 @@ local function open_quality_menu()
             end
         end
         local is_current = (current_h > 0 and math.abs(current_h - h) <= 15)
+        local hints = {}
+        if is_current then hints[#hints + 1] = 'Current' end
+        if is_current_default and h == quality_default then hints[#hints + 1] = 'Default' end
         items[#items + 1] = {
             title = label,
-            hint = is_current and 'Current' or nil,
+            hint = join_hints(hints),
             active = is_current,
             value = {'script-message-to', script, 'set-quality', tostring(h), label},
         }
     end
+
+    items[#items + 1] = {
+        title = 'Save playing quality as default',
+        hint = 'wakes future streams',
+        value = {'script-message-to', script, 'save-default'},
+    }
+    if is_current_default then
+        items[#items + 1] = {
+            title = 'Apply default now',
+            hint = default_quality_label(),
+            value = {'script-message-to', script, 'apply-default'},
+        }
+    end
+    items[#items + 1] = {
+        title = 'Default: any resolution',
+        hint = 'remove the cap',
+        value = {'script-message-to', script, 'default-off'},
+    }
 
     local menu_json = utils.format_json({
         type = 'stream_quality_menu',
@@ -181,18 +338,10 @@ end
 local function set_quality(target_h, target_label)
     local h = tonumber(target_h)
     if not h then return end
-    local format = 'bestvideo[height<=?' .. h .. ']+bestaudio/best[height<=?' .. h .. ']'
+    local format = policy and policy.stream_default_format and policy.stream_default_format(h)
+        or 'bestvideo[height<=?' .. h .. ']+bestaudio/best[height<=?' .. h .. ']'
     mp.set_property('ytdl-format', format)
-    local duration = mp.get_property_native('duration')
-    local time_pos = mp.get_property('time-pos')
-    mp.command('playlist-play-index current')
-    if duration and duration > 0 and time_pos then
-        local function on_reload()
-            mp.unregister_event(on_reload)
-            pcall(mp.commandv, 'seek', time_pos, 'absolute')
-        end
-        mp.register_event('file-loaded', on_reload)
-    end
+    reload_stream()
     mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
 end
 
@@ -501,6 +650,12 @@ local function start_download(is_audio_only)
     }
 
     local ytdl_format = mp.get_property('ytdl-format')
+    if not ytdl_format or ytdl_format == '' then
+        -- Stream default cap (script-opts/stream_quality.conf); no video
+        -- opened yet → resolve from the saved default instead of assuming 1080p.
+        ytdl_format = policy and policy.stream_default_format
+            and policy.stream_default_format(quality_default) or nil
+    end
     local worker_script = find_tool and find_tool('download_worker.py')
     local home = os.getenv('USERPROFILE') or os.getenv('HOME') or '.'
     local default_dir = policy and policy.default_download_dir and policy.default_download_dir()
@@ -559,10 +714,13 @@ local function start_download(is_audio_only)
             else
                 local fmt = ytdl_format
                 if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
-                    fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
+                    fmt = policy and policy.stream_default_format
+                        and policy.stream_default_format(quality_default) or nil
                 end
-                table.insert(args, '-f')
-                table.insert(args, fmt)
+                if fmt then
+                    table.insert(args, '-f')
+                    table.insert(args, fmt)
+                end
                 table.insert(args, '--merge-output-format')
                 table.insert(args, 'mp4')
             end
@@ -714,6 +872,9 @@ end
 mp.register_script_message('open-audio-menu', open_audio_menu)
 mp.register_script_message('open-quality-menu', open_quality_menu)
 mp.register_script_message('set-quality', set_quality)
+mp.register_script_message('save-default', save_default_quality)
+mp.register_script_message('apply-default', apply_default)
+mp.register_script_message('default-off', clear_default_quality)
 mp.register_script_message('start-download', function() start_download(false) end)
 mp.register_script_message('download-video', function() start_download(false) end)
 mp.register_script_message('download-audio', function() start_download(true) end)

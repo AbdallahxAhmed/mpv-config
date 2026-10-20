@@ -7,9 +7,14 @@ local normalizer = 'dynaudnorm=f=500:g=15:p=0.95:m=10'
 local limiter = 'alimiter=limit=0.9:level=false'
 local graph = normalizer..','..limiter
 local function filter(g,l,enabled) return {name='lavfi',label=l,enabled=enabled,params={graph=g}} end
-local function harness(filters, no_ui)
+local function harness(filters, no_ui, conf)
+    conf = conf or {}
     local h={filters=filters or {},messages={},writes=0,sends=0,ui_ready=not no_ui,buttons={},props={},observers={}}
     mp={log=function() end,get_script_name=function() return 'player_toolbar' end,
+        find_config_file=function(name)
+            if conf.conf_path and name=='script-opts/stream_quality.conf' then return conf.conf_path end
+            return nil
+        end,
         get_property_native=function(k,d) if k=='af' then return h.filters end; return h.props[k] or d end,
         get_property_number=function(k,d) return tonumber(h.props[k]) or d end,
         get_property=function(k,d) return h.props[k] or d end,
@@ -152,14 +157,110 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     h.messages['open-quality-menu']()
     assert(h.menu~=nil)
     eq(h.menu.type,'stream_quality_menu')
-    eq(#h.menu.items,3)
+    -- 3 quality entries + 'Save playing quality as default' + 'Default: any
+    -- resolution' (no saved default → no 'Apply default now' entry).
+    eq(#h.menu.items,5)
     eq(h.menu.items[1].title,'1080p60')
     eq(h.menu.items[1].active,true)
     eq(h.menu.items[1].hint,'Current')
     eq(h.menu.items[2].title,'720p')
     eq(h.menu.items[2].active,false)
+    eq(h.menu.items[4].title,'Save playing quality as default')
+    eq(h.menu.items[5].title,'Default: any resolution')
     h.messages['set-quality']('720')
-    eq(h.props['ytdl-format'],'bestvideo[height<=?720]+bestaudio/best[height<=?720]')
+    -- Same formula as the saved default (stream_policy.stream_default_format):
+    -- the height cap plus the muxed-best fallback tail.
+    eq(h.props['ytdl-format'],'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
+end)
+
+-- sandbox for persisted-default tests (os.execute is unavailable inside mpv,
+-- so conf files are written straight into TEMP instead of a subdirectory)
+local function sandbox_conf(seed_default)
+    local path=(os.getenv('TEMP') or '.')..'\\stream_quality_conf_'
+        ..tostring(os.time())..'_'..tostring(math.random(100000))..'.conf'
+    if seed_default then
+        local f=assert(io.open(path,'w'))
+        f:write('shipped comment line\n')
+        f:write('default_quality='..tostring(seed_default)..'\n')
+        f:close()
+    end
+    return path
+end
+test('quality menu marks the saved default and offers persistence actions',function()
+    local path=sandbox_conf(720)
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080
+    h.parsed_json={formats={
+        {vcodec='avc1',height=1080,fps=60},
+        {vcodec='avc1',height=720,fps=30},
+        {vcodec='avc1',height=480},
+    }}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['open-quality-menu']()
+    eq(#h.menu.items,6)
+    -- item identity first: heights present in the json-subprocess fixture
+    eq(h.menu.items[1].value[4],'1080')
+    eq(h.menu.items[2].value[4],'720')
+    eq(h.menu.items[3].value[4],'480')
+    eq(h.menu.items[1].hint,'Current')
+    eq(h.menu.items[2].hint,'Default')
+    eq(h.menu.items[4].title,'Save playing quality as default')
+    eq(h.menu.items[5].title,'Apply default now')
+    eq(h.menu.items[5].hint,'720p')
+    eq(h.menu.items[6].title,'Default: any resolution')
+    os.remove(path)
+end)
+test('current resolution matches the default when saved as such',function()
+    local path=sandbox_conf(1080)
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080
+    h.parsed_json={formats={{vcodec='avc1',height=1080,fps=60}}}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['open-quality-menu']()
+    eq(#h.menu.items,4)
+    eq(h.menu.items[1].hint,'Current · Default')
+    os.remove(path)
+end)
+test('save-default persists the playing height and drops the session override',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=100; h.props['time-pos']=42
+    h.messages['save-default']()
+    local f=io.open(path,'r'); assert(f, 'conf file was not created'); local content=f:read('*a'); f:close()
+    assert(content:find('default_quality=1080',1,true), 'saved value missing')
+    assert(content:find('ceiling',1,true), 'shipped header comment preserved')
+    eq(h.props['ytdl-format'],'')
+    assert(h.events['file-loaded']~=nil)
+    assert(h.osd:find('1080',1,true))
+    os.remove(path)
+end)
+test('default-off removes the cap without touching style comments',function()
+    local path=sandbox_conf(480)
+    local h=harness(nil,nil,{conf_path=path})
+    h.messages['default-off']()
+    local f=io.open(path,'r'); local content=f:read('*a'); f:close()
+    assert(content:find('default_quality=0',1,true))
+    assert(content:find('shipped comment line',1,true))
+    assert(h.osd:find('any resolution',1,true))
+    os.remove(path)
+end)
+test('save-default with no video only explains itself',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.messages['save-default']()
+    assert(h.osd:find('play a video first',1,true))
+    eq(io.open(path,'r'),nil)
+    os.remove(path)
+end)
+test('apply-default clears the override and re-resolves from the conf',function()
+    local path=sandbox_conf(480)
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['ytdl-format']='bestvideo[height<=?2160]+bestaudio/best[height<=?2160]'
+    h.props['height']=480; h.props['duration']=100; h.props['time-pos']=7
+    h.messages['apply-default']()
+    eq(h.props['ytdl-format'],'')
+    assert(h.osd:find('default',1,true))
+    os.remove(path)
 end)
 test('audio tracks button publishes language badge and opens clean deduplicated audio menu',function()
     local h=harness()

@@ -52,7 +52,7 @@ Recent work now on `main` (unreleased in the changelog):
 - **On-demand caption menu** (`Ctrl+C` or CC button) with *Creator / Auto-generated / Auto-translated* groups, cancellable async loading, no reloads and per-session reuse.
 - **Smart dub filtering** — the playback hook keeps the best-bitrate rendition per language/role and defaults video selection to match the chosen dub.
 - **SponsorBlock** integration with segment marking, submission and up/down-vote keybindings.
-- 1080p format caps for both streaming and downloads (`format-sort=res:1080,vbr,abr`).
+- **Configurable default quality** — the streaming ceiling lives in one file (`script-opts/stream_quality.conf`, default 1080p): pick it in the installer (`--stream-quality`), override per-video from the Quality button, or *"Save playing quality as default"* from the same menu — no hardcoded caps anywhere.
 
 ### 🧰 Player utilities
 - **Stable Volume / night mode** (`F8` or toolbar button) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.
@@ -234,6 +234,7 @@ Deploy-time options (forwarded to the deployer; run `python -m deploy.deployer -
 | `--scaler-tier` | `light` / `balanced` / `quality` (`balanced`) | `scale` / `cscale` / `dscale` quality tier |
 | `--display-mode` | `auto` / `fixed` / `vrr` (`fixed`) | Display-sync mode; `fixed` = display-resample, `vrr` opt-in for FreeSync/G-Sync |
 | `--dither-depth` | `auto` / `8` / `10` (`auto`, auto-resolved) | Output dither depth |
+| `--stream-quality` | `best` / `144` … `4320` (`1080`) | Default streaming ceiling seeded into `script-opts/stream_quality.conf` on **fresh** installs only — an existing file (player Quality-menu choice / hand edit) is always preserved |
 | `--mpv-version` | tag override | Pin the Windows mpv build tag (e.g. `2026-05-15-4498c0ff81`) |
 
 ### 2. Verify Installation

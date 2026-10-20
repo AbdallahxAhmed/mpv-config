@@ -473,6 +473,75 @@ class TestAuditPatches(unittest.TestCase):
                 content = f.read()
             self.assertIn("# border = yes", content)
 
+    def test_patch_stream_quality_conf_rewrites_default_and_keeps_comments(self):
+        """--stream-quality seeds only FRESH stream_quality.conf files — the
+        patch must rewrite just the default_quality line and keep the shipped
+        comments; a missing file is reported (False), not created."""
+        from deploy.deployer import _patch_stream_quality_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "stream_quality.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "# Default streaming quality ceiling (height in pixels; 0 = no cap).\n"
+                    "# Per-video overrides: the player's Quality menu writes this file.\n"
+                    "default_quality=1080\n"
+                )
+
+            self.assertTrue(_patch_stream_quality_conf(conf_path, "720"))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("default_quality=720", content)
+            self.assertNotIn("default_quality=1080", content)
+            self.assertIn("# Default streaming quality ceiling", content)
+            # Idempotent rewrite keeps a single default line.
+            self.assertEqual(content.count("default_quality="), 1)
+            # A missing file is not created — the deployer only patches fresh copies.
+            self.assertFalse(_patch_stream_quality_conf(os.path.join(tmpdir, "absent.conf"), "2160"))
+
+    def test_migrate_mpv_conf_neutralizes_legacy_stream_quality_pins(self):
+        """The 1080p ytdl-format cap moved to script-opts/stream_quality.conf.
+        A deployed mpv.conf predating that change keeps yt-dlp pinned forever
+        (deploy() preserves existing mpv.conf) — the migration removes only
+        the exact template-generated lines and drops the res:1080 sort bias."""
+        from deploy.deployer import _migrate_mpv_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "ytdl                      = no\n"
+                    'ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"\n'
+                    "ytdl-raw-options-append = format-sort=res:1080,vbr,abr\n"
+                    "[protocol.https]\n"
+                    "ytdl-format               = bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best\n"
+                    "ytdl-raw-options-append   = format-sort=res:1080,vbr,abr\n"
+                )
+
+            self.assertTrue(_migrate_mpv_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertNotRegex(new_content, r"(?m)^\s*ytdl-format\s*=")
+            self.assertIn("streaming default quality now lives in script-opts/stream_quality.conf", new_content)
+            self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", new_content)
+            self.assertIn("ytdl-raw-options-append   = format-sort=vbr,abr", new_content)
+            self.assertNotIn("res:1080", new_content)
+            self.assertIn("ytdl                      = no\n", new_content)
+            # Second run is a no-op.
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+
+        # Hand-modified format variants (extra selectors) are personal and stay.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "ytdl-format = bestvideo[height<=?1080][vcodec!=vp9]+bestaudio/best\n"
+                )
+            self.assertFalse(_migrate_mpv_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                self.assertIn("[vcodec!=vp9]", f.read())
+
     def test_patched_mpv_conf_forces_opengl_on_legacy_intel(self):
         from deploy.detector import Environment
         from deploy.deployer import _patch_mpv_conf
@@ -1457,7 +1526,12 @@ class TestAuditPatches(unittest.TestCase):
         self.assertNotIn("write-auto-subs=", content)
         self.assertNotIn("sub-langs=", content)
         self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)
-        self.assertIn("ytdl-raw-options-append = format-sort=res:1080,vbr,abr", content)
+        # Quality is chosen by ytdl_hook from script-opts/stream_quality.conf;
+        # the template stays free of a pinned res ceiling.
+        self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", content)
+        self.assertNotIn("res:1080", content)
+        # No active (non-comment) ytdl-format anywhere: the hook builds it.
+        self.assertNotRegex(content, r"(?m)^\s*ytdl-format\s*=")
         self.assertNotIn("ytdl_hook-ytdl_path", content)
         self.assertNotIn("C:/", content)
         self.assertNotIn("C:\\", content)
@@ -1554,21 +1628,32 @@ class TestAuditPatches(unittest.TestCase):
             self.assertNotIn('loadfile "${clipboard/text:${clipboard}}"', new_content)
             self.assertNotIn('loadfile "${clipboard}"', new_content)
 
-    def test_template_1080p_high_bitrate_stream_selection(self):
+    def test_stream_quality_default_is_modular_not_pinned_in_template(self):
+        """Streaming quality lives in script-opts/stream_quality.conf — the
+        template no longer carries a hardcoded ytdl-format/1080 ceiling, so
+        the default is configurable from the Quality menu or the installer
+        (--stream-quality) without touching mpv.conf."""
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         template_file = os.path.join(repo_root, "config", "mpv.conf.template")
 
         with open(template_file, "r", encoding="utf-8") as f:
             content = f.read()
 
-        # Check ytdl-format ceiling and removal of obsolete vp09 filter
-        self.assertIn(
-            'ytdl-format = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"', content
-        )
+        # No hardcoded format ceiling — ytdl_hook builds it from stream_quality.conf
+        self.assertNotRegex(content, r"(?m)^\s*ytdl-format\s*=")
+        # (keeps the obsolete vp09 filter exclusion)
         self.assertNotIn("vp0?9", content)
 
-        # Check bitrate sorting
-        self.assertIn("ytdl-raw-options-append = format-sort=res:1080,vbr,abr", content)
+        # Bitrate sorting without a pinned resolution tie-break
+        self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", content)
+        self.assertNotIn("res:1080", content)
+
+        # The single source of truth ships with the historic 1080p default
+        quality_conf = os.path.join(repo_root, "config", "script-opts", "stream_quality.conf")
+        with open(quality_conf, "r", encoding="utf-8") as f:
+            quality_content = f.read()
+        self.assertIn("default_quality=1080", quality_content)
+        self.assertRegex(quality_content, r"(?m)^default_quality=\d+\s*$")
 
     def test_uosc_controls_toolbar_configured(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

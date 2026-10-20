@@ -78,6 +78,24 @@ class TestDownloadWorker(unittest.TestCase):
         self.assertIn("6", args)
         self.assertNotIn("--downloader", args)
 
+    def test_build_ytdl_args_format_handling(self):
+        # explicit formats pass through untouched
+        args = download_worker.build_ytdl_args(
+            url="https://youtube.com/watch?v=123",
+            output="D:/Downloads/%(title)s.%(ext)s",
+            ytdl_format="bestvideo[height<=?720]+bestaudio/best[height<=?720]/best",
+        )
+        self.assertIn("-f", args)
+        self.assertIn("bestvideo[height<=?720]+bestaudio/best[height<=?720]/best", args)
+        self.assertIn("--merge-output-format", args)
+        # no saved default → no cap, yt-dlp's own preference order (no -f)
+        args = download_worker.build_ytdl_args(
+            url="https://youtube.com/watch?v=123",
+            output="D:/Downloads/%(title)s.%(ext)s",
+        )
+        self.assertNotIn("-f", args)
+        self.assertIn("--merge-output-format", args)
+
     def test_atomic_write_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = os.path.join(tmpdir, "state.json")

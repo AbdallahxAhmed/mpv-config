@@ -12,7 +12,7 @@ local function run(config)
     config=config or {}
     local h={json=fixture(),calls={},commands={},hooks={},props={
         ['stream-open-filename']=config.url or 'https://youtu.be/video',
-        ['options/ytdl-format']='bestvideo[height<=?1080]+bestaudio/best',
+        ['options/ytdl-format']=config.format_empty and '' or 'bestvideo[height<=?1080]+bestaudio/best',
         ['options/ytdl-raw-options']=config.raw or {},['options/vid']='auto',
         aid=config.aid or 'auto',sid=config.sid or 'auto',
         ['option-info/ytdl-format/set-from-commandline']=config.explicit_format or false,
@@ -60,7 +60,12 @@ local function run(config)
             return nil
         end} end
     package.preload['mp.msg']=function() return log end
-    package.preload['mp.options']=function() return {read_options=function(o)
+    package.preload['mp.options']=function() return {read_options=function(o, ident)
+        ident = ident or ''
+        if ident=='stream_quality' then
+            if config.default_quality ~= nil then o.default_quality = tostring(config.default_quality) end
+            return
+        end
         o.ytdl_path = config.broken_then_good and '/broken/yt-dlp:yt-dlp' or 'yt-dlp'
         if config.all_audio then o.best_audio_per_language=false end
         if config.all_subs then o.youtube_subs_on_demand=false end
@@ -87,6 +92,26 @@ end)
 test('no automatic caption enumeration at startup',function()
     local h=run(); assert(not h:has_arg('--write-srt')); assert(not h:has_arg('--sub-langs'))
     assert(h:has_arg('--no-playlist')); assert(h:has_arg('--format')); eq(#h.commands,0)
+end)
+local function format_arg(h)
+    for i,v in ipairs(h.calls[1] or {}) do if v=='--format' then return (h.calls[1])[i+1] end end
+    return nil
+end
+test('default quality: hook builds the cap from stream_quality.conf',function()
+    -- mpv.conf no longer pins ytdl-format: an empty option + saved default
+    -- (720 here) must reproduce the old template cap exactly.
+    local h=run({format_empty=true, default_quality=720})
+    eq(format_arg(h), 'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
+end)
+test('default quality 0 / unset: yt-dlp keeps its own preference order',function()
+    -- no cap: the hook must NOT pass --format (mirrors the upstream default path)
+    local h=run({format_empty=true, default_quality=0})
+    eq(format_arg(h), nil)
+end)
+test('default quality never overrides an explicitly set ytdl-format',function()
+    -- mpv.conf.user (or the Quality button) keeps precedence
+    local h=run({default_quality=720})
+    eq(format_arg(h), 'bestvideo[height<=?1080]+bestaudio/best')
 end)
 test('raw subtitle request and numeric sid retain upstream behavior',function()
     assert(run({raw={['write-auto-subs']='',['sub-langs']='ar'}}):has_arg('--write-srt'))

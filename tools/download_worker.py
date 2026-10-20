@@ -163,10 +163,12 @@ def build_ytdl_args(
     if is_audio_only:
         args.extend(["-x", "--audio-format", "mp3", "--audio-quality", "0"])
     else:
-        fmt = ytdl_format
-        if not fmt or fmt == "" or "bestvideo" not in fmt:
-            fmt = "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
-        args.extend(["-f", fmt, "--merge-output-format", "mp4"])
+        # The player resolves its saved streaming default (script-opts/
+        # stream_quality.conf) into --format before this call; without one,
+        # 'default_quality=0' / no format means yt-dlp's own preference order.
+        if ytdl_format and "bestvideo" in ytdl_format:
+            args.extend(["-f", ytdl_format])
+        args.extend(["--merge-output-format", "mp4"])
 
     # 16-Thread Acceleration
     # Use aria2c for single/progressive streams when available

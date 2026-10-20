@@ -23,6 +23,18 @@ function M.youtube_url(value)
     end
     return nil
 end
+
+-- The single quality cap used everywhere streaming quality is decided:
+-- scripts/ytdl_hook.lua (default for every new stream) and
+-- scripts/player-toolbar.lua (download fallback, GUI default actions).
+-- Input: a height in pixels read from script-opts/stream_quality.conf
+-- (`default_quality`); 0 / "best" / anything unparsable = no cap, and nil
+-- tells callers to fall back to yt-dlp's own default format choice.
+function M.stream_default_format(quality)
+    local q = tonumber(quality)
+    if not q or q <= 0 then return nil end
+    return string.format('bestvideo[height<=?%d]+bestaudio/best[height<=?%d]/best', q, q)
+end
 local iso_3_to_2 = {
     ara = 'AR', eng = 'EN', jpn = 'JA', jap = 'JA', spa = 'ES',
     fra = 'FR', fre = 'FR', deu = 'DE', ger = 'DE',
@@ -377,10 +389,15 @@ function M.download_args(url, output_dir, is_audio_only, ytdl_format, extra_opts
     else
         local fmt = ytdl_format
         if not fmt or fmt == '' or fmt:find('bestvideo') == nil then
-            fmt = 'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best'
+            -- No explicit/session format: the caller resolves the saved
+            -- stream default (script-opts/stream_quality.conf) itself;
+            -- 'default_quality=0' means no cap → let yt-dlp decide.
+            fmt = nil
         end
-        table.insert(args, '-f')
-        table.insert(args, fmt)
+        if fmt then
+            table.insert(args, '-f')
+            table.insert(args, fmt)
+        end
         table.insert(args, '--merge-output-format')
         table.insert(args, 'mp4')
     end

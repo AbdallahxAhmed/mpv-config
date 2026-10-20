@@ -75,7 +75,7 @@ class DeployerParserTests(unittest.TestCase):
     def test_defaults_follow_the_deploy_signature(self):
         args = deployer.build_arg_parser().parse_args(["--install"])
         parameters = inspect.signature(deployer.deploy).parameters
-        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth"):
+        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth", "stream_quality"):
             with self.subTest(option=name):
                 self.assertEqual(getattr(args, name), parameters[name].default)
         self.assertFalse(args.dry_run)
@@ -217,7 +217,7 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertIs(kwargs["audit_log"], self.audit_log)
         self.assertEqual(kwargs["lockfile"], "lockfile-sentinel")
         self.assertTrue(callable(kwargs["verify_callback"]))
-        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth"):
+        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth", "stream_quality"):
             self.assertEqual(kwargs[name], deployer._DEPLOY_DEFAULTS[name])
 
     def test_options_reach_deploy_and_install_deps(self):
@@ -229,6 +229,7 @@ class InstallOrchestrationTests(unittest.TestCase):
             "--dither-depth=10",
             "--mpv-profile=native",
             "--mpv-version=2025-01-15",
+            "--stream-quality=720",
         ]
         self.assertEqual(deployer.main(argv), 0)
         kwargs = self.m.deploy.call_args.kwargs
@@ -237,8 +238,13 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertEqual(kwargs["display_mode"], "vrr")
         self.assertEqual(kwargs["dither_depth"], "10")
         self.assertEqual(kwargs["mpv_profile"], "native")
+        self.assertEqual(kwargs["stream_quality"], "720")
         self.assertEqual(self.m.install_deps.call_args.kwargs["mpv_version"], "2025-01-15")
         self.assertFalse(self.m.install_deps.call_args.kwargs["dry_run"])
+
+    def test_stream_quality_best_maps_to_uncapped_zero(self):
+        self.assertEqual(deployer.main(["--install", "--stream-quality=best"]), 0)
+        self.assertEqual(self.m.deploy.call_args.kwargs["stream_quality"], "0")
 
     def test_staging_is_beside_the_config_dir_and_removed_afterwards(self):
         self.assertEqual(deployer.main(["--install"]), 0)

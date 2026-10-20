@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Configurable default streaming quality (no more hardcoded 1080)**: the streaming ceiling is chosen in one place — `script-opts/stream_quality.conf` (`default_quality=1080`). `scripts/ytdl_hook.lua` builds `ytdl-format` from it for streams (an explicit `ytdl-format` in `mpv.conf.user` still wins; `0`/`--stream-quality best` = no cap). The player's Quality menu marks the saved default and adds *Save playing quality as default*, *Apply default now* and *Default: any resolution* — changes persist to the same file with no redeploy. The installer seeds fresh deployments via `--stream-quality` (`best`/`144`…`4320`, default `1080`); existing files are personal and never rewritten, existing mpv.conf pins are migrated by the deployer's repair pass.
 - `mpv-config update`, `rollback`, `status`, `sync-deps` and `uninstall` (also `python -m deploy.deployer --update`, `--rollback`, `--status`, `--sync-deps`, `--uninstall`), ported from the pre-1.0 `setup.py`.
 
 ### Fixed

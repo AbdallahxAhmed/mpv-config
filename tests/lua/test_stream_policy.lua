@@ -15,6 +15,16 @@ test('strict hosts',function()
         'https://youtube.com@evil.test/a','/media/youtube.com/a','ytdl://https://evil.test/a',
         'file:///tmp/a','https://youtube.com/a\n--exec=bad'}) do eq(p.youtube_url(u),nil) end
 end)
+test('default-quality cap builder',function()
+    eq(p.stream_default_format(1080),
+        'bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best')
+    eq(p.stream_default_format('720'), -- conf values arrive as strings
+        'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
+    eq(p.stream_default_format(0), nil)
+    eq(p.stream_default_format('best'), nil) -- unparsable → uncapped, not a crash
+    eq(p.stream_default_format(nil), nil)
+    eq(p.stream_default_format(-5), nil)
+end)
 test('highest bitrate and default language remap',function()
     local low,high,en=audio('ar-low','ar',64,'low'),audio('ar-high','ar',256,'high'),audio('en','en',128,'medium')
     local f,r=filter({video,low,en,high})
@@ -169,9 +179,27 @@ test('download args builds valid yt-dlp arguments for video and audio', function
     assert(table.concat(audio_args, ' '):find('-x', 1, true))
     assert(table.concat(audio_args, ' '):find('--audio-format mp3', 1, true))
     eq(audio_args[#audio_args], 'https://www.youtube.com/watch?v=abc')
-
+end)
+test('download args keep merge but omit -f when no video cap is configured', function()
+    local function has_token(args, token)
+        for _, a in ipairs(args) do if a == token then return true end end
+        return false
+    end
     eq(p.download_args(nil), nil)
     eq(p.download_args(''), nil)
+    -- explicit (session/format) formats pass through untouched
+    local explicit = p.download_args('https://www.youtube.com/watch?v=abc', 'D:/Videos', false,
+        'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
+    assert(has_token(explicit, '-f'))
+    -- absent format (saved default 0/none) → yt-dlp's own preference order
+    local uncapped = p.download_args('https://www.youtube.com/watch?v=abc', 'D:/Videos', false, nil)
+    assert(has_token(uncapped, '--merge-output-format'))
+    eq(has_token(uncapped, '-f'), false)
+    -- empty / non-video formats are treated the same
+    for _, bad in ipairs({'', 'best'}) do
+        local args = p.download_args('https://www.youtube.com/watch?v=abc', 'D:/Videos', false, bad)
+        eq(has_token(args, '-f'), false)
+    end
 end)
 test('analyze cache coverage accurately identifies complete and partial ranges', function()
     local cov1 = p.analyze_cache_coverage({bof = true, eof = true, ['seekable-ranges'] = {{start = 0, ['end'] = 100}}}, 100)
