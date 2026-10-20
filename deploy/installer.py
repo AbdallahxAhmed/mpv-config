@@ -499,6 +499,35 @@ class _InlineDownloadProgress:
             self._tty = False
 
 
+def _create_tmp_file(dest_path):
+    """Create a .mpvdl-* temp file next to dest_path, failing fast on denial.
+
+    tempfile.mkstemp is a landmine on Windows: _mkstemp_inner catches
+    PermissionError and keeps drawing new random names for eons when
+    os.access(dir, W_OK) claims the directory writable but the ACL actually
+    denies creation (C:\\Program Files\\mpv in a non-elevated shell).
+    The installer then froze silently inside 'Downloading yt-dlp.exe...',
+    with no temp file, no error and no timeout — the user cannot even tell
+    it apart from a network stall. A bounded loop that raises one clear,
+    actionable PermissionError beats both that freeze and the os.access lie.
+    """
+    dest_dir = os.path.dirname(dest_path) or "."
+    for seq in range(32):
+        tmp_path = os.path.join(dest_dir, f".mpvdl-{seq:02d}-{os.urandom(6).hex()}")
+        try:
+            fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        except FileExistsError:
+            continue  # astronomically unlikely; bounded retries
+        except PermissionError as exc:
+            raise PermissionError(
+                f"{dest_dir} is not writable for this user ({exc}). "
+                "Re-run the installer from an elevated (Administrator) "
+                "PowerShell to install into C:\\Program Files\\mpv."
+            ) from exc
+        return fd, tmp_path
+    raise FileExistsError(f"No usable temporary file name found in {dest_dir}")
+
+
 def _download_asset(url, dest_path, label=None, stdout=None):
     """Download an asset to dest_path atomically (tmp file + rename).
 
@@ -512,9 +541,7 @@ def _download_asset(url, dest_path, label=None, stdout=None):
     stays silent, exactly like before.
     """
     label = label or os.path.basename(dest_path) or "download"
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        prefix=".mpvdl-", dir=os.path.dirname(dest_path) or "."
-    )
+    tmp_fd, tmp_path = _create_tmp_file(dest_path)
     os.close(tmp_fd)
     progress = _InlineDownloadProgress(label, stdout=stdout)
     request = urllib.request.Request(

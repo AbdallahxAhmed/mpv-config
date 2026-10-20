@@ -11,7 +11,11 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from deploy.installer import _download_asset, _InlineDownloadProgress
+from deploy.installer import (
+    _create_tmp_file,
+    _download_asset,
+    _InlineDownloadProgress,
+)
 
 
 class _FakeClock:
@@ -168,6 +172,50 @@ class DownloadAssetTests(unittest.TestCase):
     def _url(self, suffix=""):
         port = self.server.server_address[1]
         return f"http://127.0.0.1:{port}/asset{suffix}"
+
+    def test_create_tmp_file_creates_a_dot_mpvdl_file_in_dest_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fd, tmp_path = _create_tmp_file(os.path.join(tmpdir, "bin.exe"))
+            try:
+                self.assertTrue(os.path.isfile(tmp_path))
+                self.assertIn(".mpvdl-", os.path.basename(tmp_path))
+                self.assertEqual(os.path.dirname(tmp_path), tmpdir)
+                os.write(fd, b"probe")
+            finally:
+                os.close(fd)
+                os.remove(tmp_path)
+
+    def test_create_tmp_file_denied_raises_clear_actionable_error(self):
+        from unittest import mock
+
+        with mock.patch(
+            "deploy.installer.os.open",
+            side_effect=PermissionError(13, "Access is denied"),
+        ):
+            with self.assertRaises(PermissionError) as ctx:
+                _create_tmp_file(r"C:\Program Files\mpv\yt-dlp\yt-dlp.exe")
+            self.assertIn("not writable", str(ctx.exception))
+            self.assertIn("elevated", str(ctx.exception))
+
+    def test_unwritable_dest_fails_fast_instead_of_freezing(self):
+        # Regression: tempfile.mkstemp retried PermissionError for eons on a
+        # non-elevated C:\Program Files\mpv target, freezing the installer
+        # inside 'Downloading yt-dlp.exe...' with no output at all.
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = os.path.join(tmpdir, "yt-dlp.exe")
+            with mock.patch(
+                "deploy.installer.os.open",
+                side_effect=PermissionError(13, "Access is denied"),
+            ):
+                start = time.time()
+                with self.assertRaises(PermissionError) as ctx:
+                    _download_asset(self._url(), dest, "yt-dlp.exe", io.StringIO())
+                elapsed = time.time() - start
+            self.assertIn("not writable", str(ctx.exception))
+            # fail-fast: well under any human-visible hang
+            self.assertLess(elapsed, 5.0)
 
     def test_download_writes_exact_bytes_atomically(self):
         with tempfile.TemporaryDirectory() as tmpdir:
