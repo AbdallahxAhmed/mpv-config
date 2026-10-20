@@ -172,10 +172,18 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     eq(h.menu.items[2].title,'720p')
     eq(h.menu.items[2].active,false)
     eq(h.menu.items[4].title,'Default: any resolution')
+    -- Display larger than the source → the OSD spells the rescale out, so
+    -- stats-for-nerds' window-size line can't be mistaken for stream quality.
+    h.props['osd-width']=1920; h.props['osd-height']=1080
     h.messages['set-quality']('720')
     -- Same formula as the saved default (stream_policy.stream_default_format):
     -- the height cap plus the muxed-best fallback tail.
     eq(h.props['ytdl-format'],'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
+    assert(h.osd:find('upscale: 1920x1080 display',1,true), 'upscale note missing')
+    -- matching display → no note at all
+    h.props['osd-width']=1280; h.props['osd-height']=720
+    h.messages['set-quality']('720')
+    assert(h.osd=='Quality: 720p', 'unexpected display note: '..tostring(h.osd))
 end)
 
 -- sandbox for persisted-default tests (os.execute is unavailable inside mpv,

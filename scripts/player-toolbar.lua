@@ -114,13 +114,28 @@ local function reload_stream()
     end
 end
 
+-- Stats-for-nerds labels the window size 'Display: Resolution', so a 720p
+-- source fullscreened on a 1080p monitor reads as if the quality never
+-- changed. Spell the rescale out whenever the playing surface differs.
+local function display_note(target_h)
+    if not target_h or target_h <= 0 then return '' end
+    local display_w = mp.get_property_number('osd-width')
+    local display_h = mp.get_property_number('osd-height')
+    if not display_h or display_h <= 0 or math.abs(display_h - target_h) <= 15 then return '' end
+    local size = display_w and display_w > 0
+        and string.format('%dx%d', display_w, display_h)
+        or (display_h .. 'p')
+    return ' (' .. (display_h > target_h and 'upscale' or 'downscale')
+        .. ': ' .. size .. ' display)'
+end
+
 local function apply_default(silent)
     -- Clear any per-session quality override; every load (including this
     -- reload) resolves the default from stream_quality.conf again.
     mp.set_property('ytdl-format', '')
     reload_stream()
     if not silent then
-        mp.osd_message('Quality: default (' .. default_quality_label() .. ')', 2)
+        mp.osd_message('Quality: default (' .. default_quality_label() .. ')' .. display_note(quality_default), 2)
     end
 end
 
@@ -351,7 +366,7 @@ local function set_quality(target_h, target_label)
         or 'bestvideo[height<=?' .. h .. ']+bestaudio/best[height<=?' .. h .. ']'
     mp.set_property('ytdl-format', format)
     reload_stream()
-    mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
+    mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))) .. display_note(h), 2)
 end
 
 -- Set the persisted default straight from a menu row's submenu — replaces
