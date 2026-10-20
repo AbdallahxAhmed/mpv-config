@@ -1395,6 +1395,17 @@ end
 
 local function on_load_hook(load_fail, hook)
     local url = mp.get_property("stream-open-filename", "")
+    -- Fast quality switch: the toolbar loads an already-resolved media URL
+    -- and marks it. Skip the entire extraction round-trip for that load —
+    -- the flagged URL carries the same signature the extraction produced.
+    if url ~= "" then
+        local fast_url = mp.get_property("user-data/mpv/ytdl/fast-url")
+        if fast_url and fast_url == url then
+            mp.del_property("user-data/mpv/ytdl/fast-url")
+            msg.info("fast switch: skipping extraction for pre-resolved URL")
+            return
+        end
+    end
     local force = url:find("^ytdl://") ~= nil
     local early = force or o.try_ytdl_first or is_whitelisted(url)
     if early == load_fail then

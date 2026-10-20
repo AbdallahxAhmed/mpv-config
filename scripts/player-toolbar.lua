@@ -100,11 +100,9 @@ local function default_quality_label()
     return quality_default .. 'p'
 end
 
--- Replay the current entry and restore the position once the new load is up.
-local function reload_stream()
-    local duration = mp.get_property_native('duration')
-    local time_pos = mp.get_property('time-pos')
-    mp.command('playlist-play-index current')
+-- Restore the position once the new load is up (shared by the regular
+-- reload and the fast switch below).
+local function restore_position(duration, time_pos)
     if duration and duration > 0 and time_pos then
         local function on_reload()
             mp.unregister_event(on_reload)
@@ -112,6 +110,187 @@ local function reload_stream()
         end
         mp.register_event('file-loaded', on_reload)
     end
+end
+
+-- Replay the current entry and restore the position once the new load is up.
+-- This re-runs the whole yt-dlp extraction (~3 s round-trip measured on the
+-- shipping binary), so the fast switch below is preferred whenever it can.
+local function reload_stream()
+    local duration = mp.get_property_native('duration')
+    local time_pos = mp.get_property('time-pos')
+    mp.command('playlist-play-index current')
+    restore_position(duration, time_pos)
+end
+
+-- ─── Fast quality switch ─────────────────────────────────────────────
+-- A resolution switch normally replays the playlist entry, which makes
+-- yt-dlp re-extract the whole video even though the toolbar already holds
+-- the signed stream URLs from the last extraction. This path reuses them:
+-- load the chosen video URL directly with the best audio URL as a
+-- secondary track — zero yt-dlp round-trips, position restored as usual.
+
+local function safe_media_url(u)
+    return type(u) == 'string'
+        and (u:find('^https://') == 1 or u:find('^http://') == 1)
+        and u:find('127%.0%.0%.1') == nil and u:find('localhost') == nil
+end
+
+local function cached_stream_json()
+    local res_data = mp.get_property_native('user-data/mpv/ytdl/json-subprocess-result')
+    if type(res_data) ~= 'table' or res_data.status ~= 0
+        or type(res_data.stdout) ~= 'string' then return nil end
+    local parsed = utils.parse_json(res_data.stdout)
+    if type(parsed) ~= 'table' or type(parsed.formats) ~= 'table' then return nil end
+    return parsed
+end
+
+-- Pick one video row for the switch. is_cap=true matches the streaming
+-- default semantics: best row at or below the ceiling, ordered by height,
+-- then fps, then bitrate — yt-dlp's own selection weighs height first too.
+-- HLS/fragmented rows load through the regular reload path instead.
+local function pick_video_format(formats, target_h, is_cap)
+    local best
+    for _, f in ipairs(formats) do
+        if type(f) == 'table'
+            and f.vcodec and f.vcodec ~= 'none'
+            and f.height and f.height > 0
+            and not f.fragments
+            and (f.protocol == 'https' or f.protocol == 'http')
+            and safe_media_url(f.url)
+        then
+            local matches
+            if is_cap then
+                matches = not target_h or f.height <= target_h
+            else
+                matches = math.abs(f.height - target_h) <= 15
+            end
+            if matches then
+                local better = not best
+                    or f.height > best.height
+                    or (f.height == best.height
+                        and ((f.fps or 0) > (best.fps or 0)
+                            or (f.fps == best.fps and (f.tbr or 0) > (best.tbr or 0))))
+                if better then best = f end
+            end
+        end
+    end
+    return best
+end
+
+local function pick_audio_format(formats)
+    local best
+    for _, f in ipairs(formats) do
+        if type(f) == 'table'
+            and f.acodec and f.acodec ~= 'none'
+            and (not f.vcodec or f.vcodec == 'none')
+            and not f.fragments
+            and (f.protocol == 'https' or f.protocol == 'http')
+            and safe_media_url(f.url)
+        then
+            local rate = f.abr or f.tbr
+            local best_rate = best and (best.abr or best.tbr)
+            if not best or (rate and (not best_rate or rate > best_rate)) then
+                best = f
+            end
+        end
+    end
+    return best
+end
+
+-- Reuse the same HTTP presentation the hook applies per load.
+local function apply_stream_headers(opts, headers)
+    if type(headers) ~= 'table' then return end
+    local useragent = headers['User-Agent']
+    if useragent then opts['user-agent'] = useragent end
+    local extra = {}
+    for _, name in ipairs({'Cookie', 'Referer', 'X-Forwarded-For'}) do
+        if headers[name] then extra[#extra + 1] = name .. ': ' .. headers[name] end
+    end
+    if #extra > 0 then
+        -- List options can't go through the per-file options table, so they
+        -- ride the file-local property exactly like the hook sets them.
+        mp.set_property_native('file-local-options/http-header-fields', extra)
+    end
+end
+
+local function fallback_format(target_h)
+    return policy and policy.stream_default_format and policy.stream_default_format(target_h)
+        or 'bestvideo[height<=?' .. target_h .. ']+bestaudio/best[height<=?' .. target_h .. ']'
+end
+
+local pending_fast = nil
+
+-- The fast load is treated as settled only when mpv really shows the new
+-- stream. If it never does (signed URL expired/rejected), the cached
+-- extraction is stale: drop it and run the full pipeline once, which
+-- re-extracts and re-signs everything.
+local function arm_fast_watch(attempt, target_h, is_cap)
+    local ok_timer, timer = pcall(mp.add_timeout, 15, function()
+        if pending_fast ~= attempt then return end
+        pending_fast = nil
+        pcall(mp.del_property, 'user-data/mpv/ytdl/json-subprocess-result')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
+        mp.osd_message('Quality switch failed — reloading a fresh stream', 2)
+        msg.warn('fast switch stalled; dropping stale extraction cache')
+        if is_cap then
+            mp.set_property('ytdl-format', '')
+        else
+            mp.set_property('ytdl-format', fallback_format(target_h))
+        end
+        reload_stream()
+    end)
+    if ok_timer then attempt.timer = timer end
+    local function on_loaded()
+        local path = mp.get_property('path')
+        if pending_fast ~= attempt then
+            mp.unregister_event(on_loaded)
+            return
+        end
+        if path == attempt.url then
+            mp.unregister_event(on_loaded)
+            pending_fast = nil
+            if attempt.timer then pcall(attempt.timer.kill, attempt.timer) end
+        end
+    end
+    mp.register_event('file-loaded', on_loaded)
+end
+
+-- Returns true when the switch was performed without re-extraction.
+local function switch_quality(target_h, is_cap)
+    local parsed = cached_stream_json()
+    if not parsed then return false end
+    local video = pick_video_format(parsed.formats, target_h, is_cap)
+    if not video then return false end
+    local audio = nil
+    if not video.acodec or video.acodec == 'none' then
+        audio = pick_audio_format(parsed.formats)
+        if not audio then return false end
+    end
+
+    restore_position(mp.get_property_native('duration'), mp.get_property('time-pos'))
+
+    local opts = {}
+    apply_stream_headers(opts, video.http_headers or parsed.http_headers)
+    if audio then opts['audio-file'] = audio.url end
+
+    -- on_load hook sees this flag and opens the URL as-is, skipping the
+    -- yt-dlp spawn; set it before the load starts consuming it.
+    mp.set_property('user-data/mpv/ytdl/fast-url', video.url)
+    local ok, err = pcall(mp.command_native,
+        {'loadfile', video.url, 'replace', -1, opts})
+    if not ok then
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
+        msg.warn('fast switch failed to load: ' .. tostring(err))
+        return false
+    end
+
+    if pending_fast and pending_fast.timer then
+        pcall(pending_fast.timer.kill, pending_fast.timer)
+    end
+    local attempt = { url = video.url }
+    pending_fast = attempt
+    arm_fast_watch(attempt, target_h, is_cap)
+    return true
 end
 
 -- Stats-for-nerds labels the window size 'Display: Resolution', so a 720p
@@ -131,11 +310,22 @@ end
 
 local function apply_default(silent)
     -- Clear any per-session quality override; every load (including this
-    -- reload) resolves the default from stream_quality.conf again.
+    -- reload) resolves the default from stream_quality.conf again. Re-read
+    -- the conf first so default-off / set-default see their own write —
+    -- the in-memory cache alone would lag by one action.
     mp.set_property('ytdl-format', '')
-    reload_stream()
+    local cached = quality_default
+    quality_default = read_default_quality()
+    if quality_default == nil then quality_default = cached end
+    local cap = quality_default and quality_default > 0 and quality_default or nil
     if not silent then
-        mp.osd_message('Quality: default (' .. default_quality_label() .. ')' .. display_note(quality_default), 2)
+        local label = cap and default_quality_label() or 'any resolution'
+        mp.osd_message('Quality: default (' .. label .. ')' .. (cap and display_note(cap) or ''), 2)
+    end
+    -- Fast path reuses the signed URLs for the defaulted ceiling; the full
+    -- reload remains the fallback when the cache can't serve it.
+    if not switch_quality(cap, true) then
+        reload_stream()
     end
 end
 
@@ -361,11 +551,29 @@ local function open_quality_menu()
 end
 local function set_quality(target_h, target_label)
     local h = tonumber(target_h)
-    if not h then return end
+    if not h or h <= 0 then return end
+    -- No-op when the playing stream is already this resolution — unless the
+    -- row promises a higher frame rate than what is on screen right now.
+    local parsed = cached_stream_json()
+    if parsed and type(parsed.formats) == 'table' then
+        local picked = pick_video_format(parsed.formats, h, false)
+        local cur = mp.get_property_number('height') or mp.get_property_number('dheight') or 0
+        if picked and cur > 0 and math.abs(cur - picked.height) <= 15 then
+            local cur_fps = mp.get_property_number('container-fps') or 0
+            if not picked.fps or cur_fps <= 0 or picked.fps <= cur_fps + 0.5 then
+                mp.osd_message('Quality: already ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
+                return
+            end
+        end
+    end
     local format = policy and policy.stream_default_format and policy.stream_default_format(h)
         or 'bestvideo[height<=?' .. h .. ']+bestaudio/best[height<=?' .. h .. ']'
     mp.set_property('ytdl-format', format)
-    reload_stream()
+    -- Fast path: reuse the signed URLs from the last extraction; the full
+    -- replay (re-extraction) remains the fallback.
+    if not switch_quality(h, false) then
+        reload_stream()
+    end
     mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))) .. display_note(h), 2)
 end
 

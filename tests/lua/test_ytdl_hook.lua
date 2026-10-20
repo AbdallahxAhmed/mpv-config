@@ -174,4 +174,23 @@ test('EDL program_id gated by mpv build (0.41 release emits none, master does)',
     assert(run({mpv_version='mpv v0.42.0'}).edl:find('program_id',1,true))
     assert(run().edl:find('program_id',1,true))
 end)
+test('fast quality switch: flagged URL skips extraction entirely',function()
+    -- The toolbar pre-resolves the stream URL and marks it via
+    -- user-data/mpv/ytdl/fast-url; on_load must consume the flag and open
+    -- the URL as-is — zero yt-dlp spawns, zero re-signed URLs.
+    local h=run()
+    local before=#h.calls
+    -- a fast switch loads the raw URL again: mpv re-populates
+    -- stream-open-filename with it before on_load runs
+    h.props['user-data/mpv/ytdl/fast-url']='https://youtu.be/video'
+    h.props['stream-open-filename']='https://youtu.be/video'
+    for _,hook in ipairs(h.hooks.on_load) do hook[2]() end
+    eq(#h.calls,before)
+    eq(h.props['user-data/mpv/ytdl/fast-url'],nil)
+    -- a different or stale flag never bypasses extraction
+    local h2=run()
+    h2.props['user-data/mpv/ytdl/fast-url']='https://media.example/other-video'
+    for _,hook in ipairs(h2.hooks.on_load) do hook[2]() end
+    eq(#h2.calls,1)
+end)
 print('Hook tests passed: '..total)

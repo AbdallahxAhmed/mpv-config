@@ -19,14 +19,26 @@ local function harness(filters, no_ui, conf)
         get_property_number=function(k,d) return tonumber(h.props[k]) or d end,
         get_property=function(k,d) return h.props[k] or d end,
         set_property_native=function(k,value)
-            eq(k,'af'); h.writes=h.writes+1
-            if h.fail then return false,'test failure' end
-            h.filters=value; if h.observers['af'] then h.observers['af']('af',value) end; return true
+            if k=='af' then
+                h.writes=h.writes+1
+                if h.fail then return false,'test failure' end
+                h.filters=value; if h.observers['af'] then h.observers['af']('af',value) end
+            else
+                h.props[k]=value
+            end
+            return true
         end,
         set_property=function(k,v) h.props[k]=v end,
+        del_property=function(k) h.props[k]=nil end,
+        command_native=function(tbl)
+            h.native_commands=h.native_commands or {}
+            table.insert(h.native_commands,tbl)
+            return true
+        end,
         observe_property=function(k,t,fn) h.observers[k]=fn; if k=='af' then h.observer=fn end end,
         register_script_message=function(name,fn) h.messages[name]=fn end,
         register_event=function(name,fn) h.events=h.events or {}; h.events[name]=fn end,
+        unregister_event=function(fn) h.unregistered=h.unregistered or {}; table.insert(h.unregistered,fn) end,
         add_key_binding=function() error('Mouse controls must not require a keyboard binding') end,
         add_periodic_timer=function(sec, fn)
             h.periodic_timers=h.periodic_timers or {}
@@ -235,6 +247,106 @@ test('set-default persists straight from the submenu row and re-drives playback'
     eq(h.props['ytdl-format'],'')
     assert(h.events['file-loaded']~=nil)
     assert(h.osd:find('future streams',1,true))
+    os.remove(path)
+end)
+-- ─── fast quality switch (reuses signed URLs, no re-extraction) ───────
+local function stream_fixture()
+    return {formats={
+        {height=1080,vcodec='avc1',fps=60,protocol='https',url='https://media.example/v1080',tbr=4000},
+        {height=1080,vcodec='avc1',fps=30,protocol='https',url='https://media.example/v1080-30',tbr=2500},
+        {height=720,vcodec='avc1',fps=30,protocol='https',url='https://media.example/v720',tbr=1000},
+        {height=480,vcodec='avc1',fps=30,protocol='https',url='https://media.example/v480',tbr=600},
+        {vcodec='none',acodec='opus',protocol='https',url='https://media.example/a-lo',abr=64},
+        {vcodec='none',acodec='opus',protocol='https',url='https://media.example/a-hi',abr=256},
+    },http_headers={['User-Agent']='ua-json'}}
+end
+test('set-quality reuses signed URLs instead of re-extracting',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=200; h.props['time-pos']=17
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['set-quality']('720','720p')
+    -- fast path: pre-resolved marker + direct loadfile with the best audio
+    -- as a secondary track; the playlist replay never runs
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v720')
+    eq(#h.native_commands,1)
+    local c=h.native_commands[1]
+    eq(c[1],'loadfile'); eq(c[2],'https://media.example/v720')
+    eq(c[3],'replace'); eq(c[4],-1)
+    eq(c[5]['audio-file'],'https://media.example/a-hi')
+    eq(c[5]['user-agent'],'ua-json')
+    eq(h.last_command,nil)
+    -- clicking the playing resolution is a no-op, not a second load
+    local before=#h.native_commands
+    h.messages['set-quality']('1080','1080p60')
+    eq(#h.native_commands,before)
+    assert(h.osd:find('already',1,true))
+    -- ...but a higher-fps row at the same height still switches
+    h.props['container-fps']=30
+    h.messages['set-quality']('1080','1080p60')
+    eq(#h.native_commands,before+1)
+    eq(h.native_commands[#h.native_commands][2],'https://media.example/v1080')
+    os.remove(path)
+end)
+test('muxed rows switch as a single file without a secondary audio track',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=480; h.props['duration']=50; h.props['time-pos']=3
+    h.parsed_json={formats={
+        {height=720,vcodec='avc1',acodec='mp4a.40.2',protocol='https',url='https://media.example/mux720',tbr=800},
+        {height=1080,vcodec='avc1',fps=30,protocol='https',url='https://media.example/v1080',tbr=4000},
+        {vcodec='none',acodec='opus',protocol='https',url='https://media.example/a-hi',abr=256},
+    }}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['set-quality']('720','720p')
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/mux720')
+    local c=h.native_commands[#h.native_commands]
+    eq(c[5]['audio-file'],nil)  -- muxed row carries its own audio
+    os.remove(path)
+end)
+test('apply-default fast path picks the best row at or below the ceiling',function()
+    local path=sandbox_conf(720)
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=10; h.props['time-pos']=1
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['apply-default']()
+    eq(h.props['ytdl-format'],'')  -- session override dropped before the load
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v720')
+    local c=h.native_commands[#h.native_commands]
+    eq(c[5]['audio-file'],'https://media.example/a-hi')
+    assert(h.osd:find('default (720p)',1,true))
+    eq(#h.timeouts,1)  -- heal watcher armed for the fast load
+    os.remove(path)
+end)
+test('default-off fast path picks the top available row',function()
+    local path=sandbox_conf(720)
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['duration']=10; h.props['time-pos']=1
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['default-off']()
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v1080')
+    local c=h.native_commands[#h.native_commands]
+    eq(c[5]['audio-file'],'https://media.example/a-hi')
+    local f=io.open(path,'r'); local content=f:read('*a'); f:close()
+    assert(content:find('default_quality=0',1,true))
+    os.remove(path)
+end)
+test('fragmented rows fall back to the full reload pipeline',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=480; h.props['duration']=10; h.props['time-pos']=1
+    h.parsed_json={formats={
+        {height=720,vcodec='avc1',fps=30,protocol='m3u8_native',url='https://media.example/hls720',tbr=1000},
+        {vcodec='none',acodec='opus',protocol='m3u8_native',url='https://media.example/hls-a',abr=128},
+    }}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['set-quality']('720','720p')
+    eq(h.props['user-data/mpv/ytdl/fast-url'],nil)
+    assert(h.last_command[1]:find('playlist-play-index',1,true))
+    eq(h.props['ytdl-format'],'bestvideo[height<=?720]+bestaudio/best[height<=?720]/best')
     os.remove(path)
 end)
 test('current resolution matches the default when saved as such',function()
