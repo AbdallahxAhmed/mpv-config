@@ -15,7 +15,8 @@ Menu · Paste  |  CC · Headphones · Quality  |  Stable Volume          Fullscr
 | CC | Open subtitles and captions. On YouTube, choose creator, auto-generated or auto-translated captions. For local media, use the normal subtitle menu. |
 | Headphones | Open audio tracks and choose the available dub/language. This does not toggle Stable Volume. |
 | Quality | Dynamic resolution badge (e.g. 1080p, 720p, 4K). Click to open the actual available qualities for the current video with a selection indicator. |
-| Quality menu · Save *\<playing\>* as default | Persists the currently playing resolution as the default streaming ceiling (`script-opts/stream_quality.conf`) and applies it immediately. The item shows the actual value, e.g. *Save 720p as default*. Future streams start at it; files marked *Default* in the menu show what is saved. |
+| Quality menu · Set as default (row submenu) | Each resolution row opens a two-action submenu. *Set as default* persists that resolution as the streaming ceiling (`script-opts/stream_quality.conf`, e.g. *720p ▸ Set as default*) **and** re-drives the playing video at it. Future streams start at it; rows marked *Default* show what is saved. One submenu action — two clicks, no reopen. |
+| Quality menu · Just this video (row submenu) | Plays this video at the chosen resolution only — session override, saved default untouched. |
 | Quality menu · Apply default now | Drops any session override and reloads at the saved default. |
 | Quality menu · Default: any resolution | Removes the cap entirely — yt-dlp picks the best available source quality. |
 | Compress / inward arrows | Toggle Stable Volume. The active styling, **ON** badge and hover text reflect the actual preset state. No badge is shown while Off. |

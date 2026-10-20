@@ -306,20 +306,24 @@ local function open_quality_menu()
             title = label,
             hint = join_hints(hints),
             active = is_current,
-            value = {'script-message-to', script, 'set-quality', tostring(h), label},
+            -- Two clicks to change the permanent default: open the row's
+            -- submenu, pick 'Set as default'. No menu reopen, no separate
+            -- save-on-playing-quality step.
+            items = {
+                {
+                    title = 'Set as default',
+                    hint = 'this + future streams',
+                    value = {'script-message-to', script, 'set-default', tostring(h), label},
+                },
+                {
+                    title = 'Just this video',
+                    hint = 'temporary override',
+                    value = {'script-message-to', script, 'set-quality', tostring(h), label},
+                },
+            },
         }
     end
 
-    local current_label
-    for _, it in ipairs(items) do
-        if it.active then current_label = it.title break end
-    end
-    items[#items + 1] = {
-        title = current_label and ('Save ' .. current_label .. ' as default')
-            or 'Save playing quality as default',
-        hint = 'wakes future streams',
-        value = {'script-message-to', script, 'save-default'},
-    }
     if is_current_default then
         items[#items + 1] = {
             title = 'Apply default now',
@@ -348,6 +352,19 @@ local function set_quality(target_h, target_label)
     mp.set_property('ytdl-format', format)
     reload_stream()
     mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
+end
+
+-- Set the persisted default straight from a menu row's submenu — replaces
+-- the old 'play it first, then reopen the menu and save' dance. The saved
+-- default also re-drives the playing stream so the change is visible at
+-- once; 'Just this video' stays the session-only counterpart.
+local function set_default_quality(target_h, target_label)
+    local h = tonumber(target_h)
+    if not h or h <= 0 then return end
+    if not persist_default_quality(h) then return end
+    local label = target_label or (h >= 2160 and '4K' or (h .. 'p'))
+    apply_default(true)
+    mp.osd_message('Default quality: ' .. label .. ' — future streams start at it', 2)
 end
 
 local clean_lang_names = {
@@ -877,6 +894,7 @@ end
 mp.register_script_message('open-audio-menu', open_audio_menu)
 mp.register_script_message('open-quality-menu', open_quality_menu)
 mp.register_script_message('set-quality', set_quality)
+mp.register_script_message('set-default', set_default_quality)
 mp.register_script_message('save-default', save_default_quality)
 mp.register_script_message('apply-default', apply_default)
 mp.register_script_message('default-off', clear_default_quality)

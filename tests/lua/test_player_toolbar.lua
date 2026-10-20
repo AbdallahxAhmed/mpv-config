@@ -157,16 +157,21 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     h.messages['open-quality-menu']()
     assert(h.menu~=nil)
     eq(h.menu.type,'stream_quality_menu')
-    -- 3 quality entries + 'Save <current> as default' + 'Default: any
-    -- resolution' (no saved default → no 'Apply default now' entry).
-    eq(#h.menu.items,5)
+    -- 2-action submenus per resolution row + 'Default: any resolution'
+    -- (no saved default → no 'Apply default now' entry; the old standalone
+    -- 'Save playing quality as default' row is gone — the submenu covers it).
+    eq(#h.menu.items,4)
     eq(h.menu.items[1].title,'1080p60')
     eq(h.menu.items[1].active,true)
     eq(h.menu.items[1].hint,'Current')
+    eq(h.menu.items[1].items[1].title,'Set as default')
+    eq(h.menu.items[1].items[1].hint,'this + future streams')
+    eq(h.menu.items[1].items[1].value[4],'1080')
+    eq(h.menu.items[1].items[2].title,'Just this video')
+    eq(h.menu.items[1].items[2].value[5],'1080p60')
     eq(h.menu.items[2].title,'720p')
     eq(h.menu.items[2].active,false)
-    eq(h.menu.items[4].title,'Save 1080p60 as default')
-    eq(h.menu.items[5].title,'Default: any resolution')
+    eq(h.menu.items[4].title,'Default: any resolution')
     h.messages['set-quality']('720')
     -- Same formula as the saved default (stream_policy.stream_default_format):
     -- the height cap plus the muxed-best fallback tail.
@@ -197,17 +202,31 @@ test('quality menu marks the saved default and offers persistence actions',funct
     }}
     h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
     h.messages['open-quality-menu']()
-    eq(#h.menu.items,6)
-    -- item identity first: heights present in the json-subprocess fixture
-    eq(h.menu.items[1].value[4],'1080')
-    eq(h.menu.items[2].value[4],'720')
-    eq(h.menu.items[3].value[4],'480')
+    -- 3 resolution rows (with submenus) + 'Apply default now' + 'Default: any resolution'
+    eq(#h.menu.items,5)
+    -- item identity first: heights present in the json-subprocess fixture,
+    -- reachable via each row's 'Set as default' submenu action
+    eq(h.menu.items[1].items[1].value[4],'1080')
+    eq(h.menu.items[2].items[1].value[4],'720')
+    eq(h.menu.items[3].items[1].value[4],'480')
     eq(h.menu.items[1].hint,'Current')
     eq(h.menu.items[2].hint,'Default')
-    eq(h.menu.items[4].title,'Save 1080p60 as default')
-    eq(h.menu.items[5].title,'Apply default now')
-    eq(h.menu.items[5].hint,'720p')
-    eq(h.menu.items[6].title,'Default: any resolution')
+    eq(h.menu.items[4].title,'Apply default now')
+    eq(h.menu.items[4].hint,'720p')
+    eq(h.menu.items[5].title,'Default: any resolution')
+    os.remove(path)
+end)
+test('set-default persists straight from the submenu row and re-drives playback',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['duration']=100; h.props['time-pos']=12
+    h.messages['set-default']('720','720p')
+    local f=io.open(path,'r'); assert(f, 'conf file was not created'); local content=f:read('*a'); f:close()
+    assert(content:find('default_quality=720',1,true), 'saved value missing')
+    -- 'Set as default' also re-drives the playing stream from the saved conf
+    eq(h.props['ytdl-format'],'')
+    assert(h.events['file-loaded']~=nil)
+    assert(h.osd:find('future streams',1,true))
     os.remove(path)
 end)
 test('current resolution matches the default when saved as such',function()
@@ -217,7 +236,7 @@ test('current resolution matches the default when saved as such',function()
     h.parsed_json={formats={{vcodec='avc1',height=1080,fps=60}}}
     h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
     h.messages['open-quality-menu']()
-    eq(#h.menu.items,4)
+    eq(#h.menu.items,3)
     eq(h.menu.items[1].hint,'Current · Default')
     os.remove(path)
 end)
