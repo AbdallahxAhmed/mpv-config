@@ -117,6 +117,13 @@ ytdl                      = no
 ytdl-raw-options-append = no-playlist=
 ytdl-raw-options-append = format-sort=vbr,abr
 ytdl-raw-options-append = socket-timeout=15
+# 2026-10, measured on the shipping binary: the default client list
+# (tv_samsung,visionos,web) costs 3.0 s per extraction; dropping `web` —
+# which needs a JS runtime (Deno) the stock install doesn't have, so it
+# fails resolution attempts anyway — lands at 1.0 s with the same
+# https stream URLs. `default,-web` keeps yt-dlp's own list minus that
+# one client, so future default changes keep flowing through.
+ytdl-raw-options-append = extractor-args=youtube:player_client=default,-web
 
 # ─── Shader cache — critical for Anime4K first-frame speed ───────────
 gpu-shader-cache          = yes
