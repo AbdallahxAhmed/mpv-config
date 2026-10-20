@@ -331,21 +331,161 @@ def _select_release_asset(release, patterns):
     return None
 
 
-def _download_asset(url, dest_path):
+def _human_bytes(num_bytes):
+    """Compact byte count for progress lines ("999.0 B", "12.4 MB")."""
+    value = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
+
+
+class _InlineDownloadProgress:
+    """In-place, single-line progress for binary HTTP downloads.
+
+    Renders on a TTY while the transfer runs and is fully silent on piped
+    output (curl | bash, CI logs) — matching the previous behavior there:
+
+        > yt-dlp.exe  45% |##########.........|  8.4/18.7 MB  2.1 MB/s  ETA 5s
+
+    Whole-transfer average speed keeps the readout stable; updates are
+    throttled so a hot chunk cadence does not redraw faster than the eye.
+    """
+
+    BAR_WIDTH = 24
+
+    def __init__(self, label, total=None, stdout=None, clock=time.monotonic, update_interval=0.1):
+        self.label = (label or "download")
+        if len(self.label) > 40:
+            self.label = self.label[:37] + "..."
+        try:
+            self.total = int(total) if total is not None and int(total) > 0 else None
+        except (TypeError, ValueError):
+            self.total = None
+        self._stdout = stdout if stdout is not None else sys.stdout
+        self._clock = clock
+        self._interval = max(0.0, update_interval)
+        self._done = 0
+        self._started = None
+        self._last_render = float("-inf")
+        self._last_len = 0
+        self._rendered = False
+        try:
+            self._tty = bool(self._stdout.isatty())
+        except Exception:
+            self._tty = False
+
+    def start(self):
+        """Anchor the elapsed-time base (called when the transfer begins)."""
+        if self._started is None:
+            self._started = self._clock()
+
+    def update(self, chunk_size):
+        """Account for one received chunk; render when the throttle allows."""
+        self.start()
+        self._done += max(0, int(chunk_size))
+        now = self._clock()
+        if self._tty and now - self._last_render >= self._interval:
+            self._render()
+
+    def finish(self):
+        """Final render at the real byte count, then close the line."""
+        if not self._tty:
+            return
+        self._render()
+        if self._rendered:
+            self._stdout.write("\n")
+            self._stdout.flush()
+
+    def abort(self):
+        """Close the in-place line after a failure so logs stay readable."""
+        if self._tty and self._rendered:
+            self._stdout.write("\n")
+            self._stdout.flush()
+
+    def _render(self):
+        now = self._clock()
+        self._last_render = now
+        elapsed = now - self._started if self._started is not None else 0.0
+        speed = self._done / elapsed if elapsed > 0 else 0.0
+        speed_text = f"{_human_bytes(speed)}/s"
+
+        parts = [f"> {self.label}"]
+        if self.total and self._done <= self.total:
+            pct = min(100, int(self._done * 100 / self.total))
+            filled = int(self.BAR_WIDTH * self._done / self.total)
+            bar = ui.S.BLOCK * filled + ui.S.LIGHT * (self.BAR_WIDTH - filled)
+            parts.append(f"{pct:3d}% |{bar}|")
+            parts.append(f"{_human_bytes(self._done)}/{_human_bytes(self.total)}")
+            if speed > 0:
+                eta = max(0, int((self.total - self._done) / speed))
+                parts.append(f"{speed_text}  ETA {eta}s")
+            else:
+                parts.append(speed_text)
+        else:
+            parts.append(f"{_human_bytes(self._done)}")
+            parts.append(speed_text)
+
+        line = "  ".join(parts)
+        pad = max(0, self._last_len - len(line))
+        self._last_len = len(line)
+        self._rendered = True
+        try:
+            self._stdout.write("\r" + line + " " * pad)
+            self._stdout.flush()
+        except Exception:
+            # Closed/odd console → stop rendering, keep counting bytes.
+            self._tty = False
+
+
+def _download_asset(url, dest_path, label=None, stdout=None):
     """Download an asset to dest_path atomically (tmp file + rename).
 
     Never leaves a half-written binary at dest when a download dies
     mid-flight — a truncated yt-dlp/alass would spawn-fail inside mpv until
     the next successful deploy.
+
+    Streams in chunks (256 KiB) with an in-place progress readout on a TTY:
+    the step previously relied on a bare urlretrieve that printed nothing,
+    so a slow yt-dlp.exe fetch looked like a frozen installer. Piped output
+    stays silent, exactly like before.
     """
+    label = label or os.path.basename(dest_path) or "download"
     tmp_fd, tmp_path = tempfile.mkstemp(
         prefix=".mpvdl-", dir=os.path.dirname(dest_path) or "."
     )
     os.close(tmp_fd)
+    progress = _InlineDownloadProgress(label, stdout=stdout)
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "mpv-config installer", "Accept-Encoding": "identity"}
+    )
     try:
-        urllib.request.urlretrieve(url, tmp_path)
+        # 60 s connect/read timeout: a dead CDN connection cannot strand the
+        # installer forever with no output either way.
+        resp = urllib.request.urlopen(request, timeout=60)
+        progress.start()
+        try:
+            length = resp.headers.get("Content-Length")
+            try:
+                length = int(length) if length else None
+            except (TypeError, ValueError):
+                length = None
+            if length and length > 0:
+                progress.total = length
+            with open(tmp_path, "wb") as fh:
+                while True:
+                    chunk = resp.read(256 * 1024)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    progress.update(len(chunk))
+        finally:
+            resp.close()
+        progress.finish()
         os.replace(tmp_path, dest_path)
     except Exception:
+        progress.abort()
         try:
             os.remove(tmp_path)
         except OSError:
@@ -605,7 +745,7 @@ def _install_github_asset(name, info, env):
 
         ui.step(f"Downloading {asset_name} ({label}, {asset_size_mb:.1f} MB)...")
         try:
-            urllib.request.urlretrieve(download_url, archive_path)
+            _download_asset(download_url, archive_path, asset_name)
         except Exception as e:
             ui.error(f"Download failed: {e}")
             return False
