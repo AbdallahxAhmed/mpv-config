@@ -48,6 +48,11 @@ local function run(config)
                 return nil, 'init'
             end
             if config.nil_subprocess then return nil end
+            if config.fail_first_client then
+                if config.fail_all or #h.calls==1 then
+                    return {status=1,stdout='',stderr='unable to download video data'}
+                end
+            end
             return {status=0,stdout='fixture',stderr=''}
         end,
         commandv=function(...) h.commands[#h.commands+1]={...} end,
@@ -88,6 +93,29 @@ test('one extractor call, fewer audio streams, video and default language intact
     assert(not h.edl:find('audio only',1,true))
     local _,defaults=h.edl:gsub('flags=default',''); eq(defaults,2)
     assert(#h.edl < #run({all_audio=true}).edl)
+end)
+test('pinned client failure retries once with yt-dlp client defaults',function()
+    local h=run({fail_first_client=true,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    eq(#h.calls,2)
+    local override_in_1, override_in_2 = false, false
+    for _,v in ipairs(h.calls[1]) do if v=='--extractor-args' then override_in_1=true end end
+    for _,v in ipairs(h.calls[2]) do if v=='--extractor-args' then override_in_2=true end end
+    assert(override_in_1, 'override should be on the first attempt')
+    assert(not override_in_2, 'retry must shed the override')
+    assert(h.edl:find('https://media.example/video',1,true))  -- normal load continues
+end)
+test('a successful override run never retries',function()
+    local h=run({raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    eq(#h.calls,1)
+end)
+test('retry failure surfacing keeps upstream hard-fail semantics',function()
+    local h=run({fail_first_client=true, fail_all=true,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    eq(#h.calls,2)
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].status,1)
+    eq(h.edl,'https://youtu.be/video')  -- no EDL replacement on persistent failure
+    assert(h:has_arg('--extractor-args'))  -- first attempt kept the override
 end)
 test('no automatic caption enumeration at startup',function()
     local h=run(); assert(not h:has_arg('--write-srt')); assert(not h:has_arg('--sub-langs'))

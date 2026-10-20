@@ -220,6 +220,24 @@ end
 
 local pending_fast = nil
 
+-- After a fast switch the replaced file's end ran the hook's cleanup, which
+-- drops the parsed extraction. Put the snapshots back: the URL pair that just
+-- loaded came from exactly that extraction, so it is still current evidence.
+-- Later switches stay on the fast path, and the quality menu keeps listing
+-- the stream's real rows instead of falling back to the guess-list.
+local function fast_switch_restore(attempt)
+    if attempt.json_snapshot ~= nil then
+        mp.set_property_native('user-data/mpv/ytdl/json-subprocess-result',
+            attempt.json_snapshot)
+    end
+    if attempt.source_snapshot ~= nil then
+        mp.set_property('user-data/mpv/ytdl/source-url', attempt.source_snapshot)
+    end
+    if attempt.youtube_snapshot ~= nil then
+        mp.set_property('user-data/mpv/ytdl/is-youtube', attempt.youtube_snapshot)
+    end
+end
+
 -- The fast load is treated as settled only when mpv really shows the new
 -- stream. If it never does (signed URL expired/rejected), the cached
 -- extraction is stale: drop it and run the full pipeline once, which
@@ -250,6 +268,7 @@ local function arm_fast_watch(attempt, target_h, is_cap)
             mp.unregister_event(on_loaded)
             pending_fast = nil
             if attempt.timer then pcall(attempt.timer.kill, attempt.timer) end
+            fast_switch_restore(attempt)
         end
     end
     mp.register_event('file-loaded', on_loaded)
@@ -259,6 +278,12 @@ end
 local function switch_quality(target_h, is_cap)
     local parsed = cached_stream_json()
     if not parsed then return false end
+    -- The hook's end-file cleanup wipes the extraction props when the
+    -- replaced load ends; this fast load came from exactly that extraction,
+    -- so the toolbar repairs them afterwards (see fast_switch_restore).
+    local json_snapshot = mp.get_property_native('user-data/mpv/ytdl/json-subprocess-result')
+    local source_snapshot = mp.get_property('user-data/mpv/ytdl/source-url')
+    local youtube_snapshot = mp.get_property('user-data/mpv/ytdl/is-youtube')
     local video = pick_video_format(parsed.formats, target_h, is_cap)
     if not video then return false end
     local audio = nil
@@ -287,7 +312,12 @@ local function switch_quality(target_h, is_cap)
     if pending_fast and pending_fast.timer then
         pcall(pending_fast.timer.kill, pending_fast.timer)
     end
-    local attempt = { url = video.url }
+    local attempt = {
+        url = video.url,
+        json_snapshot = json_snapshot,
+        source_snapshot = source_snapshot,
+        youtube_snapshot = youtube_snapshot,
+    }
     pending_fast = attempt
     arm_fast_watch(attempt, target_h, is_cap)
     return true
@@ -445,6 +475,10 @@ local function publish_quality(force)
     })
     if data then pcall(mp.commandv, 'script-message-to', 'uosc', 'set-button', 'stream-quality', data) end
 end
+-- Canonical menu rows; the stream's real heights merge into these (rows the
+-- extraction didn't offer become ceiling-only choices).
+local DEFAULT_QUALITY_HEIGHTS = {2160, 1440, 1080, 720, 480, 360, 240, 144}
+
 local function open_quality_menu()
     local current_h = mp.get_property_number('height') or mp.get_property_number('dheight') or 0
     -- Re-read the saved default so hand-edited conf files don't need a restart.
@@ -479,13 +513,19 @@ local function open_quality_menu()
     for _, info in pairs(heights_map) do
         sorted_heights[#sorted_heights + 1] = info
     end
-    table.sort(sorted_heights, function(a, b) return a.height > b.height end)
-
-    if #sorted_heights == 0 then
-        for _, h in ipairs({2160, 1440, 1080, 720, 480, 360, 240, 144}) do
-            sorted_heights[#sorted_heights + 1] = {height = h}
+    -- Standard rows the stream doesn't offer stay listed: picking one sets
+    -- the same 'height<=?' cap, so playback falls to the best the video
+    -- actually has. They're marked so real rows read as available (●) and
+    -- the rest as caps you may want as default (○) — no more surprise 4K
+    -- on a 1080-max video.
+    local offered = {}
+    for _, info in pairs(heights_map) do offered[info.height] = true end
+    for _, h in ipairs(DEFAULT_QUALITY_HEIGHTS) do
+        if not offered[h] then
+            sorted_heights[#sorted_heights + 1] = {height = h, ceiling = true}
         end
     end
+    table.sort(sorted_heights, function(a, b) return a.height > b.height end)
 
     local is_current_default = quality_default and quality_default > 0 or false
     local function join_hints(hints)
@@ -507,8 +547,9 @@ local function open_quality_menu()
         local hints = {}
         if is_current then hints[#hints + 1] = 'Current' end
         if is_current_default and h == quality_default then hints[#hints + 1] = 'Default' end
+        if info.ceiling then hints[#hints + 1] = 'cap only · not in stream' end
         items[#items + 1] = {
-            title = label,
+            title = (info.ceiling and '○ ' or '● ') .. label,
             hint = join_hints(hints),
             active = is_current,
             -- Two clicks to change the permanent default: open the row's

@@ -1205,6 +1205,34 @@ local function run_ytdl_hook(url)
         return
     end
 
+    -- A pinned yt client (mpv.conf's extractor-args) is much faster because
+    -- it spares the extra player API round-trips, but YouTube can refuse it
+    -- for individual videos. Retry once without the override so single-client
+    -- speed keeps multi-client resilience as the safety net.
+    if result.status ~= 0 then
+        local has_override = false
+        for _, a in ipairs(command) do
+            if a == "--extractor-args" then has_override = true end
+        end
+        if has_override then
+            local retry = {}
+            local skip_next = false
+            for _, a in ipairs(command) do
+                if skip_next then skip_next = false
+                elseif a == "--extractor-args" then skip_next = true
+                else retry[#retry + 1] = a end
+            end
+            msg.warn("extraction failed with the configured player_client: " ..
+                "retrying with yt-dlp's own client list")
+            local retry_result = exec(retry)
+            if not retry_result.killed_by_us
+                and retry_result.status == 0
+                and type(retry_result.stdout) == "string" and retry_result.stdout ~= "" then
+                result = retry_result
+            end
+        end
+    end
+
     mp.set_property("user-data/mpv/ytdl/source-url", url)
     mp.set_property_bool("user-data/mpv/ytdl/is-youtube",
         stream_policy ~= nil and stream_policy.youtube_url(url) ~= nil)

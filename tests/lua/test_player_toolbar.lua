@@ -169,21 +169,27 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     h.messages['open-quality-menu']()
     assert(h.menu~=nil)
     eq(h.menu.type,'stream_quality_menu')
-    -- 2-action submenus per resolution row + 'Default: any resolution'
-    -- (no saved default → no 'Apply default now' entry; the old standalone
-    -- 'Save playing quality as default' row is gone — the submenu covers it).
-    eq(#h.menu.items,4)
-    eq(h.menu.items[1].title,'1080p60')
-    eq(h.menu.items[1].active,true)
-    eq(h.menu.items[1].hint,'Current')
-    eq(h.menu.items[1].items[1].title,'Set as default')
-    eq(h.menu.items[1].items[1].hint,'this + future streams')
-    eq(h.menu.items[1].items[1].value[4],'1080')
-    eq(h.menu.items[1].items[2].title,'Just this video')
-    eq(h.menu.items[1].items[2].value[5],'1080p60')
-    eq(h.menu.items[2].title,'720p')
-    eq(h.menu.items[2].active,false)
-    eq(h.menu.items[4].title,'Default: any resolution')
+    -- Real rows merged with the standard list: heights the fixture doesn't
+    -- offer are ceiling-only choices (○, hint 'cap only · not in stream'),
+    -- real rows are marked available (●). Two-action submenus per row +
+    -- 'Default: any resolution' (no saved default → no 'Apply default now').
+    -- [1]=2160○ [2]=1440○ [3]=1080● [4]=720● [5]=480● [6]=360○ [7]=240○
+    -- [8]=144○ [9]=off-row
+    eq(#h.menu.items,9)
+    eq(h.menu.items[1].title,'○ 4K')
+    eq(h.menu.items[1].active,false)
+    eq(h.menu.items[1].hint,'cap only · not in stream')
+    eq(h.menu.items[3].title,'● 1080p60')
+    eq(h.menu.items[3].active,true)
+    eq(h.menu.items[3].hint,'Current')
+    eq(h.menu.items[3].items[1].title,'Set as default')
+    eq(h.menu.items[3].items[1].hint,'this + future streams')
+    eq(h.menu.items[3].items[1].value[4],'1080')
+    eq(h.menu.items[3].items[2].title,'Just this video')
+    eq(h.menu.items[3].items[2].value[5],'1080p60')
+    eq(h.menu.items[4].title,'● 720p')
+    eq(h.menu.items[4].active,false)
+    eq(h.menu.items[9].title,'Default: any resolution')
     -- Display larger than the source → the OSD spells the rescale out, so
     -- stats-for-nerds' window-size line can't be mistaken for stream quality.
     h.props['osd-width']=1920; h.props['osd-height']=1080
@@ -222,18 +228,21 @@ test('quality menu marks the saved default and offers persistence actions',funct
     }}
     h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
     h.messages['open-quality-menu']()
-    -- 3 resolution rows (with submenus) + 'Apply default now' + 'Default: any resolution'
-    eq(#h.menu.items,5)
-    -- item identity first: heights present in the json-subprocess fixture,
-    -- reachable via each row's 'Set as default' submenu action
-    eq(h.menu.items[1].items[1].value[4],'1080')
-    eq(h.menu.items[2].items[1].value[4],'720')
-    eq(h.menu.items[3].items[1].value[4],'480')
-    eq(h.menu.items[1].hint,'Current')
-    eq(h.menu.items[2].hint,'Default')
-    eq(h.menu.items[4].title,'Apply default now')
-    eq(h.menu.items[4].hint,'720p')
-    eq(h.menu.items[5].title,'Default: any resolution')
+    -- 8 merged rows (3 real ● + 5 ceiling ○) + 'Apply default now' + 'Default: any resolution'
+    eq(#h.menu.items,10)
+    -- offered rows first by height, then the ceiling-only guesses; each row
+    -- keeps its 'Set as default' submenu action
+    eq(h.menu.items[1].items[1].value[4],'2160')
+    eq(h.menu.items[3].items[1].value[4],'1080')
+    eq(h.menu.items[4].items[1].value[4],'720')
+    eq(h.menu.items[5].items[1].value[4],'480')
+    eq(h.menu.items[3].hint,'Current')
+    eq(h.menu.items[4].hint,'Default')
+    eq(h.menu.items[4].title,'● 720p')
+    eq(h.menu.items[6].hint,'cap only · not in stream')
+    eq(h.menu.items[9].title,'Apply default now')
+    eq(h.menu.items[9].hint,'720p')
+    eq(h.menu.items[10].title,'Default: any resolution')
     os.remove(path)
 end)
 test('set-default persists straight from the submenu row and re-drives playback',function()
@@ -287,6 +296,33 @@ test('set-quality reuses signed URLs instead of re-extracting',function()
     h.messages['set-quality']('1080','1080p60')
     eq(#h.native_commands,before+1)
     eq(h.native_commands[#h.native_commands][2],'https://media.example/v1080')
+    os.remove(path)
+end)
+test('fast switch restores the wiped extraction cache when the load settles',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=200; h.props['time-pos']=5
+    local raw={status=0,stdout='fixture'}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']=raw
+    h.props['user-data/mpv/ytdl/source-url']='https://watch.example/v'
+    h.props['user-data/mpv/ytdl/is-youtube']='yes'
+    h.parsed_json=stream_fixture()
+    h.messages['set-quality']('480','480p')
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v480')
+    -- the replaced file ends during the switch → the hook's cleanup drops
+    -- the extraction; without the repair the next switch + menu would fall
+    -- back to the slow reload path and guess-list rows
+    h.props['user-data/mpv/ytdl/json-subprocess-result']=nil
+    h.props['user-data/mpv/ytdl/source-url']=nil
+    h.props['user-data/mpv/ytdl/is-youtube']=nil
+    -- the fast load settles; the toolbar rebuilds the evidence
+    h.props['path']='https://media.example/v480'
+    h.events['file-loaded']()
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'],raw)
+    eq(h.props['user-data/mpv/ytdl/source-url'],'https://watch.example/v')
+    eq(h.props['user-data/mpv/ytdl/is-youtube'],'yes')
+    -- the expired-load heal watcher must be gone dead (success cancels it)
+    assert(h.timeouts[1].dead)
     os.remove(path)
 end)
 test('muxed rows switch as a single file without a secondary audio track',function()
@@ -356,8 +392,12 @@ test('current resolution matches the default when saved as such',function()
     h.parsed_json={formats={{vcodec='avc1',height=1080,fps=60}}}
     h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
     h.messages['open-quality-menu']()
-    eq(#h.menu.items,3)
-    eq(h.menu.items[1].hint,'Current · Default')
+    -- 1 real row (1080) + 7 ceiling-only rows + Apply + off
+    eq(#h.menu.items,10)
+    eq(h.menu.items[1].title,'○ 4K')
+    eq(h.menu.items[3].title,'● 1080p60')
+    eq(h.menu.items[3].hint,'Current · Default')
+    eq(h.menu.items[9].title,'Apply default now')
     os.remove(path)
 end)
 test('save-default persists the playing height and drops the session override',function()
