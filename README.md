@@ -52,7 +52,7 @@ Recent work now on `main` (unreleased in the changelog):
 - **On-demand caption menu** (`Ctrl+C` or CC button) with *Creator / Auto-generated / Auto-translated* groups, cancellable async loading, no reloads and per-session reuse.
 - **Smart dub filtering** — the playback hook keeps the best-bitrate rendition per language/role and defaults video selection to match the chosen dub.
 - **SponsorBlock** integration with segment marking, submission and up/down-vote keybindings.
-- **Configurable default quality** — the streaming ceiling lives in one file (`script-opts/stream_quality.conf`, default 1080p): pick it in the installer (`--stream-quality`), override per-video from the Quality button, or *"Save playing quality as default"* from the same menu — no hardcoded caps anywhere.
+- **Configurable default quality** — the streaming ceiling lives in one file (`script-opts/stream_quality.conf`, default 1080p): pick it in the installer (`--stream-quality`), override per-video from the Quality button (bottom toolbar), or hit *"Save 720p as default"* (shows the current resolution) from the same menu — no hardcoded caps anywhere.
 
 ### 🧰 Player utilities
 - **Stable Volume / night mode** (`F8` or toolbar button) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.

@@ -345,9 +345,11 @@ class _InlineDownloadProgress:
     """In-place, single-line progress for binary HTTP downloads.
 
     Renders on a TTY while the transfer runs and is fully silent on piped
-    output (curl | bash, CI logs) — matching the previous behavior there:
+    output (curl | bash, CI logs) — matching the previous behavior there.
+    Same visual language as the rest of the output (rich/`ui.py`): heavy
+    unicode bar glyphs when the terminal can encode them, ASCII otherwise:
 
-        > yt-dlp.exe  45% |##########.........|  8.4/18.7 MB  2.1 MB/s  ETA 5s
+        > yt-dlp.exe  ━━━━━━━━━━━━━━━━━━━━━━  45%  8.4/18.7 MB  2.1 MB/s  ETA 5s
 
     Whole-transfer average speed keeps the readout stable; updates are
     throttled so a hot chunk cadence does not redraw faster than the eye.
@@ -356,7 +358,7 @@ class _InlineDownloadProgress:
     BAR_WIDTH = 24
 
     def __init__(self, label, total=None, stdout=None, clock=time.monotonic,
-                 update_interval=0.1, tick_interval=1.0):
+                 update_interval=0.1, tick_interval=1.0, theme=None):
         self.label = (label or "download")
         if len(self.label) > 40:
             self.label = self.label[:37] + "..."
@@ -368,6 +370,11 @@ class _InlineDownloadProgress:
         self._clock = clock
         self._interval = max(0.0, update_interval)
         self._tick_interval = max(0.0, tick_interval)
+        if theme == "unicode" or (theme is None and ui.USE_UNICODE):
+            # Matches the rich Progress bars the rest of the output paints.
+            self._bar_full, self._bar_empty = "━", "─"
+        else:
+            self._bar_full, self._bar_empty = ui.S.BLOCK, ui.S.LIGHT
         self._done = 0
         self._started = None
         self._last_render = float("-inf")
@@ -465,26 +472,47 @@ class _InlineDownloadProgress:
         speed = self._done / elapsed if elapsed > 0 else 0.0
         speed_text = f"{_human_bytes(speed)}/s"
 
-        parts = [f"> {self.label}"]
+        # (plain, decorated) pairs: the plain text drives the overwrite-pad
+        # math so ANSI escape bytes never distort visible-length accounting.
+        # Only the arrow and the bar take color — numbers stay greppable.
+        cyan, dim, reset = ui._C.CYAN, ui._C.DIM, ui._C.RESET
+        if ui.USE_COLOR:
+            pairs = [(f"> ", f"{cyan}>{reset} ")]
+        else:
+            pairs = [("> ", None)]
+        pairs.append((self.label, None))
+
         if self.total and self._done <= self.total:
             pct = min(100, int(self._done * 100 / self.total))
             filled = int(self.BAR_WIDTH * self._done / self.total)
-            bar = ui.S.BLOCK * filled + ui.S.LIGHT * (self.BAR_WIDTH - filled)
-            parts.append(f"{pct:3d}% |{bar}|")
-            parts.append(f"{_human_bytes(self._done)}/{_human_bytes(self.total)}")
+            rest = self.BAR_WIDTH - filled
+            bar_plain = self._bar_full * filled + self._bar_empty * rest
+            if ui.USE_COLOR:
+                bar_rich = (
+                    f"{cyan}{self._bar_full * filled}{reset}"
+                    f"{dim}{self._bar_empty * rest}{reset}"
+                )
+            else:
+                bar_rich = None
+            pairs.append(("  " + bar_plain, None if bar_rich is None else "  " + bar_rich))
+            pairs.append((f"  {pct:3d}%", None))
+            pairs.append(
+                (f"  {_human_bytes(self._done)}/{_human_bytes(self.total)}", None)
+            )
             if speed > 0:
                 eta = max(0, int((self.total - self._done) / speed))
-                parts.append(f"{speed_text}  ETA {eta}s")
+                pairs.append((f"  {speed_text}  ETA {eta}s", None))
             else:
-                parts.append(speed_text)
+                pairs.append((f"  {speed_text}", None))
         else:
-            parts.append(f"{_human_bytes(self._done)}")
-            parts.append(speed_text)
+            pairs.append((f"  {_human_bytes(self._done)}", None))
+            pairs.append((f"  {speed_text}", None))
 
-        line = "  ".join(parts)
-        self._write_line(line)
+        plain_line = "".join(p[0] for p in pairs)
+        shown_line = "".join(p[1] if p[1] is not None else p[0] for p in pairs)
+        self._write_line(plain_line, shown_line)
 
-    def _write_line(self, line):
+    def _write_line(self, line, shown=None):
         """Overwrite the current console line in place (carriage return)."""
         pad = max(0, self._last_len - len(line))
         self._last_len = len(line)
@@ -492,7 +520,7 @@ class _InlineDownloadProgress:
         if not self._tty:
             return
         try:
-            self._stdout.write("\r" + line + " " * pad)
+            self._stdout.write("\r" + (shown if shown is not None else line) + " " * pad)
             self._stdout.flush()
         except Exception:
             # Closed/odd console → stop rendering, keep counting bytes.

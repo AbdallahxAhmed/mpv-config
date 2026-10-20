@@ -39,6 +39,9 @@ class _TtySink(io.StringIO):
 def _progress(total=None, **kwargs):
     out = _TtySink()
     clock = _FakeClock()
+    # ASCII glyphs by default so assertions are hermetic across terminals;
+    # individual tests may override with theme="unicode".
+    kwargs.setdefault("theme", "ascii")
     progress = _InlineDownloadProgress(
         "yt-dlp.exe", total=total, stdout=out, clock=clock, **kwargs
     )
@@ -65,6 +68,17 @@ class InlineProgressTests(unittest.TestCase):
         self.assertIn("2.0 KB", text)
         self.assertNotIn("%", text)
         self.assertIn("KB/s", text)
+
+    def test_unicode_theme_uses_heavy_bar_glyphs(self):
+        # The default theme mirrors the rich Progress bars used elsewhere in
+        # the output; force it explicitly here so the test is hermetic.
+        progress, out, clock = _progress(total=1000, theme="unicode")
+        clock.advance(0.5)
+        progress.update(500)
+        text = out.getvalue()
+        self.assertIn("━" * 12, text)
+        self.assertIn("─" * 12, text)
+        self.assertIn("50%", text)
 
     def test_throttled_updates_do_not_flood_the_console(self):
         progress, out, clock = _progress(total=1000, update_interval=0.1)

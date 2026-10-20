@@ -157,7 +157,7 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     h.messages['open-quality-menu']()
     assert(h.menu~=nil)
     eq(h.menu.type,'stream_quality_menu')
-    -- 3 quality entries + 'Save playing quality as default' + 'Default: any
+    -- 3 quality entries + 'Save <current> as default' + 'Default: any
     -- resolution' (no saved default → no 'Apply default now' entry).
     eq(#h.menu.items,5)
     eq(h.menu.items[1].title,'1080p60')
@@ -165,7 +165,7 @@ test('stream quality button publishes resolution badge and opens quality menu',f
     eq(h.menu.items[1].hint,'Current')
     eq(h.menu.items[2].title,'720p')
     eq(h.menu.items[2].active,false)
-    eq(h.menu.items[4].title,'Save playing quality as default')
+    eq(h.menu.items[4].title,'Save 1080p60 as default')
     eq(h.menu.items[5].title,'Default: any resolution')
     h.messages['set-quality']('720')
     -- Same formula as the saved default (stream_policy.stream_default_format):
@@ -204,7 +204,7 @@ test('quality menu marks the saved default and offers persistence actions',funct
     eq(h.menu.items[3].value[4],'480')
     eq(h.menu.items[1].hint,'Current')
     eq(h.menu.items[2].hint,'Default')
-    eq(h.menu.items[4].title,'Save playing quality as default')
+    eq(h.menu.items[4].title,'Save 1080p60 as default')
     eq(h.menu.items[5].title,'Apply default now')
     eq(h.menu.items[5].hint,'720p')
     eq(h.menu.items[6].title,'Default: any resolution')

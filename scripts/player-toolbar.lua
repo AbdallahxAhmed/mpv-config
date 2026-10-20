@@ -310,8 +310,13 @@ local function open_quality_menu()
         }
     end
 
+    local current_label
+    for _, it in ipairs(items) do
+        if it.active then current_label = it.title break end
+    end
     items[#items + 1] = {
-        title = 'Save playing quality as default',
+        title = current_label and ('Save ' .. current_label .. ' as default')
+            or 'Save playing quality as default',
         hint = 'wakes future streams',
         value = {'script-message-to', script, 'save-default'},
     }
