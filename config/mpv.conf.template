@@ -175,7 +175,7 @@ deband-threshold          = 48
 deband-range              = 16
 deband-grain              = 24
 interpolation             = {{INTERPOLATION}}
-tscale                    = oversample
+tscale                    = linear
 video-timing-offset       = 0.01
 
 #######################################################################################
@@ -199,7 +199,7 @@ deband-threshold          = 48
 deband-range              = 20
 deband-grain              = 32
 interpolation             = {{INTERPOLATION}}
-tscale                    = oversample
+tscale                    = linear
 video-timing-offset       = 0.01
 
 # ── Wayland Refresh Rate Stabilization ────────────────────────
@@ -239,10 +239,8 @@ profile                   = live-action
 # by cache-pause=no + readahead, not by abandoning vblank alignment.
 #######################################################################################
 [protocol.https]
-profile-desc              = "Network streaming: web parity audio-sync, protected cache"
+profile-desc              = "Network streaming: 144Hz display-synced, cache-protected"
 profile-restore           = copy-equal
-video-sync                = audio
-interpolation             = no
 cache                     = yes
 cache-pause               = yes
 cache-pause-wait          = 1
@@ -253,8 +251,9 @@ demuxer-readahead-secs    = 60
 demuxer-seekable-cache    = yes
 force-seekable            = yes
 stream-buffer-size        = 512KiB
-# Stream playback uses native audio clock to prevent 25/30fps resampling jitter.
-# Press F4 to toggle interpolation on/off anytime.
+# video-sync and interpolation inherited from base config (display-resample /
+# {{INTERPOLATION}} with tscale=linear) for smooth 24/30/60fps on 144Hz panel.
+# Buffer starvation protected by cache-pause=yes so stalls pause instead of dropping frames.
 ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=vbr,abr
 ytdl-raw-options-append   = socket-timeout=15
