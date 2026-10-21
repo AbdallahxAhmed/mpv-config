@@ -96,6 +96,9 @@ F4 cycle interpolation ; show-text "Motion Interpolation: ${interpolation}"
 # Alt+t: التبديل بين محددات الحركة الزمنية (oversample حاد بدون تغبيش / linear ناعم)
 Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler (tscale): ${tscale}"
 
+# Ctrl+Alt+m: تفعيل/تعطيل محرك الحركة الذكي التلقائي (Smart Motion Engine)
+Ctrl+Alt+m script-binding smart_motion/toggle
+
 # F5: التبديل بين مسارات الصوت المتاحة.
 F5 cycle audio
 

@@ -14,6 +14,7 @@ suites = [
     "test_smart_paste.lua",
     "test_sub_backdrop.lua",
     "test_thumbfast.lua",
+    "test_smart_motion.lua",
 ]
 
 all_passed = True

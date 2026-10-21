@@ -309,6 +309,7 @@ def verify(config_dir, env):
         "memo",
         "evafast",
         "pause-when-minimize",
+        "smart_motion",
     ):
         check_file(name, f"scripts/{name}.lua")
     check_file("sponsorblock.py", "scripts/sponsorblock_shared/sponsorblock.py")
@@ -342,6 +343,8 @@ def verify(config_dir, env):
             quality_value
             or "script-opts/stream_quality.conf is missing a default_quality=<n> line",
         )
+    if os.path.isfile(os.path.join(config_dir, "script-opts", "smart_motion.conf")):
+        check_file("smart_motion.conf", "script-opts/smart_motion.conf")
 
     for relative in ("mpv.conf", "input.conf", "script-opts/autosubsync.conf"):
         path = os.path.join(config_dir, relative)
