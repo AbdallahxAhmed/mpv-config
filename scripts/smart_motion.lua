@@ -206,7 +206,19 @@ end
 
 mp.register_event("file-loaded", on_file_loaded)
 
--- Also adapt if display refresh rate changes (e.g. moving window between 60Hz and 144Hz monitors)
+-- Adapt when framerate or display refresh rate becomes known / updates
+mp.observe_property("container-fps", "native", function(_, val)
+    if val and val > 0 and not state.manual_override and state.current_path then
+        evaluate_and_apply()
+    end
+end)
+
+mp.observe_property("estimated-vf-fps", "native", function(_, val)
+    if val and val > 0 and not state.manual_override and state.current_path then
+        evaluate_and_apply()
+    end
+end)
+
 mp.observe_property("display-fps", "native", function(_, val)
     if val and val > 0 and not state.manual_override and state.current_path then
         evaluate_and_apply()
