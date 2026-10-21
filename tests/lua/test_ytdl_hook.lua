@@ -221,4 +221,16 @@ test('fast quality switch: flagged URL skips extraction entirely',function()
     for _,hook in ipairs(h2.hooks.on_load) do hook[2]() end
     eq(#h2.calls,1)
 end)
+test('fast quality switch: canonical source URL preserves playlist entry and rewrites stream',function()
+    local h=run()
+    local before=#h.calls
+    h.props['user-data/mpv/ytdl/fast-url']='https://media.example/resolved-stream'
+    h.props['user-data/mpv/ytdl/fast-source-url']='https://youtu.be/video'
+    h.props['stream-open-filename']='https://youtu.be/video'
+    for _,hook in ipairs(h.hooks.on_load) do hook[2]() end
+    eq(#h.calls,before)
+    eq(h.props['user-data/mpv/ytdl/fast-url'],nil)
+    eq(h.props['user-data/mpv/ytdl/fast-source-url'],nil)
+    eq(h.props['stream-open-filename'],'https://media.example/resolved-stream')
+end)
 print('Hook tests passed: '..total)

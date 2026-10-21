@@ -1424,12 +1424,15 @@ end
 local function on_load_hook(load_fail, hook)
     local url = mp.get_property("stream-open-filename", "")
     -- Fast quality switch: the toolbar loads an already-resolved media URL
-    -- and marks it. Skip the entire extraction round-trip for that load —
-    -- the flagged URL carries the same signature the extraction produced.
+    -- or preserves the canonical source URL in the playlist while redirecting
+    -- playback directly to the pre-resolved stream without re-extraction.
     if url ~= "" then
         local fast_url = mp.get_property("user-data/mpv/ytdl/fast-url")
-        if fast_url and fast_url == url then
+        local fast_source = mp.get_property("user-data/mpv/ytdl/fast-source-url")
+        if fast_url and (fast_url == url or (fast_source and fast_source == url)) then
             mp.del_property("user-data/mpv/ytdl/fast-url")
+            mp.del_property("user-data/mpv/ytdl/fast-source-url")
+            mp.set_property("stream-open-filename", fast_url)
             msg.info("fast switch: skipping extraction for pre-resolved URL")
             return
         end

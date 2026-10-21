@@ -248,6 +248,7 @@ local function arm_fast_watch(attempt, target_h, is_cap)
         pending_fast = nil
         pcall(mp.del_property, 'user-data/mpv/ytdl/json-subprocess-result')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
         mp.osd_message('Quality switch failed — reloading a fresh stream', 2)
         msg.warn('fast switch stalled; dropping stale extraction cache')
         if is_cap then
@@ -264,7 +265,7 @@ local function arm_fast_watch(attempt, target_h, is_cap)
             mp.unregister_event(on_loaded)
             return
         end
-        if path == attempt.url then
+        if path == attempt.url or path == attempt.video_url then
             mp.unregister_event(on_loaded)
             pending_fast = nil
             if attempt.timer then pcall(attempt.timer.kill, attempt.timer) end
@@ -298,13 +299,18 @@ local function switch_quality(target_h, is_cap)
     apply_stream_headers(opts, video.http_headers or parsed.http_headers)
     if audio then opts['audio-file'] = audio.url end
 
-    -- on_load hook sees this flag and opens the URL as-is, skipping the
-    -- yt-dlp spawn; set it before the load starts consuming it.
+    -- Preserve the canonical source URL in mpv's playlist instead of
+    -- overwriting it with a transient signed stream URL.
+    local load_url = source_snapshot or video.url
     mp.set_property('user-data/mpv/ytdl/fast-url', video.url)
+    if source_snapshot then
+        mp.set_property('user-data/mpv/ytdl/fast-source-url', source_snapshot)
+    end
     local ok, err = pcall(mp.command_native,
-        {'loadfile', video.url, 'replace', -1, opts})
+        {'loadfile', load_url, 'replace', -1, opts})
     if not ok then
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
         msg.warn('fast switch failed to load: ' .. tostring(err))
         return false
     end
@@ -313,7 +319,8 @@ local function switch_quality(target_h, is_cap)
         pcall(pending_fast.timer.kill, pending_fast.timer)
     end
     local attempt = {
-        url = video.url,
+        url = load_url,
+        video_url = video.url,
         json_snapshot = json_snapshot,
         source_snapshot = source_snapshot,
         youtube_snapshot = youtube_snapshot,
