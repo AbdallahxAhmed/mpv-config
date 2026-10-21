@@ -93,6 +93,9 @@ F3 cycle deband
 # F4: تفعيل/تعطيل سلاسة الحركة (Interpolation).
 F4 cycle interpolation ; show-text "Motion Interpolation: ${interpolation}"
 
+# Alt+t: التبديل بين محددات الحركة الزمنية (oversample حاد بدون تغبيش / linear ناعم)
+Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler (tscale): ${tscale}"
+
 # F5: التبديل بين مسارات الصوت المتاحة.
 F5 cycle audio
 
