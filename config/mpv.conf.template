@@ -239,16 +239,21 @@ profile                   = live-action
 # by cache-pause=no + readahead, not by abandoning vblank alignment.
 #######################################################################################
 [protocol.https]
-profile-desc              = "Network streaming: big cache, display-synced"
+profile-desc              = "Network streaming: 144Hz display-synced, cache-protected"
 profile-restore           = copy-equal
 cache                     = yes
+cache-pause               = yes
+cache-pause-wait          = 1
+cache-pause-initial       = no
 demuxer-max-bytes         = 800MiB
 demuxer-max-back-bytes    = 800MiB
 demuxer-readahead-secs    = 60
-# video-sync and interpolation intentionally inherited from the base config
-# (display-resample / {{INTERPOLATION}}) — do NOT override to audio/no here.
-# ytdl-format is built by scripts/ytdl_hook.lua from
-# script-opts/stream_quality.conf; no separate cap in this profile.
+demuxer-seekable-cache    = yes
+force-seekable            = yes
+stream-buffer-size        = 512KiB
+# video-sync and interpolation inherited from base config (display-resample /
+# {{INTERPOLATION}} with tscale=linear) for smooth 24/30/60fps on 144Hz panel.
+# Buffer starvation protected by cache-pause=yes so stalls pause instead of dropping frames.
 ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=vbr,abr
 ytdl-raw-options-append   = socket-timeout=15
