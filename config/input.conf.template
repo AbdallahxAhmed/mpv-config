@@ -91,7 +91,7 @@ F2 no-osd screenshot
 F3 cycle deband
 
 # F4: تفعيل/تعطيل سلاسة الحركة (Interpolation).
-F4 cycle interpolation
+F4 cycle interpolation ; show-text "Motion Interpolation: ${interpolation}"
 
 # F5: التبديل بين مسارات الصوت المتاحة.
 F5 cycle audio
