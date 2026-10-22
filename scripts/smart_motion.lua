@@ -14,6 +14,11 @@ local o = {
     cadence_tolerance = 0.005,
     osd_notifications = false,
     settle_delay = 0.25,
+    -- Temporal interpolation filter. oversample = point-sample sample-and-hold
+    -- (crisp, no ghost trails); linear = temporal cross-fade (softer, trails
+    -- moving edges). Both measure identically in mpv's telemetry - the
+    -- scaler filter cannot influence presentation timing.
+    default_tscale = "oversample",
 }
 options.read_options(o, "smart_motion")
 
@@ -48,26 +53,28 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
         return nil
     end
 
+    local tscale_filter = o.default_tscale or "linear"
+
     -- Rule 1: Streaming Protocol (Web Parity Mode)
     if is_stream and o.stream_web_parity then
         return {
             mode = "stream_web_parity",
             video_sync = "audio",
             interpolation = false,
-            tscale = "oversample",
+            tscale = tscale_filter,
             reason = "Network stream: native audio clock (matches web browser fluidity, zero buffering jitter)",
         }
     end
 
     -- Validate framerates
     if not display_fps or display_fps <= 0 or not video_fps or video_fps <= 0 or video_fps > 300 then
-        -- Incomplete telemetry: fallback to safe crisp defaults
+        -- Incomplete telemetry: fallback to safe defaults with smooth phase interpolation
         return {
             mode = "safe_fallback",
             video_sync = "display-resample",
             interpolation = true,
-            tscale = "oversample",
-            reason = "Telemetry settling: safe crisp oversample default",
+            tscale = tscale_filter,
+            reason = "Telemetry settling: safe default (display-resample with " .. tscale_filter .. ")",
         }
     end
 
@@ -77,7 +84,7 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
             mode = "high_fps_crisp",
             video_sync = "display-resample",
             interpolation = false,
-            tscale = "oversample",
+            tscale = tscale_filter,
             reason = string.format("High-FPS (%.1f fps): raw temporal clarity (zero interpolation blur)", video_fps),
         }
     end
@@ -93,8 +100,8 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
             mode = "integer_cadence_lock",
             video_sync = "display-resample",
             interpolation = true,
-            tscale = "oversample",
-            reason = string.format("Integer multiple (%dx refresh at %.1f/%.1f fps): locked vblank alignment", nearest_k, display_fps, video_fps),
+            tscale = tscale_filter,
+            reason = string.format("Integer multiple (%dx refresh at %.1f/%.1f fps): locked vblank alignment with %s", nearest_k, display_fps, video_fps, tscale_filter),
         }
     end
 
@@ -104,8 +111,8 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
             mode = "high_refresh_anti_smear",
             video_sync = "display-resample",
             interpolation = true,
-            tscale = "oversample",
-            reason = string.format("Non-integer cadence (%.2fx at %.1f/%.1f fps): crisp oversample sample-and-hold (no linear ghost trails)", ratio, display_fps, video_fps),
+            tscale = tscale_filter,
+            reason = string.format("Non-integer cadence (%.2fx at %.1f/%.1f fps): display-resample with %s interpolation", ratio, display_fps, video_fps, tscale_filter),
         }
     end
 
@@ -114,8 +121,8 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
         mode = "standard_resample",
         video_sync = "display-resample",
         interpolation = true,
-        tscale = "oversample",
-        reason = string.format("Standard refresh (%.1f Hz / %.1f fps): display-resample with oversample", display_fps, video_fps),
+        tscale = tscale_filter,
+        reason = string.format("Standard refresh (%.1f Hz / %.1f fps): display-resample with %s", display_fps, video_fps, tscale_filter),
     }
 end
 
