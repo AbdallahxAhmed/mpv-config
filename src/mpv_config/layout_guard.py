@@ -192,6 +192,9 @@ def should_translate(layout_hkl, target: str) -> bool:
     """
     if not target:
         return False
+    if not layout_hkl:
+        # the layout could not be read - better leave the key alone
+        return False
     return not _is_us_layout(layout_hkl)
 
 
