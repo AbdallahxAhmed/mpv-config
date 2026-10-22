@@ -225,16 +225,22 @@ local pending_fast = nil
 -- loaded came from exactly that extraction, so it is still current evidence.
 -- Later switches stay on the fast path, and the quality menu keeps listing
 -- the stream's real rows instead of falling back to the guess-list.
+-- Everything goes through the native getter/setter: mpv prints a
+-- user-data string in its quoted form, so a plain get/set round-trip would
+-- store "https://..." (with the quotes) and turn is-youtube's boolean into
+-- the string "true" (get_property_bool on that returns nil, not false).
 local function fast_switch_restore(attempt)
     if attempt.json_snapshot ~= nil then
         mp.set_property_native('user-data/mpv/ytdl/json-subprocess-result',
             attempt.json_snapshot)
     end
     if attempt.source_snapshot ~= nil then
-        mp.set_property('user-data/mpv/ytdl/source-url', attempt.source_snapshot)
+        mp.set_property_native('user-data/mpv/ytdl/source-url',
+            attempt.source_snapshot)
     end
     if attempt.youtube_snapshot ~= nil then
-        mp.set_property('user-data/mpv/ytdl/is-youtube', attempt.youtube_snapshot)
+        mp.set_property_native('user-data/mpv/ytdl/is-youtube',
+            attempt.youtube_snapshot)
     end
 end
 
@@ -246,7 +252,13 @@ local function arm_fast_watch(attempt, target_h, is_cap)
     local ok_timer, timer = pcall(mp.add_timeout, 15, function()
         if pending_fast ~= attempt then return end
         pending_fast = nil
+        -- Drop EVERY piece of the stale extraction, not just the parsed
+        -- JSON: a half-cleared cache leaves the quality menu claiming the
+        -- stream offers nothing (and the download button pointing at a
+        -- video that is no longer loaded).
         pcall(mp.del_property, 'user-data/mpv/ytdl/json-subprocess-result')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/source-url')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/is-youtube')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
         mp.osd_message('Quality switch failed — reloading a fresh stream', 2)
@@ -282,9 +294,13 @@ local function switch_quality(target_h, is_cap)
     -- The hook's end-file cleanup wipes the extraction props when the
     -- replaced load ends; this fast load came from exactly that extraction,
     -- so the toolbar repairs them afterwards (see fast_switch_restore).
+    -- get_property_native, not get_property: mpv prints a user-data
+    -- STRING in its quoted form ("https://..."), so the raw URL would
+    -- never match the hook's comparison, and is-youtube's boolean would
+    -- come back as the string "true".
     local json_snapshot = mp.get_property_native('user-data/mpv/ytdl/json-subprocess-result')
-    local source_snapshot = mp.get_property('user-data/mpv/ytdl/source-url')
-    local youtube_snapshot = mp.get_property('user-data/mpv/ytdl/is-youtube')
+    local source_snapshot = mp.get_property_native('user-data/mpv/ytdl/source-url')
+    local youtube_snapshot = mp.get_property_native('user-data/mpv/ytdl/is-youtube')
     local video = pick_video_format(parsed.formats, target_h, is_cap)
     if not video then return false end
     local audio = nil
@@ -306,9 +322,18 @@ local function switch_quality(target_h, is_cap)
     if source_snapshot then
         mp.set_property('user-data/mpv/ytdl/fast-source-url', source_snapshot)
     end
-    local ok, err = pcall(mp.command_native,
-        {'loadfile', load_url, 'replace', -1, opts})
-    if not ok then
+    local args = {'loadfile', load_url, 'replace', -1}
+    -- mpv REJECTS an empty per-file options table ("argument options has
+    -- incompatible type"), so the table is only passed when it carries
+    -- something. An empty one would fail the whole load silently.
+    if next(opts) ~= nil then args[5] = opts end
+    -- mp.command_native reports a rejected command as (nil, err) — it does
+    -- NOT raise, so a pcall around it would always look successful: the
+    -- failure was swallowed, the fast markers stayed behind (a later load
+    -- of the canonical URL would be hijacked into the stale stream) and
+    -- the UI sat there until the heal watcher fired.
+    local res, err = mp.command_native(args)
+    if not res then
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
         msg.warn('fast switch failed to load: ' .. tostring(err))
@@ -524,12 +549,17 @@ local function open_quality_menu()
     -- the same 'height<=?' cap, so playback falls to the best the video
     -- actually has. They're marked so real rows read as available (●) and
     -- the rest as caps you may want as default (○) — no more surprise 4K
-    -- on a 1080-max video.
+    -- on a 1080-max video. Without an extraction (local file, non-YouTube
+    -- stream, a failed switch) we know nothing about the stream, so the
+    -- rows stay unmarked: claiming "not in stream" for a row we never
+    -- checked would be the same lie in the other direction.
     local offered = {}
     for _, info in pairs(heights_map) do offered[info.height] = true end
+    local known = formats ~= nil
     for _, h in ipairs(DEFAULT_QUALITY_HEIGHTS) do
         if not offered[h] then
-            sorted_heights[#sorted_heights + 1] = {height = h, ceiling = true}
+            sorted_heights[#sorted_heights + 1] =
+                {height = h, ceiling = true, known = known}
         end
     end
     table.sort(sorted_heights, function(a, b) return a.height > b.height end)
@@ -554,9 +584,13 @@ local function open_quality_menu()
         local hints = {}
         if is_current then hints[#hints + 1] = 'Current' end
         if is_current_default and h == quality_default then hints[#hints + 1] = 'Default' end
-        if info.ceiling then hints[#hints + 1] = 'cap only · not in stream' end
+        if info.ceiling and info.known then hints[#hints + 1] = 'cap only · not in stream' end
+        -- ● the stream really offers this height, ○ a ceiling the stream
+        -- doesn't list, no marker at all when nothing is known about it.
+        local marker = '●'
+        if info.ceiling then marker = info.known and '○' or nil end
         items[#items + 1] = {
-            title = (info.ceiling and '○ ' or '● ') .. label,
+            title = (marker and (marker .. ' ') or '') .. label,
             hint = join_hints(hints),
             active = is_current,
             -- Two clicks to change the permanent default: open the row's
@@ -603,13 +637,27 @@ local function set_quality(target_h, target_label)
     -- No-op when the playing stream is already this resolution — unless the
     -- row promises a higher frame rate than what is on screen right now.
     local parsed = cached_stream_json()
+    local picked
+    local is_cap = false
     if parsed and type(parsed.formats) == 'table' then
-        local picked = pick_video_format(parsed.formats, h, false)
+        picked = pick_video_format(parsed.formats, h, is_cap)
+        if not picked then
+            -- The requested height is not in the stream as an exact row (a
+            -- ceiling row, or a height the extraction simply lacks): cap it
+            -- instead of failing the switch outright, so playback falls to
+            -- the best the video actually has.
+            picked = pick_video_format(parsed.formats, h, true)
+            is_cap = true
+        end
         local cur = mp.get_property_number('height') or mp.get_property_number('dheight') or 0
         if picked and cur > 0 and math.abs(cur - picked.height) <= 15 then
             local cur_fps = mp.get_property_number('container-fps') or 0
             if not picked.fps or cur_fps <= 0 or picked.fps <= cur_fps + 0.5 then
-                mp.osd_message('Quality: already ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))), 2)
+                local lbl = target_label or (h >= 2160 and '4K' or (h .. 'p'))
+                if is_cap and policy and policy.quality_label then
+                    lbl = policy.quality_label(nil, picked.height) or lbl
+                end
+                mp.osd_message('Quality: already ' .. lbl, 2)
                 return
             end
         end
@@ -619,10 +667,17 @@ local function set_quality(target_h, target_label)
     mp.set_property('ytdl-format', format)
     -- Fast path: reuse the signed URLs from the last extraction; the full
     -- replay (re-extraction) remains the fallback.
-    if not switch_quality(h, false) then
+    if not switch_quality(h, is_cap) then
         reload_stream()
     end
-    mp.osd_message('Quality: ' .. (target_label or (h >= 2160 and '4K' or (h .. 'p'))) .. display_note(h), 2)
+    -- A ceiling plays the best the stream really has, so report that
+    -- height — not the (unreachable) ceiling the row was named after.
+    local applied_h = (is_cap and picked) and picked.height or h
+    local applied_label = target_label or (h >= 2160 and '4K' or (h .. 'p'))
+    if is_cap and picked and policy and policy.quality_label then
+        applied_label = policy.quality_label(nil, picked.height) or applied_label
+    end
+    mp.osd_message('Quality: ' .. applied_label .. display_note(applied_h), 2)
 end
 
 -- Set the persisted default straight from a menu row's submenu — replaces

@@ -17,7 +17,16 @@ local function harness(filters, no_ui, conf)
         end,
         get_property_native=function(k,d) if k=='af' then return h.filters end; return h.props[k] or d end,
         get_property_number=function(k,d) return tonumber(h.props[k]) or d end,
-        get_property=function(k,d) return h.props[k] or d end,
+        -- mpv's get_property returns the PRINT form: a boolean property
+        -- reads back as "true"/"false", not as a boolean. The harness has to
+        -- do the same, or a string round-trip through get/set_property
+        -- would be invisible to the type-fidelity assertions.
+        get_property=function(k,d)
+            local v=h.props[k]
+            if v==nil then return d end
+            if type(v)=='boolean' then return v and 'true' or 'false' end
+            return v
+        end,
         set_property_native=function(k,value)
             if k=='af' then
                 h.writes=h.writes+1
@@ -28,11 +37,23 @@ local function harness(filters, no_ui, conf)
             end
             return true
         end,
-        set_property=function(k,v) h.props[k]=v end,
+        set_property=function(k,v)
+            -- mpv's set_property only accepts a string; a boolean raises
+            -- "bad argument #2 to set_property (string expected, got
+            -- boolean)". The harness has to raise too, or a boolean handed
+            -- to it would hide a crash that only shows up in the player.
+            if type(v)=='boolean' then
+                error('bad argument #2 to set_property (string expected, got boolean)',2)
+            end
+            h.props[k]=v
+        end,
         del_property=function(k) h.props[k]=nil end,
         command_native=function(tbl)
             h.native_commands=h.native_commands or {}
             table.insert(h.native_commands,tbl)
+            -- mpv reports a rejected command as (nil, err); it does not
+            -- raise, so the caller has to check the return value.
+            if h.native_fail then return nil, 'invalid parameter' end
             return true
         end,
         observe_property=function(k,t,fn) h.observers[k]=fn; if k=='af' then h.observer=fn end end,
@@ -305,7 +326,9 @@ test('fast switch restores the wiped extraction cache when the load settles',fun
     local raw={status=0,stdout='fixture'}
     h.props['user-data/mpv/ytdl/json-subprocess-result']=raw
     h.props['user-data/mpv/ytdl/source-url']='https://watch.example/v'
-    h.props['user-data/mpv/ytdl/is-youtube']='yes'
+    -- the hook writes this one as a BOOLEAN; a string round-trip would
+    -- leave get_property_bool returning nil
+    h.props['user-data/mpv/ytdl/is-youtube']=true
     h.parsed_json=stream_fixture()
     h.messages['set-quality']('480','480p')
     eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v480')
@@ -320,9 +343,115 @@ test('fast switch restores the wiped extraction cache when the load settles',fun
     h.events['file-loaded']()
     eq(h.props['user-data/mpv/ytdl/json-subprocess-result'],raw)
     eq(h.props['user-data/mpv/ytdl/source-url'],'https://watch.example/v')
-    eq(h.props['user-data/mpv/ytdl/is-youtube'],'yes')
+    eq(h.props['user-data/mpv/ytdl/is-youtube'],true)
+    eq(type(h.props['user-data/mpv/ytdl/is-youtube']),'boolean')
     -- the expired-load heal watcher must be gone dead (success cancels it)
     assert(h.timeouts[1].dead)
+    os.remove(path)
+end)
+test('the fast load omits an empty per-file options table',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=200; h.props['time-pos']=5
+    -- a muxed row without http headers: there is nothing to pass along
+    h.parsed_json={formats={
+        {height=720,vcodec='avc1',acodec='mp4a.40.2',protocol='https',url='https://media.example/mux720',tbr=800},
+    }}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['set-quality']('720','720p')
+    eq(#h.native_commands,1)
+    local c=h.native_commands[1]
+    eq(c[1],'loadfile'); eq(c[2],'https://media.example/mux720')
+    eq(c[3],'replace'); eq(c[4],-1)
+    -- mpv rejects an EMPTY options table ("argument options has
+    -- incompatible type"), which would fail the whole fast load
+    eq(c[5],nil)
+    os.remove(path)
+end)
+test('a rejected fast load is detected instead of silently arming the heal watcher',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=200; h.props['time-pos']=5
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.props['user-data/mpv/ytdl/source-url']='https://watch.example/v'
+    -- mpv rejects the command as (nil, err) — it never raises
+    h.native_fail=true
+    h.messages['set-quality']('480','480p')
+    -- the fast marker must not survive a rejected load
+    eq(h.props['user-data/mpv/ytdl/fast-url'],nil)
+    -- ...and no heal watcher may be armed for a switch that never started
+    eq(h.timeouts,nil)
+    -- the switch falls back to the full pipeline
+    assert(h.last_command)
+    os.remove(path)
+end)
+test('a stalled fast switch heals by re-loading the extractable source URL',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=1080; h.props['duration']=200; h.props['time-pos']=5
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.props['user-data/mpv/ytdl/source-url']='https://watch.example/v'
+    h.props['user-data/mpv/ytdl/is-youtube']=true
+    h.messages['set-quality']('480','480p')
+    -- the fast load never settles → the heal watcher fires
+    h.timeouts[1].fn()
+    -- every piece of the stale extraction is dropped, not just the JSON
+    eq(h.props['user-data/mpv/ytdl/json-subprocess-result'],nil)
+    eq(h.props['user-data/mpv/ytdl/source-url'],nil)
+    eq(h.props['user-data/mpv/ytdl/is-youtube'],nil)
+    eq(h.props['user-data/mpv/ytdl/fast-url'],nil)
+    -- and the playlist entry goes back to the extractable URL, so the
+    -- reload is a real re-extraction instead of the same dead stream
+    local last=h.native_commands[#h.native_commands]
+    eq(last[1],'loadfile'); eq(last[2],'https://watch.example/v'); eq(last[3],'replace')
+    os.remove(path)
+end)
+test('without an extraction the standard rows are not claimed to be missing',function()
+    local h=harness()
+    h.props['height']=1080
+    h.props['user-data/mpv/ytdl/json-subprocess-result']=nil
+    h.messages['open-quality-menu']()
+    -- we know nothing about the stream here, so no row may claim it lacks
+    -- that height (and the playing row must not contradict itself)
+    for _,it in ipairs(h.menu.items) do
+        assert(not it.title:find('○',1,true),'unknown rows must not be marked absent')
+        assert(not it.title:find('●',1,true),'unknown rows must not be marked present')
+        assert(not (it.hint and it.hint:find('cap only',1,true)),
+            'unknown rows must not claim the stream lacks them')
+    end
+    local current
+    for _,it in ipairs(h.menu.items) do if it.active then current=it end end
+    assert(current,'the playing row must still be marked current')
+    eq(current.hint,'Current')
+end)
+test('a ceiling row caps the switch instead of demanding an exact height',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=720; h.props['duration']=200; h.props['time-pos']=5
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    -- the 2160 row is a ceiling the stream does not offer: it must pick the
+    -- best row at or below it (1080) and keep the fast path
+    h.messages['set-quality']('2160','4K')
+    eq(#h.native_commands,1)
+    eq(h.native_commands[1][2],'https://media.example/v1080')
+    -- the OSD names the height that is really played, not the ceiling
+    assert(h.osd:find('1080p',1,true))
+    assert(not h.osd:find('4K',1,true))
+    os.remove(path)
+end)
+test('a height the stream does not offer falls back to the ceiling semantics',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=720; h.props['duration']=200; h.props['time-pos']=5
+    h.parsed_json=stream_fixture()
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    -- no 'cap' mode given, but the stream has no 1440p row at all
+    h.messages['set-quality']('1440','1440p')
+    eq(#h.native_commands,1)
+    eq(h.native_commands[1][2],'https://media.example/v1080')
     os.remove(path)
 end)
 test('muxed rows switch as a single file without a secondary audio track',function()
@@ -338,7 +467,9 @@ test('muxed rows switch as a single file without a secondary audio track',functi
     h.messages['set-quality']('720','720p')
     eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/mux720')
     local c=h.native_commands[#h.native_commands]
-    eq(c[5]['audio-file'],nil)  -- muxed row carries its own audio
+    -- the muxed row carries its own audio, so no secondary audio track is
+    -- requested; mpv rejects an empty options table, so none is sent at all
+    eq(c[5],nil)
     os.remove(path)
 end)
 test('apply-default fast path picks the best row at or below the ceiling',function()

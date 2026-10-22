@@ -72,6 +72,13 @@ local playlist_cookies = {}
 local playlist_metadata = {}
 local stream_delay = 0
 
+-- The yt client pinned in mpv.conf (ytdl-raw-options extractor-args) spares
+-- the extra player API round-trips, but YouTube can refuse it for
+-- individual videos. The first refusal falls back to yt-dlp's own client
+-- list and is remembered: from then on the session runs unpinned instead of
+-- paying the double extraction on every following open.
+local pinned_client_refused = false
+
 local function Set (t)
     local set = {}
     for _, v in pairs(t) do set[v] = true end
@@ -1022,6 +1029,31 @@ local function add_single_video(json)
     mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
 end
 
+-- Rebuild the argv without the extractor-args override. The hook emits the
+-- flag and its value as two elements, unless the option was configured
+-- empty (then the flag stands alone and must not swallow the next
+-- argument). Returns nil when the command carries no override at all.
+local function strip_extractor_args(command)
+    local retry = {}
+    local found = false
+    local i = 1
+    while i <= #command do
+        local a = command[i]
+        if a == "--extractor-args" then
+            found = true
+            i = i + 1
+            if i <= #command and not command[i]:match("^%-%-") then
+                i = i + 1
+            end
+        else
+            retry[#retry + 1] = a
+            i = i + 1
+        end
+    end
+    if not found then return nil end
+    return retry
+end
+
 local function run_ytdl_hook(url)
     local start_time = os.clock()
     stream_delay = 0
@@ -1069,9 +1101,15 @@ local function run_ytdl_hook(url)
     end
 
     for param, arg in pairs(raw_options) do
-        table.insert(command, "--" .. param)
-        if arg ~= "" or param == "proxy" then
-            table.insert(command, arg)
+        -- Once the pinned client was refused, run on yt-dlp's own client
+        -- list for the rest of the session.
+        if param == "extractor-args" and pinned_client_refused then
+            msg.verbose("pinned yt client was refused earlier; using the default client list")
+        else
+            table.insert(command, "--" .. param)
+            if arg ~= "" or param == "proxy" then
+                table.insert(command, arg)
+            end
         end
         if (param == "sub-lang" or param == "sub-langs" or param == "srt-lang") and (arg ~= "") then
             allsubs = false
@@ -1209,19 +1247,19 @@ local function run_ytdl_hook(url)
     -- it spares the extra player API round-trips, but YouTube can refuse it
     -- for individual videos. Retry once without the override so single-client
     -- speed keeps multi-client resilience as the safety net.
-    if result.status ~= 0 then
-        local has_override = false
-        for _, a in ipairs(command) do
-            if a == "--extractor-args" then has_override = true end
-        end
-        if has_override then
-            local retry = {}
-            local skip_next = false
-            for _, a in ipairs(command) do
-                if skip_next then skip_next = false
-                elseif a == "--extractor-args" then skip_next = true
-                else retry[#retry + 1] = a end
-            end
+    --
+    -- The retry only makes sense for YouTube (that is the only extractor the
+    -- override can break) and never after a spawn failure (yt-dlp is not
+    -- there; retrying just doubles the wait). Once the fallback succeeds,
+    -- the pinned client is remembered as refused and the rest of the
+    -- session runs unpinned instead of paying the double extraction again.
+    if result.status ~= 0
+        and not pinned_client_refused
+        and result.error_string ~= "init"
+        and stream_policy ~= nil
+        and stream_policy.youtube_url(url) ~= nil then
+        local retry = strip_extractor_args(command)
+        if retry then
             msg.warn("extraction failed with the configured player_client: " ..
                 "retrying with yt-dlp's own client list")
             local retry_result = exec(retry)
@@ -1229,6 +1267,9 @@ local function run_ytdl_hook(url)
                 and retry_result.status == 0
                 and type(retry_result.stdout) == "string" and retry_result.stdout ~= "" then
                 result = retry_result
+                pinned_client_refused = true
+                msg.info("pinned yt client refused; using the default client list " ..
+                    "for the rest of this session")
             end
         end
     end
@@ -1427,8 +1468,12 @@ local function on_load_hook(load_fail, hook)
     -- or preserves the canonical source URL in the playlist while redirecting
     -- playback directly to the pre-resolved stream without re-extraction.
     if url ~= "" then
-        local fast_url = mp.get_property("user-data/mpv/ytdl/fast-url")
-        local fast_source = mp.get_property("user-data/mpv/ytdl/fast-source-url")
+        -- get_property_native, not get_property: mpv prints a user-data
+        -- STRING in its quoted form ("https://..."), so the comparison
+        -- against the raw URL would never match and every fast switch
+        -- would fall back to a full extraction.
+        local fast_url = mp.get_property_native("user-data/mpv/ytdl/fast-url")
+        local fast_source = mp.get_property_native("user-data/mpv/ytdl/fast-source-url")
         if fast_url and (fast_url == url or (fast_source and fast_source == url)) then
             mp.del_property("user-data/mpv/ytdl/fast-url")
             mp.del_property("user-data/mpv/ytdl/fast-source-url")

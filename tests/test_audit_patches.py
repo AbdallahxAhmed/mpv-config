@@ -1523,6 +1523,16 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("ytdl                      = no", content)
         self.assertIn("ytdl-raw-options-append = no-playlist=", content)
         self.assertNotIn("player_client=android,web", content)
+        # Exactly ONE yt client list is pinned: `default,-web` keeps yt-dlp's
+        # own multi-client resilience and only drops the `web` client (which
+        # needs an external JS runtime the stock install lacks). A single
+        # client would be faster but brittle; scripts/ytdl_hook.lua retries
+        # once with bare defaults if the pinned list is refused.
+        self.assertIn(
+            "ytdl-raw-options-append = extractor-args=youtube:player_client=default,-web",
+            content,
+        )
+        self.assertEqual(content.count("player_client="), 1)
         self.assertNotIn("write-auto-subs=", content)
         self.assertNotIn("sub-langs=", content)
         self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)

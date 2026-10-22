@@ -20,9 +20,19 @@ local function run(config)
     if config.live then h.json.is_live=true end
     if config.other then h.json.extractor='other' end
     local function get(k,d) local v=h.props[k]; if v==nil then return d end; return v end
+    -- mpv prints a user-data STRING in its quoted form ("https://..."),
+    -- while get_property_native returns the raw value. The harness has to
+    -- do the same, or a comparison against a raw URL would look correct
+    -- here and never match in the player.
+    local function get_print(k,d)
+        local v=h.props[k]
+        if v==nil then return d end
+        if type(v)=='string' and k:match('^user%-data/') then return '"'..v..'"' end
+        return v
+    end
     local function set(k,v) h.props[k]=v end
     local log=setmetatable({}, {__index=function() return function() end end})
-    mp={log=function() end,get_property=get,get_property_native=get,get_property_bool=get,
+    mp={log=function() end,get_property=get_print,get_property_native=get,get_property_bool=get,
         set_property=set,set_property_native=set,set_property_bool=set,set_property_number=set,
         del_property=function(k) h.props[k]=nil end,
         find_config_file=function(name)
@@ -53,6 +63,9 @@ local function run(config)
                     return {status=1,stdout='',stderr='unable to download video data'}
                 end
             end
+            if config.fail_from and #h.calls>=config.fail_from then
+                return {status=1,stdout='',stderr='unable to download video data'}
+            end
             return {status=0,stdout='fixture',stderr=''}
         end,
         commandv=function(...) h.commands[#h.commands+1]={...} end,
@@ -80,6 +93,14 @@ local function run(config)
     for _,hook in ipairs(h.hooks.on_load) do hook[2]() end
     h.edl=h.props['stream-open-filename']
     function h:has_arg(arg) for _,v in ipairs(self.calls[1] or {}) do if v==arg then return true end end; return false end
+    -- argv of the n-th spawn (the hook reuses one command table, so every
+    -- call has to be inspected separately)
+    function h:call_has_arg(n,arg) for _,v in ipairs(self.calls[n] or {}) do if v==arg then return true end end; return false end
+    -- open another video in the same session (the hook keeps its state)
+    function h:load_again(url)
+        self.props['stream-open-filename']=url or 'https://youtu.be/video'
+        for _,hook in ipairs(self.hooks.on_load) do hook[2]() end
+    end
     return h
 end
 test('one extractor call, fewer audio streams, video and default language intact',function()
@@ -116,6 +137,60 @@ test('retry failure surfacing keeps upstream hard-fail semantics',function()
     eq(h.props['user-data/mpv/ytdl/json-subprocess-result'].status,1)
     eq(h.edl,'https://youtu.be/video')  -- no EDL replacement on persistent failure
     assert(h:has_arg('--extractor-args'))  -- first attempt kept the override
+end)
+test('a refused pinned client is remembered: later opens run unpinned',function()
+    local h=run({fail_first_client=true,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    eq(#h.calls,2)
+    assert(h:call_has_arg(1,'--extractor-args'),'first attempt keeps the override')
+    assert(not h:call_has_arg(2,'--extractor-args'),'the fallback sheds the override')
+    -- The refusal is remembered: the rest of the session runs on yt-dlp's
+    -- own client list instead of paying the double extraction again.
+    local before=#h.calls
+    h:load_again()
+    eq(#h.calls,before+1)
+    assert(not h:call_has_arg(before+1,'--extractor-args'),
+        'later opens must not re-pin the refused client')
+end)
+test('a non-YouTube URL is never retried without the override',function()
+    local h=run({url='https://twitch.tv/somechannel', fail_first_client=true,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    -- the youtube-scoped override cannot be the reason for a twitch
+    -- failure: a retry would only double the wait
+    eq(#h.calls,1)
+end)
+test('a pinned client that fails twice keeps the pin for the next video',function()
+    -- Both the pinned attempt AND the fallback fail: the video itself is
+    -- unavailable, which says nothing about the client -> keep pinning.
+    local h=run({fail_first_client=true, fail_from=2,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    eq(#h.calls,2)
+    local before=#h.calls
+    h:load_again()
+    eq(#h.calls,before+2)
+    assert(h:call_has_arg(before+1,'--extractor-args'),
+        'the next video is still pinned')
+end)
+test('a missing yt-dlp binary is not retried',function()
+    local h=run({nil_subprocess=true,
+        raw={['extractor-args']='youtube:player_client=tv_samsung'}})
+    -- the binary never started; a second spawn would just double the wait
+    eq(#h.calls,1)
+end)
+test('a failing extraction without an override is not retried',function()
+    local h=run({fail_first_client=true, fail_all=true})
+    eq(#h.calls,1)
+end)
+test('an empty extractor-args override is stripped without eating the next argument',function()
+    local h=run({fail_first_client=true, raw={['extractor-args']=''}})
+    eq(#h.calls,2)
+    -- the bare flag is gone ...
+    assert(not h:call_has_arg(2,'--extractor-args'))
+    -- ... and nothing else is: an empty override has no value of its own,
+    -- so stripping it must not swallow the argument that follows it
+    eq(#h.calls[2],#h.calls[1]-1)
+    assert(h:call_has_arg(2,'--'))
+    assert(h:call_has_arg(2,'https://youtu.be/video'))
 end)
 test('no automatic caption enumeration at startup',function()
     local h=run(); assert(not h:has_arg('--write-srt')); assert(not h:has_arg('--sub-langs'))
