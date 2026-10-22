@@ -203,7 +203,9 @@ def should_translate(produced: str, target: str) -> bool:
     """
     if not target:
         return False
-    if produced and not (32 <= ord(produced) < 127):
+    if produced and (ord(produced) < 32 or ord(produced) == 127):
+        # a control code: a modifier is involved (Windows turns Ctrl+letter
+        # into one) and those combos are layout independent
         return False
     return produced != target
 

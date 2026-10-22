@@ -50,8 +50,8 @@ end
 test('the script loads and exposes its options', function()
     local h, kl = load_script()
     assert(kl, "the script must expose itself")
-    eq("00000409", kl.options.layout)
     eq(true, kl.options.enabled)
+    eq("", kl.options.command)
 end)
 
 test('nothing is started when the guard is not configured', function()
