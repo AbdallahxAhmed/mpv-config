@@ -84,8 +84,17 @@ CTRL+6 no-osd script-message-to profile_picker set-mode C+A
 CTRL+0 no-osd script-message-to profile_picker set-mode off
 
 # **----- Anime4K mode cycle / manual profile override -----**
-Alt+a no-osd script-message-to profile_picker cycle-mode
-Alt+Shift+a no-osd script-message-to profile_picker toggle-manual
+# Ctrl+<letter> is a Windows control code, so it is the SAME key in every
+# keyboard layout - unlike Alt+<letter>, which never matches while an
+# Arabic layout is active (the key then produces an Arabic character).
+# The mouse menu carries the same actions.
+Ctrl+g no-osd script-message-to profile_picker cycle-mode
+Ctrl+Shift+g no-osd script-message-to profile_picker toggle-manual
+
+# **----- Cheat sheet -----
+# "?" is a punctuation key, so it works in every layout.
+? no-osd script-message-to help_overlay help
+F9 no-osd script-message-to help_overlay help
 
 
 # **----- اختصارات مفيدة إضافية (تم التصحيح) -----**

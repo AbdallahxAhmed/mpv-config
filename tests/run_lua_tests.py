@@ -16,6 +16,7 @@ suites = [
     "test_thumbfast.lua",
     "test_smart_motion.lua",
     "test_profile_picker.lua",
+    "test_help_overlay.lua",
 ]
 
 all_passed = True

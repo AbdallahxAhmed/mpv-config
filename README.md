@@ -35,7 +35,17 @@ Recent work now on `main` (unreleased in the changelog):
 ## ✨ Features
 
 ### 🎬 Playback quality
-- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), with an auto-applied `[anime]` profile for files whose path contains `anime`/`cartoon`.
+- **Automatic anime detection** - `scripts/profile_picker.lua` decides per file whether the file is anime
+  (release group, Japanese audio track, episode marker, multi-language tag, or a title from your own
+  `script-opts/anime_series.conf` list) and applies the matching profile. Offline, explainable, and it
+  leaves Japanese live action and Hollywood movies on the light profile.
+- **The Anime4K mode is your choice** - the installer asks which chain to ship (`off`, `fast`, `A`, `A+A`,
+  `B`, `B+B`, `C`, `C+A`); `Ctrl+1`..`Ctrl+6` and `Ctrl+g` change it inside the player and the choice
+  is remembered in `script-opts/anime4k.conf`.
+- **A one-key cheat sheet** (`?` or `F9`) listing the keys and the mouse actions, including the Arabic
+  layout twins.
+- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), applied by the auto-detected `[anime]` profile
+  (Anime4K + 2-pass deband) or by the light `[live-action]` one.
 - **gpu-next (libplacebo)** renderer with platform auto-detection: `d3d11` + `d3d11va` zero-copy on Windows (measured 1.4 ms/frame vs 5.3 ms for `nvdec-copy`), Vulkan + `auto-safe` on Linux, VideoToolbox on macOS.
 - **Fixed-refresh display sync** — calibrated for 1080p 144 Hz panels; linear temporal scaling absorbs non-integer VSync ratios without judder, with a dedicated KDE-Wayland stabilization profile.
 - **Source-aware profiles** — `[anime]` (Anime4K + 2-pass deband), `[live-action]` (mild 1-pass deband + grain), `[protocol.https]` streaming (800 MiB buffer / 60 s readahead, same vblank alignment).
@@ -156,6 +166,14 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 > Everything above also has a mouse equivalent in the uosc toolbar — see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
 
 ### Arabic keyboard twins (AZERTY 102)
+
+`Ctrl+<letter>`, the function keys and punctuation are **layout independent** (Windows turns
+`Ctrl+letter` into a control code, and `?`/`F9` are not letters), so every binding added from
+now on uses them - `Ctrl+1`..`Ctrl+6` for the Anime4K modes, `Ctrl+g` to cycle them, `?`/`F9` for
+the cheat sheet. `Alt+<letter>` is *not* layout independent: with an Arabic layout active the key
+produces an Arabic character and the binding never matches - which is why the new bindings avoid
+it. The letters that carry an Arabic twin keep it; the ones that would fire while typing
+(`b` → `لا`, `h` → `ا`) are deliberately left to the mouse menu instead.
 
 Ground truth probed from the deployed layout (`00000C01`): `b→لا`, `f→ب`, `j→ت`, `l→م`, `p→ح`, `a→ش`, `c→ؤ`, `n→ى`, `y→غ`, `x→ء`, `r→ق`, `;→ك`. mpv can only bind single codepoints, so the lam-alef composite `لا` can never be bound — those characters are deliberately left unbound, and every twin lives on a safe letter:
 
