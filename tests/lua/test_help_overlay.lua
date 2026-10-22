@@ -61,10 +61,10 @@ end)
 test('the cheat sheet lists the sections a user needs', function()
     local _, help = load_script()
     local text = help.build()
-    for _, needle in ipairs({ "PLAYBACK", "VIDEO", "SUBTITLES", "MOUSE", "ARABIC" }) do
+    for _, needle in ipairs({ "PLAYBACK", "VIDEO", "SUBTITLES", "MOUSE", "LAYOUT" }) do
         assert(text:find(needle, 1, true), "missing section: " .. needle)
     end
-    for _, needle in ipairs({ "Ctrl+1..Ctrl+6", "Ctrl+g", "cycle", "twin" }) do
+    for _, needle in ipairs({ "Ctrl+1..Ctrl+6", "Ctrl+g", "cycle", "guard" }) do
         assert(text:find(needle, 1, true), "missing entry: " .. needle)
     end
 end)
@@ -72,7 +72,7 @@ end)
 test('the cheat sheet explains the Arabic layout behaviour', function()
     local _, help = load_script()
     local text = help.build()
-    assert(text:find("ARABIC", 1, true))
+    assert(text:find("LAYOUT", 1, true))
     assert(text:find("LAYOUT", 1, true))
     -- it must say plainly that Ctrl+letter is layout independent and
     -- Alt+letter is not

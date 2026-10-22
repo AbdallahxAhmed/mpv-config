@@ -92,11 +92,17 @@ test('a Hollywood movie with a MultiSub tag is not anime', function()
     eq(false, v.anime)
 end)
 
-test('the series list overrides everything', function()
+test('the series list is a hint, not a verdict', function()
     local _, pp = load_script()
-    local v = pp.classify('D:\\Video\\[UnknownGroup] My Show 07 [1080p].mkv', ENG,
+    -- on its own it does not decide: the list changes with every season,
+    -- so it must never outvote the signals that keep working
+    local alone = pp.classify('D:\\Video\\My Show 07 [1080p].mkv', ENG,
         { groups = {}, series = { 'my show' }, threshold = 3 })
-    eq(true, v.anime)
+    eq(false, alone.anime)
+    -- but it pushes a borderline file over the line
+    local hint = pp.classify('D:\\Video\\My Show 07 [1080p].mkv', JPN,
+        { groups = {}, series = { 'my show' }, threshold = 3 })
+    eq(true, hint.anime)
 end)
 
 test('the threshold is honoured', function()

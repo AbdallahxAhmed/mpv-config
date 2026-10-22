@@ -174,10 +174,12 @@ class TestConfig(unittest.TestCase):
                 bindings[parts[0]] = parts[1]
 
         self.assertEqual(bindings.get("c"), "script-binding uosc/subtitles")
-        self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
+        # the Arabic twin is gone: the keyboard-layout guard keeps mpv's
+        # window on a latin layout, so the Latin key is the only binding
+        self.assertIsNone(bindings.get("ؤ"))
         self.assertEqual(bindings.get("Ctrl+c"), "script-binding ytdl_sub_menu/open")
         self.assertEqual(bindings.get("a"), "script-binding uosc/audio")
-        self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")
+        self.assertIsNone(bindings.get("ش"))
         # Windows control codes make modified Arabic-char combos unreachable
         # (the layout probe shows ctrl+letter arrives as "\x02"-style codes),
         # so only the Latin Ctrl+c twin of the YouTube sub menu exists.

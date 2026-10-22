@@ -57,11 +57,12 @@ local SECTIONS = {
         },
     },
     {
-        title = "ARABIC LAYOUT (102 AZERTY)",
+        title = "KEYBOARD LAYOUT",
         rows = {
-            { "a / b / c / f / j / l / n / p / y", "the twins of the Latin keys" },
-            { "Ctrl+<letter>", "always the Latin key (control codes)" },
-            { "Alt+<letter>", "NOT available - use the mouse menu" },
+            { "mpv's window", "runs on a latin layout (the guard keeps it there)" },
+            { "Ctrl+<letter>", "always the Latin key (Windows control codes)" },
+            { "F-keys, ? , space", "layout independent" },
+            { "Alt+<letter>", "layout dependent - use the mouse menu" },
         },
     },
 }

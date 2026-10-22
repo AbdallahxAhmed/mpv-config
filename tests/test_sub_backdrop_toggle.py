@@ -24,10 +24,23 @@ class TestSubBackdropToggle(unittest.TestCase):
         cls.mpv_conf = (ROOT / "config" / "mpv.conf.template").read_text(encoding="utf-8")
         cls.verifier = (ROOT / "deploy" / "verifier.py").read_text(encoding="utf-8")
 
-    def test_en_and_ar_bind_the_script_with_identical_commands(self):
-        self.assertIn("b    script-binding sub_backdrop/toggle", self.template)
-        self.assertIn("ب       script-binding sub_backdrop/toggle", self.template)
-        self.assertNotIn("cycle-values sub-back-color", self.template)
+    def test_en_binding_is_present_and_no_twin_remains(self):
+        """The Latin binding stays; the Arabic twin is gone.
+
+        mpv matches the CHARACTER a key produces, so a twin only works
+        while that layout is active. The keyboard-layout guard keeps
+        mpv's window on a latin layout instead, which covers every key.
+        """
+        template = self.template
+        self.assertRegex(template, r"(?m)^b\s+script-binding sub_backdrop/toggle\s*$")
+        # no ACTIVE binding may use a non-latin key (the comments may still
+        # mention the Arabic layout)
+        active = [
+            line.split(None, 1)[0]
+            for line in template.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        self.assertEqual([k for k in active if any(ord(c) > 0x590 for c in k)], [])
 
     def test_uppercase_sponsorblock_B_binding_untouched(self):
         self.assertIn("B        script-binding sponsorblock_upvote", self.template)

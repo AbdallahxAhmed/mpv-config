@@ -250,10 +250,14 @@ local function classify(path, tracks, cfg)
     end
 
     local title = clean_title(name)
+    -- A title from your own list is a HINT, not a verdict: the list
+    -- changes with every season you finish, so it must never outvote the
+    -- signals that keep working (release group, Japanese audio track,
+    -- episode marker) - those describe the RELEASE, not the series.
     for _, entry in ipairs(series) do
         local needle = entry:gsub("[%._]", " "):gsub("%s+", " ")
         if needle ~= "" and title:find(needle, 1, true) then
-            score = score + 4
+            score = score + 2
             reasons[#reasons + 1] = "series:" .. entry
             break
         end

@@ -180,39 +180,16 @@ n    script-binding autosubsync-menu
 # OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
 b    script-binding sub_backdrop/toggle
 
-# ─── Arabic Bilingual Twin Bindings (Arabic 102 AZERTY layout) ────
-# Ground truth, probed from the deployed keyboard layout (00000C01):
-#   b → لا (lam+alef, TWO codepoints), f → ب, j → ت, l → م, p → ح,
-#   a → ش, c → ؤ, n → ى, y → غ.
-# mpv binds single codepoints only, so 'لا' can never bind. Worse, mpv
-# receives the lam-alef sequence as two unicode events, so any binding on
-# ل or ا makes the physical b key fire it while typing — that is why
-# SponsorBlock used to pop on b. Those characters are left unbound on
-# purpose; the twins below live on safe letters that appear in no
-# lam-alef composite (ا ا آ أ إ are the composite glyphs).
-# Ctrl/Alt/Shift + Arabic char can never match either: Windows turns
-# every ctrl+letter into a control code which mpv names "ctrl+b" etc.,
-# so the Latin twins own every modified combo (Ctrl+c, Ctrl+v, Ctrl+n...).
+# ─── Keyboard layout ───────────────────────────────────────────────
+# mpv matches a binding against the CHARACTER a key produces, so with
+# an Arabic (or any non-latin) layout active the letter bindings never
+# fire. The keys above therefore assume a latin layout.
 #
-# Subtitles menu (uosc) — ؤ = c
-ؤ        script-binding uosc/subtitles
-
-# Audio tracks & dubs menu (uosc) — ش = a
-ش        script-binding uosc/audio
-
-# History (memo) — ح = h (physical P in Arabic layout)
-ح        script-binding memo-history
-
-# Subtitle sync (autosubsync) — ى = n
-ى        script-binding autosubsync-menu
-
-# Subtitle background box toggle — ب = b (physical F in Arabic layout)
-# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
-ب       script-binding sub_backdrop/toggle
-
-# SponsorBlock segment marking / submission — ت = g (physical J), م = G (physical L)
-ت        script-binding sponsorblock_set_segment
-م        script-binding sponsorblock_submit_segment
+# scripts/keyboard_layout.lua keeps mpv's own window on a latin layout
+# (script-opts/keyboard_layout.conf, enabled by default), so the
+# letters work while the rest of the desktop stays as you like it.
+# Ctrl+<letter>, the function keys and punctuation are layout
+# independent either way.
 
 # Explicit Latin bindings for SponsorBlock segment marking
 g        script-binding sponsorblock_set_segment

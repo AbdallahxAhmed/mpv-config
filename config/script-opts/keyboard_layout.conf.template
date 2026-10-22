@@ -1,0 +1,15 @@
+# keyboard_layout.conf - keep mpv's window on a latin keyboard layout.
+#
+# mpv matches a key binding against the CHARACTER a key produces, so with
+# an Arabic (or any non-latin) layout active the letter bindings never
+# fire. The guard puts mpv's own input context back on a latin layout and
+# leaves every other window, the system input list and the taskbar
+# indicator alone.
+#
+# enabled=no    -> do not start the guard
+# layout=...    -> the layout id to use (00000409 = English US)
+# command=...   -> the command line that starts the guard (written by the
+#                  installer with the right python path)
+enabled=yes
+layout=00000409
+command=

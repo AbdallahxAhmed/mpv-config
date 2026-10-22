@@ -93,6 +93,22 @@ def _write_anime4k_conf(path, preset):
         stream.write(f"mode={mode}\n")
 
 
+def _patch_keyboard_layout_conf(template_path, dest_path, env):
+    """Write the command line that starts the keyboard-layout guard.
+
+    The guard lives in the installed package, so the interpreter that has
+    it is the one running the deployer (a venv on Linux, the --user
+    install on Windows).
+    """
+    with open(template_path, "r", encoding="utf-8") as stream:
+        content = stream.read()
+    python = sys.executable or "python"
+    content = re.sub(r"(?m)^command=.*$", f'command="{python}" -m mpv_config.layout_guard', content)
+    with open(dest_path, "w", encoding="utf-8") as stream:
+        stream.write(content)
+    return dest_path
+
+
 def _resolve_scaler_tier(tier):
     return SCALER_TIERS.get(tier, SCALER_TIERS["balanced"])
 
@@ -963,6 +979,13 @@ def deploy(
         if not os.path.exists(anime4k_dest):
             _write_anime4k_conf(anime4k_dest, anime_preset)
             newly_managed.append("script-opts/anime4k.conf")
+        # The keyboard-layout guard needs the interpreter that has this
+        # package, so it is written with the real path.
+        layout_template = os.path.join(opts_src, "keyboard_layout.conf.template")
+        layout_dest = os.path.join(opts_dst, "keyboard_layout.conf")
+        if os.path.isfile(layout_template) and not os.path.exists(layout_dest):
+            _patch_keyboard_layout_conf(layout_template, layout_dest, env)
+            newly_managed.append("script-opts/keyboard_layout.conf")
         ytdl_dest = os.path.join(opts_dst, "ytdl_hook.conf")
         # Localize a freshly supplied default; refresh OUR OWN previously
         # generated stub (single standard-candidate line — e.g. after the

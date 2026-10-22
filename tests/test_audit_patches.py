@@ -1689,30 +1689,49 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("button:stable-volume", items)
         self.assertNotIn("keypress", controls[0])
 
-    def test_input_conf_arabic_twin_bindings(self):
+    def test_input_conf_has_no_arabic_twin_bindings(self):
+        """The layout guard owns the keyboard layout, so no twin bindings.
+
+        mpv matches a binding against the CHARACTER a key produces, so a
+        twin binding only works while that layout is active. The guard
+        (scripts/keyboard_layout.lua) puts mpv's own window on a latin
+        layout instead, which covers every key at once - so the twins are
+        gone, and the Latin bindings below are the only ones needed.
+        """
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         input_template = os.path.join(repo_root, "config", "input.conf.template")
-
         with open(input_template, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("ح        script-binding memo-history", content)
-        self.assertIn("ؤ        script-binding uosc/subtitles", content)
-        self.assertIn("ش        script-binding uosc/audio", content)
-        self.assertIn("ى        script-binding autosubsync-menu", content)
-        self.assertIn("ب       script-binding sub_backdrop/toggle", content)
-        self.assertIn("ت        script-binding sponsorblock_set_segment", content)
-        self.assertIn("م        script-binding sponsorblock_submit_segment", content)
-        # lam-alef composite glyphs and unreachable modified combos must stay
-        # unbound (the physical b key emits ل+ا as two unicode events). Active
-        # lines only — comments legitimately mention the retired keys.
         active_keys = [
             line.split(None, 1)[0]
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        for hazard in ("ا", "ل", "إ", "ﻻ", "ﻵ", "Shift+ل", "Ctrl+ؤ", "Ctrl+ر", "Ctrl+Shift+ر"):
-            self.assertNotIn(hazard, active_keys)
+        non_latin = [k for k in active_keys if any(ord(c) > 0x590 for c in k)]
+        self.assertEqual(
+            non_latin, [],
+            "no twin bindings: the keyboard-layout guard owns the layout",
+        )
+
+        # the Latin bindings are still there
+        for key, command in (
+            ("c", "script-binding uosc/subtitles"),
+            ("a", "script-binding uosc/audio"),
+            ("h", "script-binding memo-history"),
+            ("n", "script-binding autosubsync-menu"),
+            ("b", "script-binding sub_backdrop/toggle"),
+        ):
+            self.assertRegex(
+                content,
+                r"(?m)^%s\s+%s\s*$" % (re.escape(key), re.escape(command)),
+                "the Latin binding for %s is missing" % key,
+            )
+
+        # and the guard is wired up
+        self.assertIn("keyboard_layout", content)
+        guard = os.path.join(repo_root, "scripts", "keyboard_layout.lua")
+        self.assertTrue(os.path.isfile(guard))
 
     def test_migrate_input_conf_appends_arabic_twins(self):
         from deploy.deployer import _migrate_input_conf

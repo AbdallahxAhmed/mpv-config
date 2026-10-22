@@ -25,6 +25,7 @@ found during that audit.
 
 import os
 import re
+from pathlib import Path
 import tempfile
 import unittest
 
@@ -121,27 +122,22 @@ class TestInputConfConflictAudit(unittest.TestCase):
             "keys bound twice with different commands: %r" % self.duplicates,
         )
 
-    def test_bilingual_twins_match_latin_commands(self):
-        twins = {
-            "b": ("ب", "script-binding sub_backdrop/toggle"),
-            "c": ("ؤ", "script-binding uosc/subtitles"),
-            "a": ("ش", "script-binding uosc/audio"),
-            "h": ("ح", "script-binding memo-history"),
-            "n": ("ى", "script-binding autosubsync-menu"),
-            "g": ("ت", "script-binding sponsorblock_set_segment"),
-            "G": ("م", "script-binding sponsorblock_submit_segment"),
-        }
-        for latin, (arabic, command) in twins.items():
-            self.assertEqual(
-                self.bindings.get(latin),
-                command,
-                "Latin %r must keep %r" % (latin, command),
-            )
-            self.assertEqual(
-                self.bindings.get(arabic),
-                command,
-                "Arabic twin %r must bind the same command as %r" % (arabic, latin),
-            )
+    def test_no_bilingual_twins_remain(self):
+        """No Arabic twin bindings: the layout guard replaces them.
+
+        A twin only works while its layout is active, and the lam-alef
+        composites can never be bound safely. The guard puts mpv's window
+        on a latin layout instead, so the Latin keys cover everything.
+        """
+        template = Path(__file__).resolve().parent.parent / "config" / "input.conf.template"
+        content = template.read_text(encoding="utf-8")
+        active = [
+            line.split(None, 1)[0]
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        twins = [k for k in active if any(ord(c) > 0x590 for c in k)]
+        self.assertEqual(twins, [], "the Arabic twins were replaced by the layout guard")
 
     def test_modified_arabic_combos_are_not_declared(self):
         """Windows control codes make ctrl/alt/shift+Arabic-char unreachable."""
