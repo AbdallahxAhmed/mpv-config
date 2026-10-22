@@ -1,10 +1,17 @@
--- keyboard_layout.lua - keep mpv's window on a latin keyboard layout.
+-- keyboard_layout.lua - make mpv's letter keys work under ANY layout.
 --
 -- mpv matches a key binding against the CHARACTER a key produces, so with
 -- an Arabic (or any non-latin) layout active the letter bindings never
--- fire. Windows keeps the input layout per input context and mpv's window
--- inherits the layout of whoever started mpv - so a guard puts mpv's own
--- window back on a latin layout and leaves everything else alone.
+-- fire.
+--
+-- Switching mpv's window to another layout does NOT work: Windows'
+-- WM_INPUTLANGCHANGEREQUEST toggles to the last active layout of the
+-- FOREGROUND thread, so a helper that toggles mpv puts it back on
+-- whatever the focused application last used. The guard therefore leaves
+-- the layout alone and translates the printable keys instead: while mpv
+-- is focused, a key that would produce an Arabic character is swallowed
+-- and the US character of the same physical key is injected. The system
+-- layout, the taskbar indicator and every other app keep working.
 --
 -- The command line comes from script-opts/keyboard_layout.conf (the
 -- installer writes it with the right python path), so nothing is guessed
@@ -15,8 +22,8 @@ local options = require 'mp.options'
 
 local o = {
     enabled = true,
-    layout = "00000409",
     command = "",
+    log = "",
 }
 options.read_options(o, "keyboard_layout")
 
@@ -27,12 +34,23 @@ local function start_guard()
         return
     end
     -- start /B detaches: mpv must not wait for the guard.
-    local ok, err = pcall(io.popen, 'start /B "" ' .. o.command, "r")
+    local command = o.command
+    local log = o.log
+    if log == "" then
+        local dir = mp.get_config_dir and mp.get_config_dir() or ""
+        if dir ~= "" then
+            local sep = dir:sub(-1)
+            if sep ~= "/" and sep ~= "\\" then dir = dir .. "/" end
+            log = dir .. "keyboard_layout.log"
+        end
+    end
+    if log ~= "" then command = command .. ' --log "' .. log .. '"' end
+    local ok, err = pcall(io.popen, 'start /B "" ' .. command, "r")
     if not ok then
         msg.warn("keyboard layout: could not start the guard: " .. tostring(err))
         return
     end
-    msg.info("keyboard layout: guard started (" .. o.layout .. ")")
+    msg.info("keyboard layout: guard started")
 end
 
 -- The guard is a python process: starting it costs ~120ms, so it

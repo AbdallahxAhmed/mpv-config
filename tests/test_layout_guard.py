@@ -1,6 +1,5 @@
-"""The keyboard-layout guard: mpv's window must end up on a latin layout."""
+"""The keyboard-layout guard: mpv's keys must work under any layout."""
 import ctypes
-import ctypes.wintypes as wintypes
 import subprocess
 import sys
 import time
@@ -12,7 +11,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 try:
     from mpv_config import layout_guard as lg
-except Exception:  # pragma: no cover - the package is not installed in CI
+except Exception:  # pragma: no cover
     lg = None
 
 MPV = None
@@ -28,50 +27,50 @@ for candidate in ("mpv.exe", "mpv.com", "mpv"):
 
 @unittest.skipUnless(lg is not None, "mpv_config is not importable")
 @unittest.skipUnless(sys.platform == "win32", "the layout guard is Windows only")
-@unittest.skipUnless(MPV, "mpv is not installed")
 class LayoutGuardTests(unittest.TestCase):
-    def test_mpv_window_ends_up_on_the_latin_layout(self):
+    def test_the_us_character_of_a_key_is_the_english_one(self):
+        """The US table gives the English character for the key."""
         lg._windows_only()
-        user32 = ctypes.windll.user32
+        for vk, expected in ((ord("A"), "a"), (ord("H"), "h"), (ord("K"), "k"),
+                             (ord("1"), "1"), (0x20, " ")):
+            self.assertEqual(lg._us_char(vk, 0, False), expected)
+        self.assertEqual(lg._us_char(ord("1"), 0, True), "!")
+        self.assertEqual(lg._us_char(ord("H"), 0, True), "H")
 
-        # Put THIS thread on the Arabic layout so the mpv we start inherits
-        # it - that inheritance is the whole problem.
-        arabic = user32.LoadKeyboardLayoutW("00000C01", 1)
-        try:
-            user32.ActivateKeyboardLayout(arabic, 0)
-        except Exception:
-            pass
+    def test_a_key_that_already_produces_the_us_character_is_untouched(self):
+        self.assertFalse(lg.should_translate("a", "a"))
 
-        proc = subprocess.Popen(
-            [MPV, "--no-config", "--idle=yes", "--force-window=immediate",
-             "--geometry=320x200+50+50"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            deadline = time.time() + 15
-            windows = []
-            while time.time() < deadline:
-                windows = lg._find_mpv_windows()
-                if windows:
-                    break
-                time.sleep(0.25)
-            self.assertTrue(windows, "no mpv window appeared")
+    def test_a_dead_key_is_translated(self):
+        # the layout produced nothing (a dead key): the US character is
+        # the useful one
+        self.assertTrue(lg.should_translate("", "a"))
 
-            hwnd, thread = windows[0]
-            if lg._layout_of(thread) == 0x409:
-                self.skipTest("mpv did not inherit a non-latin layout here")
+    def test_a_different_character_is_translated(self):
+        # the Arabic 102 AZERTY layout puts 'ا' on the physical H key
+        self.assertTrue(lg.should_translate("ا", "h"))
 
-            # the guard puts it back
-            self.assertTrue(lg._ensure_layout(hwnd, thread, "00000409", 0x409))
-            self.assertEqual(lg._layout_of(thread), 0x409)
-        finally:
-            proc.kill()
+    def test_control_codes_are_never_translated(self):
+        # Ctrl+letter is a control code and already layout independent
+        self.assertFalse(lg.should_translate("\x1e", "a"))
+        self.assertFalse(lg.should_translate("\x02", "1"))
 
-    def test_the_guard_leaves_other_windows_alone(self):
+    def test_a_key_without_a_us_equivalent_is_untouched(self):
+        self.assertFalse(lg.should_translate("ش", ""))
+
+    @unittest.skipUnless(MPV, "mpv is not installed")
+    def test_the_guard_starts_and_installs_its_hook(self):
         lg._windows_only()
-        user32 = ctypes.windll.user32
-        # the helper only ever touches windows whose class is "mpv"
-        self.assertTrue(hasattr(lg, "_find_mpv_windows"))
-        self.assertEqual(lg.WM_INPUTLANGCHANGEREQUEST, 0x0050)
+        guard = subprocess.Popen(
+            [sys.executable, "-m", "mpv_config.layout_guard", "--duration", "3"],
+            cwd=str(REPO_ROOT / "src"), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True,
+            creationflags=0x08000000)
+        time.sleep(1.5)
+        alive = guard.poll() is None
+        guard.terminate()
+        output = guard.stdout.read() if guard.stdout else ""
+        self.assertTrue(alive, "the guard exited: %s" % output[:300])
+        self.assertNotIn("could not install", output)
 
 
 if __name__ == "__main__":

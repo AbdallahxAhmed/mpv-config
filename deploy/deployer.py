@@ -104,6 +104,7 @@ def _patch_keyboard_layout_conf(template_path, dest_path, env):
         content = stream.read()
     python = sys.executable or "python"
     content = re.sub(r"(?m)^command=.*$", f'command="{python}" -m mpv_config.layout_guard', content)
+    content = re.sub(r"(?m)^log=.*$", "log=", content)
     with open(dest_path, "w", encoding="utf-8") as stream:
         stream.write(content)
     return dest_path
