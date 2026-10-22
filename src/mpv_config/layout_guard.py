@@ -113,6 +113,11 @@ def _windows_only() -> bool:
     _user32.GetWindowThreadProcessId.restype = ctypes.c_uint
     _user32.MapVirtualKeyW.argtypes = [ctypes.c_uint, ctypes.c_uint]
     _user32.MapVirtualKeyW.restype = ctypes.c_int
+    _user32.MapVirtualKeyExW.argtypes = [
+        ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    _user32.MapVirtualKeyExW.restype = ctypes.c_int
+    _user32.GetKeyboardLayout.argtypes = [ctypes.c_uint]
+    _user32.GetKeyboardLayout.restype = ctypes.c_void_p
     _user32.ToUnicodeEx.argtypes = [
         ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint,
         ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
@@ -144,19 +149,31 @@ def _find_mpv_windows():
     return found
 
 
+def _mpv_window():
+    """mpv's window handle and its thread, if it is up."""
+    for hwnd, thread in _find_mpv_windows():
+        return hwnd, thread
+    return None, None
+
+
 def _mpv_is_foreground() -> bool:
     foreground = _user32.GetForegroundWindow()
     if not foreground:
         return False
-    for hwnd, _thread in _find_mpv_windows():
-        if hwnd == foreground:
-            return True
-    return False
+    hwnd, _thread = _mpv_window()
+    return hwnd is not None and hwnd == foreground
 
 
-def _produced_char(vk: int) -> str:
-    """The character the CURRENT layout produces for this key."""
-    code = _user32.MapVirtualKeyW(vk, MAPVK_VK_TO_CHAR)
+def _produced_char(vk: int, hkl=None) -> str:
+    """The character the layout of the GIVEN thread produces for this key.
+
+    MapVirtualKeyW would use THIS process' own thread layout, which is not
+    the layout the user types in - MapVirtualKeyExW with the target
+    thread's layout handle is the only correct way to ask.
+    """
+    if hkl is None:
+        hkl = _user32.GetKeyboardLayout(0)
+    code = _user32.MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, hkl, 0)
     return chr(code) if code else ""
 
 
@@ -229,7 +246,11 @@ def _make_hook(log):
                 return _user32.CallNextHookEx(None, code, wparam, lparam)
         shift = bool(_user32.GetKeyState(0x10) & 0x8000)
         target = _us_char(vk, scan, shift)
-        produced = _produced_char(vk)
+        _hwnd, thread = _mpv_window()
+        produced = _produced_char(vk, _user32.GetKeyboardLayout(thread) if thread else None)
+        if log and produced != target:
+            log("key vk=%d produced=%r target=%r fg=%s"
+                % (vk, produced, target, _mpv_is_foreground()))
         if not should_translate(produced, target):
             return _user32.CallNextHookEx(None, code, wparam, lparam)
         # the layout produced something else: give mpv the US character

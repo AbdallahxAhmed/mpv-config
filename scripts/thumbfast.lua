@@ -249,6 +249,8 @@ local script_name
 local show_thumbnail = false
 local has_valid_frame = false
 local last_loaded_path = nil
+local last_loaded_duration = nil
+local last_loaded_title = nil
 
 -- Single-flight overlay dispatcher state
 local overlay_busy = false
@@ -572,6 +574,36 @@ local function vf_string(filters, full)
     return vf
 end
 
+-- Is the current file a network stream? The thumbnail worker is a
+-- second mpv that downloads the SAME stream again, so it competes
+-- for the same connection.
+local function is_network_stream()
+    local path = properties["path"]
+    if properties["demuxer-via-network"] then return true end
+    return type(path) == "string" and path:find("^https?://") ~= nil
+end
+
+-- A quality switch loads the signed stream URL, so the path changes
+-- even though it is the same video. The duration (and the title) are
+-- the reliable evidence: without them the overlay is hidden on every
+-- load and the seek preview becomes an empty black rectangle.
+local function is_same_video(loaded_path)
+    if last_loaded_path ~= nil and last_loaded_path == loaded_path then
+        return true
+    end
+    local duration = mp.get_property_number("duration", 0) or 0
+    local title = mp.get_property("metadata/title") or ""
+    local same = false
+    if last_loaded_duration and duration > 0
+        and math.abs(last_loaded_duration - duration) <= 1.5 then
+        same = last_loaded_title == "" or title == "" or last_loaded_title == title
+    end
+    last_loaded_path = loaded_path
+    last_loaded_duration = duration > 0 and duration or nil
+    last_loaded_title = title
+    return same
+end
+
 local function calc_dimensions()
     local width = properties["video-out-params"] and properties["video-out-params"]["dw"]
     local height = properties["video-out-params"] and properties["video-out-params"]["dh"]
@@ -695,8 +727,12 @@ local function spawn(time)
         end
     end
 
-    local demux_bytes = is_net and "64MiB" or "32MiB"
-    local reahead_secs = is_net and "5" or "0"
+    -- The worker only needs ONE frame. A 64 MiB cache made it
+    -- download the whole stream while the main playback was
+    -- fighting for the same connection (measured: the worker took
+    -- ~43% of it and the playback fell behind by seconds).
+    local demux_bytes = is_net and "16MiB" or "32MiB"
+    local reahead_secs = is_net and "1" or "0"
     local seek_mode = (allow_fast_seek or is_net) and "--hr-seek=no" or "--hr-seek=yes"
     local spawn_path = (is_net and open_fn and open_fn ~= "" and open_fn) or path
 
@@ -1499,7 +1535,7 @@ local function watch_changes()
     last_crop = properties["video-crop"]
     last_has_vid = has_vid
 
-    if not spawned and not disabled and (show_thumbnail or options.spawn_first) and effective_w and effective_h then
+    if not spawned and not disabled and (show_thumbnail or (options.spawn_first and not is_network_stream())) and effective_w and effective_h then
         spawn(pending_spawn_target or last_seek_time or mp.get_property_number("time-pos", 0))
         if file_timer and not file_timer:is_enabled() then file_timer:resume() end
     end
@@ -1514,7 +1550,7 @@ local function update_property(name, value)
             if spawned then
                 clear()
                 respawn_thumbnailer(pending_spawn_target or last_seek_time or 0)
-            elseif show_thumbnail or options.spawn_first then
+            elseif show_thumbnail or (options.spawn_first and not is_network_stream()) then
                 calc_dimensions()
                 if effective_w and effective_h then
                     local desired_time = pending_spawn_target or last_seek_time or mp.get_property_number("time-pos", 0)
@@ -2084,13 +2120,12 @@ function file_load()
     -- set would give every later generation --scripts=<never-written .run>
     -- and no working IPC channel (permanent pipe open failed).
     script_written = false
-    -- The same video reloaded (a quality switch keeps the canonical
-    -- URL in the playlist): the frame on screen is still the right
-    -- one, so keep it instead of blanking the overlay until the new
-    -- frame has been captured.
+    -- The same video reloaded (a quality switch loads the signed
+    -- stream URL, so the path changes): the frame on screen is still
+    -- the right one, so keep it instead of blanking the overlay until
+    -- the new frame has been captured.
     local loaded_path = mp.get_property("path") or ""
-    local same_video = last_loaded_path ~= nil and last_loaded_path == loaded_path
-    last_loaded_path = loaded_path
+    local same_video = is_same_video(loaded_path)
     clear(same_video)
     spawned = false
     dirty = true
@@ -2151,7 +2186,11 @@ function file_load()
         last_vf_reset = vf_string(filters_reset)
         last_crop = properties["video-crop"]
         info(effective_w, effective_h)
-        if options.spawn_first and not disabled then
+        -- Pre-spawning the worker for a network stream starts a second
+        -- mpv that downloads the same stream (plus a second yt-dlp
+        -- extraction) before the user even touches the timeline. For a
+        -- stream the worker starts when the timeline is hovered.
+        if options.spawn_first and not disabled and not is_network_stream() then
             local desired_time = last_seek_time or mp.get_property_number("time-pos", 0)
             spawn(desired_time)
             file_timer:resume()

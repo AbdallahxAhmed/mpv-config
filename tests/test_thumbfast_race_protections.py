@@ -137,8 +137,10 @@ class TestThumbfastAvailability(unittest.TestCase):
 
     def test_network_demuxer_cache_flags(self):
         """Network playback must use seekable cache, readahead for nearby scrubbing, and back-bytes."""
-        self.assertIn('local reahead_secs = is_net and "5" or "0"', self.thumbfast_lua)
-        self.assertIn('local demux_bytes = is_net and "64MiB" or "32MiB"', self.thumbfast_lua)
+        # The worker only needs one frame: a big cache made it download
+        # the whole stream and starve the main playback.
+        self.assertIn('local reahead_secs = is_net and "1" or "0"', self.thumbfast_lua)
+        self.assertIn('local demux_bytes = is_net and "16MiB" or "32MiB"', self.thumbfast_lua)
         self.assertIn('table.insert(args, "--demuxer-seekable-cache=yes")', self.thumbfast_lua)
         self.assertIn('table.insert(args, "--demuxer-max-back-bytes=32MiB")', self.thumbfast_lua)
 
@@ -678,6 +680,80 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         self.assertIn("script_written = false", self.thumbfast_lua[rp_idx : rp_idx + 1200])
         # the client-script write step must still be gated on script_written
         self.assertIn("elseif not script_written then", self.thumbfast_lua)
+
+
+class TestThumbfastQualitySwitchKeepsThumbnail(unittest.TestCase):
+    """A quality switch must not blank the seek preview.
+
+    The fast quality switch loads the signed stream URL, so the path
+    changes even though it is the same video. thumbfast used to compare
+    paths only, hid the overlay on every load and uosc kept drawing its
+    empty thumbnail rectangle - a black box on the timeline.
+    """
+
+    def setUp(self):
+        self.thumbfast_lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def test_same_video_helper_exists(self):
+        self.assertIn("local function is_same_video(loaded_path)", self.thumbfast_lua)
+
+    def test_same_video_uses_the_duration_not_only_the_path(self):
+        """The duration is the evidence that a re-load is the same video."""
+        match = re.search(
+            r"local function is_same_video\(loaded_path\)\n(.*?)^end",
+            self.thumbfast_lua,
+            re.MULTILINE | re.DOTALL,
+        )
+        self.assertIsNotNone(match, "is_same_video() not found")
+        body = match.group(1)
+        self.assertIn('mp.get_property_number("duration"', body)
+        self.assertIn("math.abs(last_loaded_duration - duration) <= 1.5", body)
+        self.assertIn("last_loaded_title", body)
+
+    def test_file_load_uses_the_helper(self):
+        load_idx = self.thumbfast_lua.find("function file_load()")
+        self.assertNotEqual(load_idx, -1)
+        body = self.thumbfast_lua[load_idx : load_idx + 2500]
+        self.assertIn("is_same_video(loaded_path)", body)
+        self.assertIn("clear(same_video)", body)
+
+    def test_previous_file_is_remembered(self):
+        for name in ("last_loaded_path", "last_loaded_duration", "last_loaded_title"):
+            self.assertIn("local %s = nil" % name, self.thumbfast_lua)
+
+
+class TestThumbfastNetworkWorkerDoesNotStarvePlayback(unittest.TestCase):
+    """The thumbnail worker is a second mpv downloading the same stream.
+
+    Measured against a throttled HTTP server: the worker took ~43% of
+    the connection and the playback fell ~2 s behind the wall clock.
+    """
+
+    def setUp(self):
+        self.thumbfast_lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def test_network_helper_exists(self):
+        self.assertIn("local function is_network_stream()", self.thumbfast_lua)
+
+    def test_pre_spawn_is_skipped_for_network_streams(self):
+        """A stream must not start a second downloader before the user asks."""
+        load_idx = self.thumbfast_lua.find("function file_load()")
+        self.assertNotEqual(load_idx, -1)
+        body = self.thumbfast_lua[load_idx : load_idx + 4000]
+        self.assertIn(
+            "options.spawn_first and not disabled and not is_network_stream()", body
+        )
+
+    def test_idle_watcher_does_not_pre_spawn_for_network_streams(self):
+        self.assertIn(
+            "(options.spawn_first and not is_network_stream())", self.thumbfast_lua
+        )
+
+    def test_worker_cache_is_capped(self):
+        """The worker needs one frame, not the whole stream."""
+        self.assertIn('local demux_bytes = is_net and "16MiB" or "32MiB"', self.thumbfast_lua)
+        self.assertIn('local reahead_secs = is_net and "1" or "0"', self.thumbfast_lua)
+        self.assertNotIn('"64MiB"', self.thumbfast_lua)
 
 
 if __name__ == "__main__":
