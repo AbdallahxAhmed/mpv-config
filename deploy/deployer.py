@@ -84,6 +84,15 @@ def _resolve_anime_chain(preset, shader_sep):
     return shader_sep.join(f"~~/shaders/{name}.glsl" for name in parts)
 
 
+def _write_anime4k_conf(path, preset):
+    """Seed the runtime Anime4K mode the anime profile picks up."""
+    mode = preset if preset in ANIME4K_CHAINS else "A"
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write("# Anime4K shader mode used by the anime profile.\n")
+        stream.write("# one of: " + " | ".join(ANIME4K_CHAINS.keys()) + "\n")
+        stream.write(f"mode={mode}\n")
+
+
 def _resolve_scaler_tier(tier):
     return SCALER_TIERS.get(tier, SCALER_TIERS["balanced"])
 
@@ -947,6 +956,13 @@ def deploy(
                 ):
                     shutil.copy2(src, dst)
                     newly_managed.append("script-opts/" + name)
+        # The Anime4K mode the anime profile uses. A fresh install gets the
+        # mode that was chosen at install time; an existing file is the
+        # user's own choice (they can change it inside mpv) and is kept.
+        anime4k_dest = os.path.join(opts_dst, "anime4k.conf")
+        if not os.path.exists(anime4k_dest):
+            _write_anime4k_conf(anime4k_dest, anime_preset)
+            newly_managed.append("script-opts/anime4k.conf")
         ytdl_dest = os.path.join(opts_dst, "ytdl_hook.conf")
         # Localize a freshly supplied default; refresh OUR OWN previously
         # generated stub (single standard-candidate line — e.g. after the
@@ -1698,6 +1714,31 @@ def _require_complete_fetch(results):
         raise RuntimeError("Fetch was incomplete; no live configuration was replaced")
 
 
+def _resolve_anime_preset(args):
+    """The Anime4K chain the anime profile should use.
+
+    An explicit --anime-preset wins. Otherwise an interactive install asks
+    (the shader mode is the one setting a first-time user cannot guess),
+    and unattended installs keep the shipped default.
+    """
+    chosen = getattr(args, "anime_preset", None)
+    if chosen:
+        return chosen
+    if _is_interactive_session():
+        ui.header("Anime4K shader mode")
+        ui.info("The anime profile uses this chain. Heavier modes cost GPU time")
+        ui.info("at 144Hz: A is the sweet spot for 1080p, A+A/B are the")
+        ui.info("sharpest/softest, 'off' disables the shaders.")
+        try:
+            chosen = ui.ask_choice("Anime4K mode", list(ANIME4K_CHAINS.keys()))
+        except (EOFError, KeyboardInterrupt):
+            ui.warn("No mode chosen; keeping the default.")
+            return _DEPLOY_DEFAULTS["anime_preset"]
+        ui.info(f"Anime4K mode: {chosen}")
+        return chosen
+    return _DEPLOY_DEFAULTS["anime_preset"]
+
+
 def cmd_install(args):
     """Fail-closed install: fetch, dependencies, recoverable deployment, verification.
 
@@ -1712,6 +1753,7 @@ def cmd_install(args):
     if args.dry_run:
         ui.info("[DRY RUN] No downloads, installs, audit writes, or replacements.")
         return 0
+    args.anime_preset = _resolve_anime_preset(args)
     if _is_interactive_session() and not confirm_plan(plan, "installation"):
         ui.warn("Installation cancelled by user.")
         return 0
@@ -2292,8 +2334,12 @@ def build_arg_parser():
     parser.add_argument(
         "--anime-preset",
         choices=list(ANIME4K_CHAINS),
-        default=_DEPLOY_DEFAULTS["anime_preset"],
-        help="Anime4K shader chain preset (default: %(default)s)",
+        default=None,
+        help=(
+            "Anime4K shader chain preset for the anime profile. Omit it and an "
+            "interactive install asks; unattended installs use "
+            f"{_DEPLOY_DEFAULTS['anime_preset']}."
+        ),
     )
     parser.add_argument(
         "--scaler-tier",

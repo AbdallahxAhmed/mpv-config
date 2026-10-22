@@ -15,6 +15,7 @@ suites = [
     "test_sub_backdrop.lua",
     "test_thumbfast.lua",
     "test_smart_motion.lua",
+    "test_profile_picker.lua",
 ]
 
 all_passed = True

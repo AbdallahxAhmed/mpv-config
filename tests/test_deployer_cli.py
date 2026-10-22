@@ -77,9 +77,63 @@ class DeployerParserTests(unittest.TestCase):
         parameters = inspect.signature(deployer.deploy).parameters
         for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth", "stream_quality"):
             with self.subTest(option=name):
+                if name == "anime_preset":
+                    # None means "not chosen yet": an interactive install
+                    # asks for the Anime4K mode, an unattended one falls
+                    # back to the deploy() default (see _resolve_anime_preset).
+                    self.assertIsNone(getattr(args, name))
+                    original = deployer._is_interactive_session
+                    deployer._is_interactive_session = lambda: False
+                    try:
+                        self.assertEqual(
+                            deployer._resolve_anime_preset(args), parameters[name].default
+                        )
+                    finally:
+                        deployer._is_interactive_session = original
+                    continue
                 self.assertEqual(getattr(args, name), parameters[name].default)
         self.assertFalse(args.dry_run)
         self.assertIsNone(args.mpv_version)
+
+    def test_the_installer_asks_for_the_anime_mode_when_interactive(self):
+        parser = deployer.build_arg_parser()
+        args = parser.parse_args(["--install"])
+        original_interactive = deployer._is_interactive_session
+        original_ask = deployer.ui.ask_choice
+        asked = []
+
+        def fake_ask(text, choices):
+            asked.append((text, list(choices)))
+            return "A+A"
+
+        deployer._is_interactive_session = lambda: True
+        deployer.ui.ask_choice = fake_ask
+        try:
+            chosen = deployer._resolve_anime_preset(args)
+        finally:
+            deployer._is_interactive_session = original_interactive
+            deployer.ui.ask_choice = original_ask
+        self.assertEqual(chosen, "A+A")
+        self.assertEqual(len(asked), 1)
+        for mode in ("A", "A+A", "B", "B+B", "C+A", "fast", "off"):
+            self.assertIn(mode, asked[0][1])
+
+    def test_an_explicit_anime_preset_skips_the_prompt(self):
+        parser = deployer.build_arg_parser()
+        args = parser.parse_args(["--install", "--anime-preset", "B"])
+        original_interactive = deployer._is_interactive_session
+        original_ask = deployer.ui.ask_choice
+
+        def boom(*a, **k):
+            raise AssertionError("must not prompt when the mode was given")
+
+        deployer._is_interactive_session = lambda: True
+        deployer.ui.ask_choice = boom
+        try:
+            self.assertEqual(deployer._resolve_anime_preset(args), "B")
+        finally:
+            deployer._is_interactive_session = original_interactive
+            deployer.ui.ask_choice = original_ask
 
     def test_every_registry_preset_and_profile_is_selectable(self):
         parser = deployer.build_arg_parser()

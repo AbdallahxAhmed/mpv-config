@@ -56,27 +56,36 @@
 # └─────────────┴───────────────────────────────────────────────────┘
 
 # **----- اختصارات تبديل مؤثرات Anime4K -----**
+#
+# These go through scripts/profile_picker.lua, so the choice is applied
+# AND remembered (script-opts/anime4k.conf). It also survives a restart:
+# the anime profile picks the saved mode up again on the next anime file.
+# Alt+a cycles the mode, Alt+Shift+a overrides the anime detection by hand.
 
 # الوضع A
-CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A (Sharp)"
+CTRL+1 no-osd script-message-to profile_picker set-mode A
 
 # الوضع B
-CTRL+2 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B (Soft)"
+CTRL+2 no-osd script-message-to profile_picker set-mode B
 
 # الوضع C
-CTRL+3 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C (Denoise)"
+CTRL+3 no-osd script-message-to profile_picker set-mode C
 
 # الوضع A+A (تم التصحيح)
-CTRL+4 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode A+A (Ultra Sharp)"
+CTRL+4 no-osd script-message-to profile_picker set-mode A+A
 
 # الوضع B+B (تم التصحيح)
-CTRL+5 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_Soft_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode B+B (Ultra Soft)"
+CTRL+5 no-osd script-message-to profile_picker set-mode B+B
 
 # الوضع C+A (تم التصحيح)
-CTRL+6 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_Denoise_CNN_x2_VL.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x2.glsl{{SHADER_SEP}}~~/shaders/Anime4K_AutoDownscalePre_x4.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Restore_CNN_M.glsl{{SHADER_SEP}}~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl"; show-text "Anime4K: Mode C+A (Denoise + Sharp)"
+CTRL+6 no-osd script-message-to profile_picker set-mode C+A
 
 # **----- اختصار لإلغاء جميع المؤثرات -----**
-CTRL+0 no-osd change-list glsl-shaders clr ""; show-text "Shaders Cleared"
+CTRL+0 no-osd script-message-to profile_picker set-mode off
+
+# **----- Anime4K mode cycle / manual profile override -----**
+Alt+a no-osd script-message-to profile_picker cycle-mode
+Alt+Shift+a no-osd script-message-to profile_picker toggle-manual
 
 
 # **----- اختصارات مفيدة إضافية (تم التصحيح) -----**

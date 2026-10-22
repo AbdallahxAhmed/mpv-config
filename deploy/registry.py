@@ -189,7 +189,9 @@ ANIME4K_CHAINS = {
     "A": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
     "A+A": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_Restore_CNN_M;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
     "B": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_Soft_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+    "B+B": "Anime4K_Clamp_Highlights;Anime4K_Restore_CNN_Soft_VL;Anime4K_Upscale_CNN_x2_VL;Anime4K_Restore_CNN_Soft_M;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
     "C": "Anime4K_Clamp_Highlights;Anime4K_Upscale_Denoise_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Upscale_CNN_x2_M",
+    "C+A": "Anime4K_Clamp_Highlights;Anime4K_Upscale_Denoise_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Restore_CNN_M;Anime4K_Upscale_CNN_x2_M",
 }
 
 SCALER_TIERS = {
