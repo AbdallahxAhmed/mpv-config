@@ -1,4 +1,4 @@
-\"\"\"Make mpv's letter keys work under ANY keyboard layout.
+"""Make mpv's letter keys work under ANY keyboard layout.
 
 mpv matches a key binding against the CHARACTER a key produces. With an
 Arabic (or any non-latin) layout active the letter bindings never fire,
@@ -26,7 +26,7 @@ How the decision is made:
     Ctrl+letter into a control code, which is layout independent already.
 
 Windows only. Elsewhere this exits with a clear message and no effect.
-\"\"\"
+"""
 from __future__ import annotations
 
 import argparse
@@ -75,7 +75,7 @@ _HOOKPROC = None
 
 
 class MSG(ctypes.Structure):
-    \"\"\"The Win32 message struct - GetMessage needs a real pointer.\"\"\"
+    """The Win32 message struct - GetMessage needs a real pointer."""
     _fields_ = [("hwnd", wintypes.HWND), ("message", wintypes.UINT),
                 ("wParam", wintypes.WPARAM), ("lParam", wintypes.LPARAM),
                 ("time", wintypes.DWORD), ("pt", ctypes.c_byte * 8)]
@@ -128,7 +128,7 @@ def _windows_only() -> bool:
 
 
 def _find_mpv_windows():
-    \"\"\"Every visible mpv window (class \"mpv\") with its owning thread.\"\"\"
+    """Every visible mpv window (class \"mpv\") with its owning thread."""
     found = []
 
     def callback(hwnd, _lparam):
@@ -145,7 +145,7 @@ def _find_mpv_windows():
 
 
 def _mpv_window():
-    \"\"\"mpv's window handle and its thread, if it is up.\"\"\"
+    """mpv's window handle and its thread, if it is up."""
     for hwnd, thread in _find_mpv_windows():
         return hwnd, thread
     return None, None
@@ -160,7 +160,7 @@ def _mpv_is_foreground() -> bool:
 
 
 def _mpv_layout():
-    \"\"\"The keyboard layout handle mpv's own thread is using.\"\"\"
+    """The keyboard layout handle mpv's own thread is using."""
     _hwnd, thread = _mpv_window()
     if not thread:
         return None
@@ -168,20 +168,20 @@ def _mpv_layout():
 
 
 def _is_us_layout(hkl) -> bool:
-    \"\"\"Is this layout handle a US one? The low word is the layout id.\"\"\"
+    """Is this layout handle a US one? The low word is the layout id."""
     if not hkl:
         return False
     return (int(hkl) & 0xFFFF) == US_LAYOUT_ID
 
 
 def _us_char(vk: int, scan: int, shift: bool) -> str:
-    \"\"\"The character the US layout produces for this physical key.\"\"\"
+    """The character the US layout produces for this physical key."""
     table = US_SHIFT if shift else US_CHARS
     return table.get(vk, "")
 
 
 def should_translate(layout_hkl, target: str) -> bool:
-    \"\"\"Does this key need the US character instead of the layout's one?
+    """Does this key need the US character instead of the layout's one?
 
     Pure so it can be tested without a keyboard:
       - nothing to translate without a US character for the key;
@@ -189,7 +189,7 @@ def should_translate(layout_hkl, target: str) -> bool:
         produces exactly the character the bindings expect;
       - otherwise mpv is on a layout that produces something else, so the
         US character of the same physical key is the useful one.
-    \"\"\"
+    """
     if not target:
         return False
     return not _is_us_layout(layout_hkl)
@@ -215,11 +215,11 @@ def _inject_char(char: str) -> None:
 
 
 def _make_hook(log, foreground_check=None, inject=None, layout_of=None):
-    \"\"\"Build the low level keyboard hook.
+    """Build the low level keyboard hook.
 
     foreground_check, inject and layout_of can be replaced so the whole key
     path can be tested without a real window and without sending real keys.
-    \"\"\"
+    """
     check_foreground = foreground_check or _mpv_is_foreground
     inject_char = inject or _inject_char
     get_layout = layout_of or _mpv_layout
