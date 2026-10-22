@@ -170,12 +170,13 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 ### Arabic keyboard twins (AZERTY 102)
 
 mpv matches a binding against the **character** a key produces, so with an Arabic (or any
-non-latin) layout active the letter bindings never fire. `scripts/keyboard_layout.lua` therefore
-keeps **mpv's own window** on a latin layout (`script-opts/keyboard_layout.conf`, enabled by
-default): the guard flips mpv's input context back to English whenever the window has focus and
-leaves every other window, the system input list and the taskbar indicator untouched. The letters
-then work with your usual muscle memory. `Ctrl+<letter>`, the function keys and punctuation are
-layout independent anyway (Windows turns `Ctrl+letter` into a control code), so `Ctrl+1`..`Ctrl+6`
+non-latin) layout active the letter bindings never fire. `scripts/keyboard_layout.lua` fixes that
+without touching your keyboard layout: while mpv is the focused window it swallows the printable
+keys and injects the character the **same physical key** has on a US layout
+(`script-opts/keyboard_layout.conf`, enabled by default). The system layout, the taskbar indicator
+and every other application keep working exactly as they were, and what it translated is written to
+`%APPDATA%/mpv/keyboard_layout.log`. `Ctrl+<letter>`, the function keys and punctuation are layout
+independent anyway (Windows turns `Ctrl+letter` into a control code), so `Ctrl+1`..`Ctrl+6`
 (Anime4K modes), `Ctrl+g` (cycle), `?`/`F9` (cheat sheet) work in any layout. `Alt+<letter>` is
 *not* layout independent - the mouse menu carries those actions.
 

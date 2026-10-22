@@ -185,11 +185,12 @@ b    script-binding sub_backdrop/toggle
 # an Arabic (or any non-latin) layout active the letter bindings never
 # fire. The keys above therefore assume a latin layout.
 #
-# scripts/keyboard_layout.lua keeps mpv's own window on a latin layout
-# (script-opts/keyboard_layout.conf, enabled by default), so the
-# letters work while the rest of the desktop stays as you like it.
-# Ctrl+<letter>, the function keys and punctuation are layout
-# independent either way.
+# scripts/keyboard_layout.lua takes care of that: while mpv is focused
+# it translates the printable keys to the character the same physical
+# key has on a US layout (script-opts/keyboard_layout.conf, enabled by
+# default). The system layout, the taskbar indicator and every other
+# application are left alone, and Ctrl+<letter>, the function keys and
+# punctuation are layout independent anyway.
 
 # Explicit Latin bindings for SponsorBlock segment marking
 g        script-binding sponsorblock_set_segment
