@@ -34,6 +34,9 @@ local function start_guard()
         return
     end
     -- start /B detaches: mpv must not wait for the guard.
+    -- The output is redirected as well: without it the guard keeps mpv's
+    -- pipe open and io.popen never returns, which blocks this script's
+    -- thread for as long as the guard runs.
     local command = o.command
     local log = o.log
     if log == "" then
@@ -45,7 +48,7 @@ local function start_guard()
         end
     end
     if log ~= "" then command = command .. ' --log "' .. log .. '"' end
-    local ok, err = pcall(io.popen, 'start /B "" ' .. command, "r")
+    local ok, err = pcall(io.popen, 'start /B "" ' .. command .. ' >nul 2>&1', "r")
     if not ok then
         msg.warn("keyboard layout: could not start the guard: " .. tostring(err))
         return
