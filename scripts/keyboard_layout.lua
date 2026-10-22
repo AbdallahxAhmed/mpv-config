@@ -35,6 +35,13 @@ local function start_guard()
     msg.info("keyboard layout: guard started (" .. o.layout .. ")")
 end
 
-mp.add_timeout(1.0, start_guard)
+-- The guard is a python process: starting it costs ~120ms, so it
+-- waits for the first file instead of delaying the player's start.
+local started = false
+mp.register_event("file-loaded", function()
+    if started then return end
+    started = true
+    start_guard()
+end)
 
 _G.keyboard_layout = { options = o, start = start_guard }

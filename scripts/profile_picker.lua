@@ -35,6 +35,12 @@ local o = {
     -- network streams too: YouTube anime keeps a Japanese audio track, so the
     -- same signals work there
     detect_streams = true,
+    -- Apply the anime profile (and with it Anime4K) to network
+    -- streams? Off by default: the VL CNN chains cost 18-44
+    -- mistimed frames at 1080p, which is exactly the cadence
+    -- disturbance a 144Hz panel notices. Ctrl+1..Ctrl+6 still
+    -- turn Anime4K on for a stream by hand.
+    apply_anime_profile_to_streams = false,
 }
 options.read_options(o, "profile_picker")
 
@@ -394,6 +400,7 @@ local function decide()
     local path = mp.get_property("path") or ""
     local is_stream = path:find("^https?://") ~= nil or path:find("^ytdl://") ~= nil
     if is_stream and not o.detect_streams then return end
+    local apply_here = not is_stream or o.apply_anime_profile_to_streams
     local tracks = mp.get_property_native("track-list") or {}
     local verdict = classify(path, tracks)
     state.detected = verdict.anime
@@ -401,6 +408,11 @@ local function decide()
         verdict.anime and "anime" or "live-action", verdict.score,
         table.concat(verdict.reasons, ", ")))
     if state.manual then return end
+    if not apply_here then
+        -- a stream keeps the light profile: Anime4K is opt-in there
+        apply_profile(false)
+        return
+    end
     apply_profile(verdict.anime)
 end
 

@@ -248,6 +248,7 @@ local script_name
 
 local show_thumbnail = false
 local has_valid_frame = false
+local last_loaded_path = nil
 
 -- Single-flight overlay dispatcher state
 local overlay_busy = false
@@ -1285,8 +1286,8 @@ file_timer = mp.add_periodic_timer(file_check_period, function()
 end)
 file_timer:kill()
 
-local function clear()
-    mp.msg.trace("CLEAR received show=" .. tostring(show_thumbnail) .. " x=" .. tostring(last_x) .. " y=" .. tostring(last_y) .. " last_seek=" .. tostring(last_seek_time))
+local function clear(keep_overlay)
+    mp.msg.trace("CLEAR received show=" .. tostring(show_thumbnail) .. " x=" .. tostring(last_x) .. " y=" .. tostring(last_y) .. " last_seek=" .. tostring(last_seek_time) .. " keep=" .. tostring(keep_overlay))
     stop_seek_watchdog()
     seek_pipeline.retry_count = 0
     seek_pipeline.pipe_fail_count = 0
@@ -1302,10 +1303,12 @@ local function clear()
     seek_pipeline.in_flight_target = nil
     seek_pipeline.in_flight_generation = 0
     seek_pipeline.pending_target = nil
-    show_thumbnail = false
-    last_x = nil
-    last_y = nil
-    desired_overlay = false
+    if not keep_overlay then
+        show_thumbnail = false
+        last_x = nil
+        last_y = nil
+        desired_overlay = false
+    end
     pump_overlay()
     if script_name then return end
     if pending_respawn and respawn_thumbnailer then
@@ -2081,7 +2084,14 @@ function file_load()
     -- set would give every later generation --scripts=<never-written .run>
     -- and no working IPC channel (permanent pipe open failed).
     script_written = false
-    clear()
+    -- The same video reloaded (a quality switch keeps the canonical
+    -- URL in the playlist): the frame on screen is still the right
+    -- one, so keep it instead of blanking the overlay until the new
+    -- frame has been captured.
+    local loaded_path = mp.get_property("path") or ""
+    local same_video = last_loaded_path ~= nil and last_loaded_path == loaded_path
+    last_loaded_path = loaded_path
+    clear(same_video)
     spawned = false
     dirty = true
     last_vf_runtime = ""

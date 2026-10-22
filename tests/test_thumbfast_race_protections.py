@@ -42,7 +42,7 @@ class TestThumbfastOverlayDispatcher(unittest.TestCase):
         """clear() must set desired_overlay = false and pump, not issue overlay-remove directly."""
         # Extract clear() body
         clear_match = re.search(
-            r"local function clear\(\)\n(.*?)^end",
+            r"local function clear\((?:keep_overlay)?\)\n(.*?)^end",
             self.thumbfast_lua,
             re.MULTILINE | re.DOTALL,
         )
@@ -643,7 +643,7 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
 
     def test_clear_removes_overlay_before_script_name_check(self):
         """clear() must hide and pump overlay before checking script_name to prevent stuck overlays."""
-        clear_idx = self.thumbfast_lua.find("local function clear()")
+        clear_idx = self.thumbfast_lua.find("local function clear(")
         self.assertNotEqual(clear_idx, -1)
         clear_body = self.thumbfast_lua[clear_idx : clear_idx + 1200]
         desired_idx = clear_body.find("desired_overlay = false")

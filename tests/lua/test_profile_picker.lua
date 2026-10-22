@@ -250,4 +250,26 @@ test('the profile own chain is not mistaken for a user choice', function()
     eq('A', pp.state.mode)
 end)
 
+test('a stream is classified but keeps the light profile', function()
+    local h, pp = load_script()
+    h.props['path'] = 'https://www.youtube.com/watch?v=abc'
+    h.props['track-list'] = JPN
+    h.events['file-loaded']()
+    -- the anime profile would bring Anime4K, which measurably disturbs the
+    -- 144Hz cadence on a stream: it is opt-in there (Ctrl+1..6)
+    eq(1, #h.commands)
+    eq('apply-profile', h.commands[1][1])
+    eq('live-action', h.commands[1][2])
+end)
+
+test('a local anime file gets the anime profile', function()
+    local h, pp = load_script()
+    h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
+    h.props['track-list'] = JPN
+    h.events['file-loaded']()
+    eq(1, #h.commands)
+    eq('apply-profile', h.commands[1][1])
+    eq('anime', h.commands[1][2])
+end)
+
 print('Profile picker tests passed: ' .. total)
