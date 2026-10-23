@@ -314,7 +314,9 @@ end
 local function mode_file_path()
     local found = mp.find_config_file and mp.find_config_file("script-opts/anime4k.conf")
     if found then return found end
-    local dir = mp.get_config_dir and mp.get_config_dir() or ""
+    -- mp.get_config_dir does not exist in this mpv; use the property.
+    local ok_dir, dir = pcall(mp.get_property, "config-dir")
+    dir = (ok_dir and dir) or ""
     if dir ~= "" then
         local sep = dir:sub(-1)
         if sep ~= "/" and sep ~= "\\" then dir = dir .. "/" end

@@ -40,8 +40,10 @@ local function start_guard()
     local command = o.command
     local log = o.log
     if log == "" then
-        local dir = mp.get_config_dir and mp.get_config_dir() or ""
-        if dir ~= "" then
+        -- mp.get_config_dir does not exist in this mpv (probe: nil), but
+        -- the config-dir property is always there.
+        local ok_dir, dir = pcall(mp.get_property, "config-dir")
+        if ok_dir and dir and dir ~= "" then
             local sep = dir:sub(-1)
             if sep ~= "/" and sep ~= "\\" then dir = dir .. "/" end
             log = dir .. "keyboard_layout.log"

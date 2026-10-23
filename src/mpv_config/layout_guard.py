@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import ctypes.wintypes as wintypes
+import os
 import sys
 
 WH_KEYBOARD_LL = 13
@@ -278,10 +279,18 @@ def main(argv=None) -> int:
     if not _windows_only():
         return 0
 
+    if not args.log and sys.platform == "win32":
+        # no --log given: fall back to the personal config directory so
+        # the guard can always report what it did
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            args.log = os.path.join(app_data, "mpv", "keyboard_layout.log")
+
     log_file = None
     log = None
     if args.log:
         try:
+            os.makedirs(os.path.dirname(os.path.abspath(args.log)), exist_ok=True)
             log_file = open(args.log, "a", encoding="utf-8")
             log = lambda line: (log_file.write(line + "\n"), log_file.flush())
         except OSError:

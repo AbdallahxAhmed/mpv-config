@@ -27,7 +27,8 @@ local function quality_conf_path()
     local found = mp.find_config_file and mp.find_config_file(quality_conf_name)
     if found then return found end
     local config_dir = nil
-    if mp.get_config_dir then config_dir = mp.get_config_dir() end
+    local ok_dir, dir = pcall(mp.get_property, "config-dir")
+    if ok_dir and dir and dir ~= '' then config_dir = dir end
     if config_dir and config_dir ~= '' then
         local sep = config_dir:sub(-1)
         if sep ~= '/' and sep ~= '\\' then config_dir = config_dir .. '/' end
