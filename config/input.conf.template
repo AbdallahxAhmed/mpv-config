@@ -93,9 +93,11 @@ CTRL+0 no-osd script-message-to profile_picker set-mode off
 # Ctrl+<letter> is a Windows control code, so it is the SAME key in every
 # keyboard layout - unlike Alt+<letter>, which never matches while an
 # Arabic layout is active (the key then produces an Arabic character).
-# The mouse menu carries the same actions.
+# The mouse menu carries the same actions. toggle-manual sits on
+# Ctrl+Shift+t (not g): under Arabic, Ctrl+Shift+G and Ctrl+Shift+H both
+# arrive as Ctrl+أ (aliased), and that twin belongs to history.
 Ctrl+g no-osd script-message-to profile_picker cycle-mode
-Ctrl+Shift+g no-osd script-message-to profile_picker toggle-manual
+Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual
 
 # **----- Cheat sheet -----
 # "?" is a punctuation key, so it works in every layout.
@@ -196,13 +198,13 @@ b    script-binding sub_backdrop/toggle
 # SAME physical key produces on Arabic 101 (c -> ؤ, a -> ش, n -> ى,
 # ? -> ؟, ...). Write only Latin lines here; the twins are automatic.
 #
-# Five keys CANNOT have a same-key twin: h g b G B. Measured on the real
-# key stream (--input-test capture): a b keypress delivers ONLY "ا" to
-# mpv - the lam of every lam-alef pair never arrives - so b and h send
-# the IDENTICAL character (G/H alias on "أ", B/N on "آ"). Binding any of
-# those glyphs would make the partner key misfire. Their actions live on
-# the Ctrl+Shift+ combos below instead - Windows control codes, the SAME
-# physical combo in every layout:
+# The Ctrl+Shift+<letter> combos below are the only route to five
+# actions under Arabic: h g b G B cannot have bare twins (measured on
+# the real key stream: b and h deliver the IDENTICAL character - the
+# lam-alef lam never reaches mpv). Under Arabic the combos arrive as
+# Ctrl+<Arabic char> (Ctrl+Shift+H -> Ctrl+أ - measured), and the
+# generator binds those twins too, so the SAME combos work in every
+# layout:
 Ctrl+Shift+h   script-binding memo-history
 Ctrl+Shift+m   script-binding sponsorblock_set_segment
 Ctrl+Shift+s   script-binding sponsorblock_submit_segment

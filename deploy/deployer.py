@@ -1321,19 +1321,31 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         updated_content = updated_content.replace("— لا = b", "— ب = b")
 
     # 4. Arabic twin hygiene (layout-probed).
-    #    Ground truth from probing the deployed 00000C01 (Arabic 102 AZERTY)
-    #    layout: the physical b key emits the two-codepoint lam-alef sequence
-    #    U+0644 U+0627, and mpv receives it as two unicode events — any
-    #    binding on a component glyph (ل/ا, or آ/أ/إ from the shifted
-    #    composites) fires while the user types lam-alef. That is how the
-    #    physical b key used to pop SponsorBlock marking. Presentation forms
-    #    (U+FExx like ﻻ) are never emitted and were dead code. Modified
-    #    Arabic combos never fire either: Windows turns ctrl+letter into a
-    #    control code that mpv names "ctrl+b", so Ctrl+ر / Ctrl+ؤ style
-    #    declarations are unreachable on every layout.
-    #    Delete all such lines, then make sure each safe twin exists once.
-    hazard_glyphs = re.compile(r"[\u0627\u0622\u0623\u0625\u0644\uFE70-\uFEFF]")
-    arabic_script = re.compile(r"[\u0600-\u06FF\uFE70-\uFEFF]")
+    #    Ground truth from the real key stream (user --input-test captures,
+    #    2026-10-25): the physical b key emits only the second glyph of the
+    #    lam-alef sequence (U+0627 "ا"), and shifted T/G/B emit إ/أ/آ - so
+    #    any PLAIN binding on a component glyph (ل ا آ أ إ) fires while the
+    #    user types those keys (that was the "b pops SponsorBlock" bug).
+    #    MODIFIED combos are different and DO reach mpv: Ctrl+Shift+H under
+    #    Arabic arrives as "Ctrl+أ" (measured - falsifies the old claim
+    #    that Windows control codes make every modified Arabic binding
+    #    unreachable), so the generator emits modified twins and this
+    #    cleanup must keep them. The old era's specific junk modified lines
+    #    (duplicates of Latin bindings) are removed by exact pattern, and
+    #    presentation forms (U+FExx) are never emitted and stay deleted.
+    legacy_junk = (
+        r"^[ \t]*Ctrl\+ؤ[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*Ctrl\+ر[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*Ctrl\+Shift\+ر[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*Shift\+ل[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*Ctrl\+ﻻ[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*Shift\+ﻻ[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*ﻵ[ \t]+[^\r\n]*\r?\n?",
+    )
+    for pattern in legacy_junk:
+        updated_content = re.sub(pattern, "", updated_content, flags=re.MULTILINE)
+    plain_hazard = re.compile(r"^[\u0627\u0622\u0623\u0625\u0644]$")
+    presentation = re.compile(r"[\uFE70-\uFEFF]")
     kept_lines = []
     for line in updated_content.splitlines():
         stripped = line.strip()
@@ -1341,9 +1353,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             kept_lines.append(line)
             continue
         key = stripped.split(None, 1)[0]
-        plain_hazard = "+" not in key and hazard_glyphs.search(key) is not None
-        combo_hazard = "+" in key and arabic_script.search(key) is not None
-        if plain_hazard or combo_hazard:
+        if plain_hazard.match(key) or presentation.search(key):
             continue
         kept_lines.append(line)
     updated_content = "\n".join(kept_lines) + "\n"
@@ -1398,6 +1408,17 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         for key, cmd in missing_backups:
             block += "%s   %s\n" % (key, cmd)
         updated_content = updated_content.rstrip() + "\n" + block
+
+    #    toggle-manual moves Ctrl+Shift+g -> Ctrl+Shift+t: under Arabic,
+    #    Ctrl+Shift+G and Ctrl+Shift+H both arrive as Ctrl+أ (aliased),
+    #    and the generated twin must belong to history, not to the niche
+    #    profile override.
+    updated_content, _manual_moves = re.subn(
+        r"^([ \t]*Ctrl\+Shift\+g[ \t]+no-osd script-message-to profile_picker toggle-manual[ \t]*)$",
+        r"Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual",
+        updated_content,
+        flags=re.MULTILINE,
+    )
 
     #    mpv canonicalizes "Ctrl+Shift+b" and "Ctrl+B" to the SAME key
     #    (shift is encoded as the uppercase letter), so the legacy

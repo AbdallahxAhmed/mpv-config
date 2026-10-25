@@ -30,14 +30,42 @@ class TwinLookupTests(unittest.TestCase):
     def test_lam_alef_keys_are_refused(self):
         """h g b G B: the REAL key stream aliases them (user's --input-test
         capture, 2026-10-25: b delivers ONLY ا, so b and h are the same
-        event to mpv; G/H alias on أ, B/N on آ). No twin can exist - the
-        actions carry Ctrl+Shift+ backups instead. NOTE: the `keypress`
+        event to mpv; G/H alias on أ, B/N on آ). No bare twin can exist -
+        the actions carry Ctrl+Shift+ backups instead. NOTE: the `keypress`
         command DOES deliver both characters, so this cannot be observed
         from headless tests - only from the real Windows stream."""
         for key in ("h", "g", "b", "G", "B"):
             twin, reason = layout_twins._twin_for(key)
             self.assertIsNone(twin, key)
             self.assertIn("lam-alef", reason)
+
+    def test_modified_combo_twins(self):
+        """Ctrl+Shift+<letter> under Arabic arrives as Ctrl+<the shift-layer
+        Arabic char> - NOT a control code (user's capture shows 'Ctrl+أ'
+        for Ctrl+Shift+H). The generator binds those events directly."""
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+h"), ("Ctrl+أ", ""))
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+H"), ("Ctrl+أ", ""))
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+m"), ("Ctrl+’", ""))
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+s"), ("Ctrl+ٍ", ""))
+        # lam-alef pair: only the LAST character arrives -> Ctrl+آ
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+b"), ("Ctrl+آ", ""))
+        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+u"), ("Ctrl+‘", ""))
+
+    def test_modified_twins_refuse_ascii(self):
+        """Ctrl+Shift+l's Arabic half is plain '/' - binding Ctrl+/ could
+        fire on US keystrokes, so it is refused."""
+        twin, reason = layout_twins._twin_for("Ctrl+Shift+l")
+        self.assertIsNone(twin)
+        self.assertIn("US", reason)
+
+    def test_plain_ctrl_gets_no_twin(self):
+        """Plain Ctrl+<letter> arrives as a layout-independent control code
+        on every layout - it needs no twin (and Alt delivery is
+        unverified)."""
+        for key in ("Ctrl+v", "Ctrl+c", "Alt+t"):
+            self.assertIn(layout_twins._twin_for(key)[1],
+                          ("control-code or unverified combo",))
+            self.assertFalse(layout_twins._is_twinable(key), key)
 
     def test_ascii_twins_are_refused(self):
         """>/< shift to plain ASCII under Arabic - binding those would
@@ -121,10 +149,10 @@ F9   ignored
         self.assertIn("ؤ script-binding user/own", text)
 
     def test_shipped_template_gets_the_expected_twins(self):
-        """Pin the actual deployed bindings: the safe single-key twins plus
-        the Arabic question mark; h/g/b/B/G are reported as needing the
-        Ctrl+Shift+ backups (their glyphs alias other keys on the real
-        key stream)."""
+        """Pin the actual deployed bindings: the safe single-key twins, the
+        Arabic question mark, and the modified-combo twins (Ctrl+Shift+X
+        arrives as Ctrl+<Arabic char> under Arabic); h/g/b/B/G bare are
+        reported as impossible (real-stream aliasing)."""
         path = os.path.join(REPO, "config", "input.conf.template")
         with open(path, "r", encoding="utf-8") as handle:
             text, report = layout_twins.generate(handle.read())
@@ -133,16 +161,25 @@ F9   ignored
             ("ش", "script-binding uosc/audio"),
             ("ى", "script-binding autosubsync-menu"),
             ("؟", "no-osd script-message-to help_overlay help"),
+            ("Ctrl+أ", "script-binding memo-history"),
+            ("Ctrl+’", "script-binding sponsorblock_set_segment"),
+            ("Ctrl+ٍ", "script-binding sponsorblock_submit_segment"),
+            ("Ctrl+آ", "script-binding sub_backdrop/toggle"),
+            ("Ctrl+‘", "script-binding sponsorblock_upvote"),
         ]:
             self.assertIn("%s %s" % (twin, command), text)
-        # the lam-alef glyphs never appear as active keys
+        # the lam-alef glyphs never appear as PLAIN active keys
         for line in text.splitlines():
             if line and not line.startswith("#"):
-                self.assertNotIn(line.split(None, 1)[0],
-                                 layout_twins.LAM_ALEF_REFUSED,
-                                 "bound a lam-alef glyph: %r" % line)
+                key = line.split(None, 1)[0]
+                self.assertNotIn(key, layout_twins.LAM_ALEF_REFUSED,
+                                 "bound a lam-alef glyph plain: %r" % line)
         reported = {key for key, _ in report}
-        self.assertEqual(reported, {"h", "g", "b", "B", "G"})
+        # the five bare lam-alef keys, plus the paste-to-playlist combos
+        # whose Arabic half is plain ASCII "{" (refused: US behaviour)
+        self.assertEqual(
+            reported,
+            {"h", "g", "b", "B", "G", "Ctrl+Shift+v", "Ctrl+Shift+V"})
 
     def test_block_is_utf8_round_trip(self):
         text, _ = layout_twins.generate(self.MINI)
@@ -210,17 +247,24 @@ class MigrationTests(unittest.TestCase):
             self.assertNotRegex(
                 text, r"^%s[ \t]+.*%s" % (glyph, command))
         self.assertNotIn("Arabic Bilingual Twin Bindings", text)
-        # the same-key twins are present, exactly once each
+        # the same-key twins are present, exactly once each, plus the
+        # modified-combo twins for the backup block's Ctrl+Shift+ lines
         for glyph, command in [
             ("ؤ", "script-binding uosc/subtitles"),
             ("ش", "script-binding uosc/audio"),
             ("ى", "script-binding autosubsync-menu"),
             ("؟", "no-osd script-message-to help_overlay help"),
+            ("Ctrl+أ", "script-binding memo-history"),
+            ("Ctrl+’", "script-binding sponsorblock_set_segment"),
+            ("Ctrl+ٍ", "script-binding sponsorblock_submit_segment"),
+            ("Ctrl+آ", "script-binding sub_backdrop/toggle"),
+            ("Ctrl+‘", "script-binding sponsorblock_upvote"),
         ]:
             self.assertEqual(
-                len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)),
+                len(re.findall(r"^%s[ \t]+%s$" % (re.escape(glyph), re.escape(command)),
                                text, re.MULTILINE)), 1)
-        # the lam-alef glyphs stay unbound (b/h alias on the real stream)
+        # the lam-alef glyphs stay unbound as PLAIN keys (b/h alias on the
+        # real stream); the modified Ctrl+آ twin above is deliberately OK
         for line in text.splitlines():
             if line and not line.startswith("#"):
                 self.assertNotIn(line.split(None, 1)[0],

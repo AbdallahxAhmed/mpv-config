@@ -25,7 +25,7 @@
 Recent work now on `main` (unreleased in the changelog):
 
 - **Playback display-sync fixes** — `tscale=linear` + `video-timing-offset=0.01` for jitter-free `display-resample` at fixed 144 Hz, and a KDE-Wayland-only refresh-rate stabilization profile.
-- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`), plus layout-independent `Ctrl+Shift+h/m/s/b/u` backups for `h g b G B` (their glyphs alias other keys on the real key stream); the keyboard hook guard is retired to an opt-in.
+- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`), and twins the `Ctrl+Shift+h/m/s/b/u` backup combos as their Arabic-delivery forms (`Ctrl+أ/’/ٍ/آ/‘` — measured on the real key stream); bare `h g b G B` alias other keys and stay combo-only; the keyboard hook guard is retired to an opt-in.
 - **Hardened management commands** — `rollback` restores only this config's own `mpv.backup.*` folders; `uninstall` can cleanly purge the config, backups, managed dependencies and the install directory.
 - **Robust installers** — `install` / `verify` wired to the real deployer; the shell bootstrap works on PEP 668 systems (Ubuntu 24.04) via a private venv.
 - **Security hygiene** — no key material or personal paths tracked; enforced by `tests/test_repo_hygiene.py`.
@@ -180,15 +180,17 @@ hook process runs (the previous keyboard hook guard still ships but is disabled 
 `script-opts/keyboard_layout.conf` — set `enabled=yes` to bring it back for layouts beyond Arabic
 101).
 
-Five keys cannot have a same-key twin: **h g b G B**. Measured on the real key stream (an
+Five keys cannot have a bare twin: **h g b G B**. Measured on the real key stream (an
 `--input-test` capture): pressing `b` delivers **only `ا`** to mpv — the `ل` of the lam-alef pair
 never arrives — so `b` and `h` send the *identical* character (`G`/`H` alias on `أ`, `B`/`N` on
-`آ`). No configuration can tell them apart; binding `ا` would just make `b` open history. Their
-actions live on **`Ctrl+Shift+H`** (history), **`Ctrl+Shift+M`** (mark segment), **`Ctrl+Shift+S`**
-(submit), **`Ctrl+Shift+B`** (subtitle backdrop), **`Ctrl+Shift+U`** (SponsorBlock upvote) —
-Windows control codes, the **same physical combo in every layout**. `Ctrl+<letter>`, the function
-keys and `?` (twin `؟`) work in any layout; `Alt+<letter>` does not — the mouse menu carries
-those actions.
+`آ`); no configuration can tell them apart. But their **`Ctrl+Shift+` combos DO reach mpv under
+Arabic — as `Ctrl+<Arabic char>`** (`Ctrl+Shift+H` arrives as `Ctrl+أ`, measured), so the deployer
+twins those too: **`Ctrl+Shift+H`** (history), **`Ctrl+Shift+M`** (mark segment), **`Ctrl+Shift+S`**
+(submit), **`Ctrl+Shift+B`** (subtitle backdrop), **`Ctrl+Shift+U`** (SponsorBlock upvote) are the
+**same physical combos in every layout**. (`Ctrl+Shift+G` moved to `Ctrl+Shift+T`: under Arabic it
+would collide with history's `Ctrl+أ`.) Plain `Ctrl+<letter>` is a Windows control code and works
+in any layout, as do the function keys and `?` (twin `؟`); `Alt+<letter>` does not — the mouse
+menu carries those actions.
 
 | Key | Physical key | Action |
 | --- | --- | --- |

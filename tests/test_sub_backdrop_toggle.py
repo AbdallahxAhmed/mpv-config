@@ -168,20 +168,21 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
                 content,
             )
             # Rule 6 must never invent a script binding for other keys/CIFs:
-            # no sub-back-color cycle-values line may appear, and the only
-            # sub_backdrop line this fixture ends up with is the
-            # layout-independent backup (no b/ب and no Latin letter
-            # bindings exist here, so no twins are generated).
+            # no sub-back-color cycle-values line may appear; the sub_backdrop
+            # lines here are the backup combo and its generated Arabic twin
+            # Ctrl+آ (Ctrl+Shift+b under Arabic arrives as Ctrl+آ).
             self.assertNotIn("cycle-values sub-back-color", content)
             backdrops = [
                 line
                 for line in content.splitlines()
                 if "sub_backdrop" in line
             ]
+            self.assertTrue(backdrops)
             for line in backdrops:
-                self.assertEqual(
+                self.assertIn(
                     line.split(None, 2)[:2],
-                    ["Ctrl+Shift+b", "script-binding"],
+                    (["Ctrl+Shift+b", "script-binding"],
+                     ["Ctrl+آ", "script-binding"]),
                     "unexpected rewrite of unrelated binding: %r" % line,
                 )
 

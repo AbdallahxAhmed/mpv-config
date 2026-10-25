@@ -14,26 +14,32 @@ deployer regenerates the twin block on every install/update, so a binding
 added by hand later is covered after the next `mpv-config update`.
 
 Rules the generator follows:
-  - only bare printable keys and Shift+<printable> are twinned. Ctrl+/Alt+
-    combinations are layout independent on Windows (control codes) and
-    named keys (F1, RIGHT, ...) are not characters at all;
-  - a twin must be exactly one character and must not be reachable from
-    the US layout, otherwise binding it would change US-layout behaviour.
-    Arabic letters qualify; the few Arabic shift-layer results that are
-    plain ASCII (e.g. Shift+. produces ".") do NOT and are skipped with a
-    report - those actions need a hand-picked layout-independent backup
-    in the template (Ctrl+Shift+<letter>);
-  - the lam-alef glyphs (ل ا أ إ آ) are NEVER bound, singles or
-    sequences. Measured on the real key stream (user's --input-test
-    capture, 2026-10-25): a b keypress delivers ONLY "ا" to mpv - the ل
-    of every lam-alef pair never arrives - so "b" and "h" send the
-    IDENTICAL character (as do G/H via "أ" and B/N via "آ"). Binding ا
-    therefore makes the b key open history, and a ل-ا sequence twin can
-    never fire (its first key never comes). h g b G B keep their
-    Ctrl+Shift+ backups: control codes, the same physical combo in every
-    layout. NOTE for the future: simulating this with the `keypress`
-    command DOES deliver both characters - only the real Windows stream
-    drops the ل; do not "fix" this from headless tests.
+  - only bare printable keys, Shift+<printable> and Ctrl+Shift+<printable>
+    are twinned. Plain Ctrl+<letter> arrives as a layout-independent
+    control code on every layout (measured: Ctrl+c/v and Ctrl+4 work under
+    Arabic), so it needs no twin; named keys (F1, RIGHT, ...) are not
+    characters at all;
+  - a Ctrl+Shift+<key> combo does NOT become a control code under Arabic:
+    mpv receives Ctrl+<the shift-layer Arabic character> (measured on the
+    real stream: a user --input-test capture shows "Ctrl+أ" for
+    Ctrl+Shift+H). Those modified twins are emitted - Ctrl+Shift+h ->
+    Ctrl+أ, Ctrl+Shift+b -> Ctrl+آ (lam-alef pairs: only the LAST
+    character arrives, same as bare keys) - and combining marks are
+    allowed (mpv registers and dispatches them). ASCII halves are refused
+    so US behaviour never changes;
+  - a bare twin must be exactly one character, not reachable from the US
+    layout (otherwise the binding would change US behaviour), and not a
+    lam-alef glyph;
+  - the lam-alef glyphs (ل ا أ إ آ) are NEVER bound as plain keys.
+    Measured on the real key stream (user's --input-test capture,
+    2026-10-25): a b keypress delivers ONLY "ا" to mpv - the ل of every
+    lam-alef pair never arrives - so "b" and "h" send the IDENTICAL
+    character (as do G/H via "أ" and B/N via "آ"). Binding ا would make
+    the b key open history. h g b G B are covered by their Ctrl+Shift+
+    backups' modified twins instead. NOTE for the future: simulating keys
+    with the `keypress` command DOES deliver both characters - only the
+    real Windows stream drops the ل; do not "fix" this from headless
+    tests.
 
 Table provenance: probed on the target machine from the loaded Arabic
 layout (hkl 0x04010c01, layout id 00000401 = Arabic 101) with
@@ -130,17 +136,50 @@ def _validate(twin):
     return twin, ""
 
 
+def _validate_modified(char):
+    """Validation for the Arabic half of a Ctrl+<char> modified twin.
+
+    The lam-alef refusal does NOT apply here: a Ctrl+أ event can only come
+    from the Ctrl+Shift+H/G combos, and the generator binds exactly one of
+    the aliasing combos, so nothing misfires. ASCII stays refused (binding
+    it could fire on US keystrokes).
+    """
+    if len(char) != 1:
+        return None, "modified twin must be a single character"
+    if char in US_REACHABLE:
+        return None, (
+            "twin Ctrl+%r is typeable on the US layout - would change US "
+            "behaviour" % char)
+    return char, ""
+
+
 def _twin_for(key):
     """(twin, reason) for a binding key, or (None, reason) when untwinnable."""
-    if key.startswith("Shift+"):
-        body = key[len("Shift+"):]
+    if key.startswith("Ctrl+Shift+"):
+        # Under an Arabic layout the combo does NOT become a control code:
+        # mpv receives Ctrl+<the shift-layer Arabic character> (measured on
+        # the real stream - a user --input-test capture shows 'Ctrl+أ').
+        # For lam-alef pairs only the LAST character arrives, same as bare
+        # keys, so the twin binds on it.
+        body = key[len("Ctrl+Shift+"):]
         if len(body) != 1 or not body.isprintable():
             return None, "not a single printable key"
         shift_char = body.upper() if body.isalpha() else US_SHIFTED.get(body)
         if shift_char is None:
             return None, "no US shift character for this key"
-        twin = ARABIC_SHIFT.get(shift_char)
-    elif len(key) == 1 and key.isprintable():
+        arabic = ARABIC_SHIFT.get(shift_char)
+        if not arabic:
+            return None, "no Arabic twin for this combo"
+        char, reason = _validate_modified(arabic[-1])
+        if char is None:
+            return None, reason
+        return "Ctrl+" + char, ""
+    if key.startswith(("Ctrl+", "Alt+", "Win+", "Meta+")):
+        # plain Ctrl+<letter> arrives as a layout-independent control code
+        # on every layout (measured: Ctrl+c/v and Ctrl+4 work under Arabic);
+        # Alt+<letter> delivery is unverified - neither gets a twin.
+        return None, "control-code or unverified combo"
+    if len(key) == 1 and key.isprintable():
         if key in ARABIC_PLAIN:
             twin = ARABIC_PLAIN[key]
         else:
@@ -164,10 +203,13 @@ def _parse_binding(line):
 
 
 def _is_twinable(key):
-    """Bare printable keys and Shift+<printable> only."""
+    """Bare printable keys, Shift+<printable> and Ctrl+Shift+<printable>."""
     if key.startswith(("Ctrl+", "Alt+", "Win+", "Meta+")):
-        return False
-    body = key[len("Shift+"):] if key.startswith("Shift+") else key
+        if not key.startswith("Ctrl+Shift+"):
+            return False
+        body = key[len("Ctrl+Shift+"):]
+    else:
+        body = key[len("Shift+"):] if key.startswith("Shift+") else key
     return len(body) == 1 and body.isprintable()
 
 

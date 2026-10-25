@@ -35,23 +35,25 @@ _spec.loader.exec_module(layout_twins)
 MPV = r"C:\Program Files\mpv\mpv.exe"
 
 SOURCE_CONF = """c set user-data/t/latin yes
-h set user-data/t/h yes
-b set user-data/t/b yes
 ? set user-data/t/q yes
+Ctrl+Shift+h set user-data/t/combo yes
 """
 
 TWINS_TO_CHECK = [
     # (Arabic key EVENTS, flag that must be set)
     (["ؤ"], "latin"),
     (["؟"], "q"),
+    # Ctrl+Shift+H under Arabic arrives as Ctrl+أ (real-stream measured);
+    # headless keypress proves the binding registers and dispatches
+    (["Ctrl+أ"], "combo"),
 ]
-# h/b/g are NOT here on purpose: on the REAL Windows key stream b and h
-# deliver the identical character (user's --input-test capture,
+# h/b/g bare are NOT here on purpose: on the REAL Windows key stream b and
+# h deliver the identical character (user's --input-test capture,
 # 2026-10-25 - the ل of the lam-alef pair never reaches mpv), so no twin
 # can distinguish them. The `keypress` command DOES deliver both
 # characters, which once made a ل-ا sequence twin look correct in this
 # headless harness while never firing on real hardware. Do not
-# reintroduce lam-alef twins from headless evidence.
+# reintroduce lam-alef bare twins from headless evidence.
 
 
 @unittest.skipUnless(
