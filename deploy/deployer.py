@@ -1401,6 +1401,21 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             block += "%s   %s\n" % (key, cmd)
         updated_content = updated_content.rstrip() + "\n" + block
 
+    #    Cheat sheet: '?' gets the Arabic twin '؟' in the generated block
+    #    and F9 is the layout-independent fallback. Deployed files older
+    #    than the help overlay predate both bindings.
+    if not re.search(r"^[ \t]*\?[ \t]+", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\n\n# One-key cheat sheet - '?' twins to '؟' under Arabic; F9 always works\n"
+            + "? no-osd script-message-to help_overlay help\n"
+        )
+    if not re.search(r"^[ \t]*F9[ \t]+", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\nF9 no-osd script-message-to help_overlay help\n"
+        )
+
     # 5. Fix bindings mpv rejects on every version:
     #    a) CTRL+0 shader clear: change-list needs the empty-string value
     #       ('clr ""'); a bare 'clr' fails with
