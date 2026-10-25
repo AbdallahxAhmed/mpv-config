@@ -1401,6 +1401,19 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             block += "%s   %s\n" % (key, cmd)
         updated_content = updated_content.rstrip() + "\n" + block
 
+    #    mpv canonicalizes "Ctrl+Shift+b" and "Ctrl+B" to the SAME key
+    #    (shift is encoded as the uppercase letter), so the legacy
+    #    "Ctrl+B = downvote" duplicate would be silently shadowed by the
+    #    Ctrl+Shift+b backdrop backup. Downvote stays on Ctrl+b.
+    if re.search(r"^[ \t]*Ctrl\+Shift\+b[ \t]+script-binding sub_backdrop/toggle",
+                 updated_content, re.MULTILINE):
+        updated_content = re.sub(
+            r"^[ \t]*Ctrl\+B[ \t]+script-binding sponsorblock_downvote[^\r\n]*\r?\n?",
+            "",
+            updated_content,
+            flags=re.MULTILINE,
+        )
+
     #    Cheat sheet: '?' gets the Arabic twin '؟' in the generated block
     #    and F9 is the layout-independent fallback. Deployed files older
     #    than the help overlay predate both bindings.

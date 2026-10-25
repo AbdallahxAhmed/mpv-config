@@ -52,7 +52,7 @@
 # │ g           │  Mark segment start/end                          │
 # │ G           │  Submit segment to SponsorBlock API              │
 # │ B           │  Upvote segment (👍 = B for Block)               │
-# │ Ctrl+B      │  Downvote segment (👎)                           │
+# │ Ctrl+b      │  Downvote segment (👎)                           │
 # ├─────────────┼───────────────────────────────────────────────────┤
 # │             │  🌐 Every-layout combos (Arabic included)         │
 # │ Ctrl+Shift+ │  h = History · m = Mark segment · s = Submit     │
@@ -173,10 +173,11 @@ a        script-binding uosc/audio
 # History (memo) — h = History
 h    script-binding memo-history
 
-# SponsorBlock voting — B = Block (Upvote), Ctrl+B = Downvote
+# SponsorBlock voting — B = Block (Upvote), Ctrl+b = Downvote.
+# (No Ctrl+B line: mpv canonicalizes it to the same key as Ctrl+Shift+b,
+#  which the layout backups own — "Sub title backdrop".)
 B        script-binding sponsorblock_upvote
 Ctrl+b   script-binding sponsorblock_downvote
-Ctrl+B   script-binding sponsorblock_downvote
 
 # Subtitle sync (autosubsync) — n = syNc
 n    script-binding autosubsync-menu
