@@ -123,11 +123,15 @@ class TestInputConfConflictAudit(unittest.TestCase):
         )
 
     def test_no_bilingual_twins_remain(self):
-        """No Arabic twin bindings: the layout guard replaces them.
+        """The template's only Arabic-script keys are the documented bare
+        shift-layer route.
 
-        A twin only works while its layout is active, and the lam-alef
-        composites can never be bound safely. The guard puts mpv's window
-        on a latin layout instead, so the Latin keys cover everything.
+        Generated twins live in the DEPLOYED file, not the template. The
+        template carries exactly five Arabic keys on purpose: under Arabic
+        Shift+<letter> delivers the shift-layer character (measured:
+        Shift+H -> أ), which gives the five lam-alef actions a route
+        without Ctrl - أ/’/ٍ/آ/‘. Anything else Arabic-script in the
+        template is a regression (ا would alias b and h).
         """
         template = Path(__file__).resolve().parent.parent / "config" / "input.conf.template"
         content = template.read_text(encoding="utf-8")
@@ -136,13 +140,17 @@ class TestInputConfConflictAudit(unittest.TestCase):
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        twins = [k for k in active if any(ord(c) > 0x590 for c in k)]
-        self.assertEqual(twins, [], "the Arabic twins were replaced by the layout guard")
+        twins = sorted(k for k in active if any(ord(c) > 0x590 for c in k))
+        self.assertEqual(
+            twins,
+            sorted(["أ", "’", "ٍ", "آ", "‘"]),
+            "only the documented bare shift-layer keys belong in the template")
 
     def test_modified_arabic_combos_are_not_declared(self):
-        """Windows control codes make ctrl/alt/shift+Arabic-char unreachable."""
+        """Only the five documented Arabic-key bindings exist; no modified
+        Arabic junk (Ctrl+ؤ-era lines) is declared."""
         for banned in ("Ctrl+ؤ", "Ctrl+ر", "Ctrl+Shift+ر", "Shift+ل", "Ctrl+ﻻ"):
-            self.assertNotIn(banned, self.bindings, "%s can never fire (control codes)" % banned)
+            self.assertNotIn(banned, self.bindings, "%s must not be declared" % banned)
 
 
 class TestSmartSkipConflictAudit(unittest.TestCase):

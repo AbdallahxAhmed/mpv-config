@@ -1262,7 +1262,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertTrue(ok)
         # The lines stream as they appear (twice: echo + live lines are hard
         # to distinguish in a join, so assert the per-line prefix exists).
-        streamed = [l for l in joined.splitlines() if l.startswith("      streamed-line-")]
+        streamed = [line for line in joined.splitlines() if line.startswith("      streamed-line-")]
         self.assertEqual(len(streamed), 2)
         self.assertIn("  $ ", joined)
         self.assertIn("(finished in", joined)
@@ -1690,16 +1690,16 @@ class TestAuditPatches(unittest.TestCase):
         self.assertNotIn("keypress", controls[0])
 
     def test_input_conf_has_no_arabic_twin_bindings(self):
-        """The template stays Latin-only; the twins are generated at deploy.
+        """The template stays Latin-only except the bare shift-layer route.
 
         mpv matches a binding against the CHARACTER a key produces, so a
         twin binding only works while that layout is active. The deployer
         (src/mpv_config/layout_twins.py) appends the same-physical-key
-        Arabic twins to the DEPLOYED input.conf on every install/update -
-        the template itself only carries Latin lines plus the
-        layout-independent Ctrl+Shift+ backups (control codes: the same
-        combo in every layout) for the keys whose Arabic twin is
-        impossible (h g b G B emit lam-alef sequences).
+        Arabic twins to the DEPLOYED input.conf on every install/update.
+        The template itself carries Latin lines, the Ctrl+Shift+ backups,
+        and exactly five Arabic keys: the bare shift-layer route for the
+        lam-alef actions (under Arabic, Shift+H delivers أ etc. -
+        measured; no Ctrl needed).
         """
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         input_template = os.path.join(repo_root, "config", "input.conf.template")
@@ -1711,10 +1711,10 @@ class TestAuditPatches(unittest.TestCase):
             for line in content.splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        non_latin = [k for k in active_keys if any(ord(c) > 0x590 for c in k)]
+        non_latin = sorted(k for k in active_keys if any(ord(c) > 0x590 for c in k))
         self.assertEqual(
-            non_latin, [],
-            "the template carries only Latin bindings; twins are generated at deploy",
+            non_latin, sorted(["أ", "’", "ٍ", "آ", "‘"]),
+            "only the documented bare shift-layer keys belong in the template",
         )
 
         # the Latin bindings are still there

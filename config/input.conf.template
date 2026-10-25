@@ -211,6 +211,18 @@ Ctrl+Shift+s   script-binding sponsorblock_submit_segment
 Ctrl+Shift+b   script-binding sub_backdrop/toggle
 Ctrl+Shift+u   script-binding sponsorblock_upvote
 
+# Under Arabic, SHIFT+<letter> (no Ctrl!) delivers the shift-layer Arabic
+# character - and those are distinct for our five keys. These lines give
+# h m s b u a BARE-ish route (just hold Shift) in the Arabic layout; in
+# the English layout the same presses produce plain uppercase letters, so
+# nothing changes there. (Shift+G delivers the same أ as Shift+H - the
+# mark action lives on Shift+M / Ctrl+Shift+M.)
+أ   script-binding memo-history
+’   script-binding sponsorblock_set_segment
+ٍ   script-binding sponsorblock_submit_segment
+آ   script-binding sub_backdrop/toggle
+‘   script-binding sponsorblock_upvote
+
 # Explicit Latin bindings for SponsorBlock segment marking
 g        script-binding sponsorblock_set_segment
 G        script-binding sponsorblock_submit_segment

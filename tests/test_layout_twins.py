@@ -152,10 +152,12 @@ F9   ignored
         """Pin the actual deployed bindings: the safe single-key twins, the
         Arabic question mark, and the modified-combo twins (Ctrl+Shift+X
         arrives as Ctrl+<Arabic char> under Arabic); h/g/b/B/G bare are
-        reported as impossible (real-stream aliasing)."""
+        reported as impossible (real-stream aliasing). The template's own
+        bare shift-layer lines (أ آ ’ ‘ ٍ) are skipped by the generator."""
         path = os.path.join(REPO, "config", "input.conf.template")
         with open(path, "r", encoding="utf-8") as handle:
-            text, report = layout_twins.generate(handle.read())
+            base_text = handle.read()
+        text, report = layout_twins.generate(base_text)
         for twin, command in [
             ("ؤ", "script-binding uosc/subtitles"),
             ("ش", "script-binding uosc/audio"),
@@ -168,12 +170,27 @@ F9   ignored
             ("Ctrl+‘", "script-binding sponsorblock_upvote"),
         ]:
             self.assertIn("%s %s" % (twin, command), text)
-        # the lam-alef glyphs never appear as PLAIN active keys
-        for line in text.splitlines():
+        # the template's own bare shift-layer route is present and survives
+        # generation untouched
+        for glyph, command in [
+            ("أ", "script-binding memo-history"),
+            ("’", "script-binding sponsorblock_set_segment"),
+            ("ٍ", "script-binding sponsorblock_submit_segment"),
+            ("آ", "script-binding sub_backdrop/toggle"),
+            ("‘", "script-binding sponsorblock_upvote"),
+        ]:
+            self.assertRegex(base_text,
+                             r"(?m)^%s\s+%s$" % (glyph, re.escape(command)))
+            self.assertEqual(
+                len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)),
+                               text, re.MULTILINE)), 1)
+        # the GENERATED block never binds a lam-alef glyph plain
+        block = text[text.index(layout_twins.BEGIN_MARK):]
+        for line in block.splitlines():
             if line and not line.startswith("#"):
-                key = line.split(None, 1)[0]
-                self.assertNotIn(key, layout_twins.LAM_ALEF_REFUSED,
-                                 "bound a lam-alef glyph plain: %r" % line)
+                self.assertNotIn(line.split(None, 1)[0],
+                                 layout_twins.LAM_ALEF_REFUSED,
+                                 "generated a plain lam-alef twin: %r" % line)
         reported = {key for key, _ in report}
         # the five bare lam-alef keys, plus the paste-to-playlist combos
         # whose Arabic half is plain ASCII "{" (refused: US behaviour)
@@ -248,7 +265,8 @@ class MigrationTests(unittest.TestCase):
                 text, r"^%s[ \t]+.*%s" % (glyph, command))
         self.assertNotIn("Arabic Bilingual Twin Bindings", text)
         # the same-key twins are present, exactly once each, plus the
-        # modified-combo twins for the backup block's Ctrl+Shift+ lines
+        # modified-combo twins; the template's bare shift-layer lines
+        # (أ آ ’ ‘ ٍ) would be in deployed files too and survive
         for glyph, command in [
             ("ؤ", "script-binding uosc/subtitles"),
             ("ش", "script-binding uosc/audio"),
@@ -263,12 +281,12 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(
                 len(re.findall(r"^%s[ \t]+%s$" % (re.escape(glyph), re.escape(command)),
                                text, re.MULTILINE)), 1)
-        # the lam-alef glyphs stay unbound as PLAIN keys (b/h alias on the
-        # real stream); the modified Ctrl+آ twin above is deliberately OK
+        # the genuinely hazardous glyphs stay unbound: ا (b/h alias) and
+        # the dead ل/إ; أ آ ’ ‘ ٍ are legitimate (Shift+letter route)
         for line in text.splitlines():
             if line and not line.startswith("#"):
                 self.assertNotIn(line.split(None, 1)[0],
-                                 layout_twins.LAM_ALEF_REFUSED,
+                                 ("ا", "ل", "إ"),
                                  repr(line))
         # the Latin bindings survive untouched
         for latin in ("c", "a", "h", "n", "g", "G", "b"):

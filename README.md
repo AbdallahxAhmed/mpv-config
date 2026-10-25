@@ -183,12 +183,14 @@ hook process runs (the previous keyboard hook guard still ships but is disabled 
 Five keys cannot have a bare twin: **h g b G B**. Measured on the real key stream (an
 `--input-test` capture): pressing `b` delivers **only `ا`** to mpv — the `ل` of the lam-alef pair
 never arrives — so `b` and `h` send the *identical* character (`G`/`H` alias on `أ`, `B`/`N` on
-`آ`); no configuration can tell them apart. But their **`Ctrl+Shift+` combos DO reach mpv under
-Arabic — as `Ctrl+<Arabic char>`** (`Ctrl+Shift+H` arrives as `Ctrl+أ`, measured), so the deployer
-twins those too: **`Ctrl+Shift+H`** (history), **`Ctrl+Shift+M`** (mark segment), **`Ctrl+Shift+S`**
-(submit), **`Ctrl+Shift+B`** (subtitle backdrop), **`Ctrl+Shift+U`** (SponsorBlock upvote) are the
-**same physical combos in every layout**. (`Ctrl+Shift+G` moved to `Ctrl+Shift+T`: under Arabic it
-would collide with history's `Ctrl+أ`.) Plain `Ctrl+<letter>` is a Windows control code and works
+`آ`); no configuration can tell them apart. But two routes cover them with the **same physical keys**: plain **`Shift+H`** (history),
+**`Shift+M`** (mark), **`Shift+S`** (submit), **`Shift+B`** (backdrop), **`Shift+U`** (upvote) —
+under Arabic those deliver the distinct shift-layer characters `أ/’/ٍ/آ/‘`, which the config binds
+(no Ctrl at all; in English the same presses are plain uppercase letters, so nothing changes) —
+and the **`Ctrl+Shift+`** combos, which reach mpv under Arabic as `Ctrl+<Arabic char>`
+(`Ctrl+Shift+H` arrives as `Ctrl+أ`, measured) and are twinned the same way. (`Ctrl+Shift+G` moved to `Ctrl+Shift+T`: under Arabic it
+would collide with history's `Ctrl+أ`; likewise Shift+G delivers أ with Shift+H — mark lives on
+Shift+M.) Plain `Ctrl+<letter>` is a Windows control code and works
 in any layout, as do the function keys and `?` (twin `؟`); `Alt+<letter>` does not — the mouse
 menu carries those actions.
 
@@ -198,11 +200,11 @@ menu carries those actions.
 | `ش` | A | Audio tracks & dubs menu (twin of `a`) |
 | `ى` | N | Subtitle sync menu (twin of `n`) |
 | `؟` | `?` | Cheat sheet (twin of `?`) |
-| `Ctrl+Shift+h` | H | Watch history (memo) |
-| `Ctrl+Shift+m` | M | Mark SponsorBlock segment |
-| `Ctrl+Shift+s` | S | Submit SponsorBlock segment |
-| `Ctrl+Shift+b` | B | Subtitle backdrop toggle |
-| `Ctrl+Shift+u` | U | SponsorBlock upvote |
+| `Shift+h` / `Ctrl+Shift+h` | H | Watch history (memo) |
+| `Shift+m` / `Ctrl+Shift+m` | M | Mark SponsorBlock segment |
+| `Shift+s` / `Ctrl+Shift+s` | S | Submit SponsorBlock segment |
+| `Shift+b` / `Ctrl+Shift+b` | B | Subtitle backdrop toggle |
+| `Shift+u` / `Ctrl+Shift+u` | U | SponsorBlock upvote |
 | `ز` | `.` | Toggle auto-skip (same as `Ctrl+.`) |
 | `د` | `.` | Toggle category auto-skip (same as `Alt+.`) |
 | `غ` | Y | Confirm auto-skip countdown |

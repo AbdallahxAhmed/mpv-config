@@ -1323,16 +1323,16 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     # 4. Arabic twin hygiene (layout-probed).
     #    Ground truth from the real key stream (user --input-test captures,
     #    2026-10-25): the physical b key emits only the second glyph of the
-    #    lam-alef sequence (U+0627 "ا"), and shifted T/G/B emit إ/أ/آ - so
-    #    any PLAIN binding on a component glyph (ل ا آ أ إ) fires while the
-    #    user types those keys (that was the "b pops SponsorBlock" bug).
-    #    MODIFIED combos are different and DO reach mpv: Ctrl+Shift+H under
-    #    Arabic arrives as "Ctrl+أ" (measured - falsifies the old claim
-    #    that Windows control codes make every modified Arabic binding
-    #    unreachable), so the generator emits modified twins and this
-    #    cleanup must keep them. The old era's specific junk modified lines
-    #    (duplicates of Latin bindings) are removed by exact pattern, and
-    #    presentation forms (U+FExx) are never emitted and stay deleted.
+    #    lam-alef sequence, so PLAIN "ا" fires on BOTH b and h (aliased) -
+    #    the one genuinely hazardous plain glyph, deleted. Plain ل إ never
+    #    fire usefully (ل is dropped by the key stream entirely) - deleted
+    #    as dead weight, as are presentation forms (U+FExx). The remaining
+    #    shift-layer glyphs (أ آ ’ ‘ ٍ ...) are legitimate binding keys:
+    #    they arrive from Shift+<letter> presses and the template binds
+    #    several of them deliberately - user bindings on them are kept.
+    #    MODIFIED combos reach mpv as "Ctrl+أ" etc. (measured - falsifies
+    #    the old control-code claim), and the era's specific junk modified
+    #    lines are removed by exact pattern.
     legacy_junk = (
         r"^[ \t]*Ctrl\+ؤ[ \t]+[^\r\n]*\r?\n?",
         r"^[ \t]*Ctrl\+ر[ \t]+[^\r\n]*\r?\n?",
@@ -1344,7 +1344,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     )
     for pattern in legacy_junk:
         updated_content = re.sub(pattern, "", updated_content, flags=re.MULTILINE)
-    plain_hazard = re.compile(r"^[\u0627\u0622\u0623\u0625\u0644]$")
+    plain_hazard = re.compile(r"^[\u0644\u0627\u0625]$")  # ل ا إ only
     presentation = re.compile(r"[\uFE70-\uFEFF]")
     kept_lines = []
     for line in updated_content.splitlines():
@@ -1406,6 +1406,34 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             "# every layout and cover the actions.\n"
         )
         for key, cmd in missing_backups:
+            block += "%s   %s\n" % (key, cmd)
+        updated_content = updated_content.rstrip() + "\n" + block
+
+    #    Bare shift-layer route for the same five actions: under Arabic,
+    #    Shift+<letter> delivers the shift-layer character with NO Ctrl
+    #    needed (measured: Shift+H -> أ). Distinct per action except
+    #    Shift+G (delivers أ like Shift+H; mark lives on Shift+M). In the
+    #    English layout those presses produce uppercase letters - nothing
+    #    changes there.
+    shift_route = (
+        ("أ", "script-binding memo-history"),
+        ("’", "script-binding sponsorblock_set_segment"),
+        ("ٍ", "script-binding sponsorblock_submit_segment"),
+        ("آ", "script-binding sub_backdrop/toggle"),
+        ("‘", "script-binding sponsorblock_upvote"),
+    )
+    missing_shift = [
+        (key, cmd) for key, cmd in shift_route
+        if not re.search(r"^[ \t]*%s[ \t]+" % re.escape(key),
+                         updated_content, re.MULTILINE)
+    ]
+    if missing_shift:
+        block = (
+            "\n# ─── Bare shift-layer route (Arabic layout, no Ctrl) ───\n"
+            "# Shift+H/M/S/B/U under Arabic deliver these characters; in the\n"
+            "# English layout the same presses are plain uppercase letters.\n"
+        )
+        for key, cmd in missing_shift:
             block += "%s   %s\n" % (key, cmd)
         updated_content = updated_content.rstrip() + "\n" + block
 

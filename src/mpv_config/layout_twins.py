@@ -30,16 +30,17 @@ Rules the generator follows:
   - a bare twin must be exactly one character, not reachable from the US
     layout (otherwise the binding would change US behaviour), and not a
     lam-alef glyph;
-  - the lam-alef glyphs (ل ا أ إ آ) are NEVER bound as plain keys.
+  - the lam-alef glyphs (ل ا أ إ آ) are never GENERATED as plain twins.
     Measured on the real key stream (user's --input-test capture,
     2026-10-25): a b keypress delivers ONLY "ا" to mpv - the ل of every
     lam-alef pair never arrives - so "b" and "h" send the IDENTICAL
-    character (as do G/H via "أ" and B/N via "آ"). Binding ا would make
-    the b key open history. h g b G B are covered by their Ctrl+Shift+
-    backups' modified twins instead. NOTE for the future: simulating keys
-    with the `keypress` command DOES deliver both characters - only the
-    real Windows stream drops the ل; do not "fix" this from headless
-    tests.
+    character; binding ا would make the b key open history. The template
+    covers those five keys through the Ctrl+Shift+ combos (whose Arabic
+    delivery form the generator twins) and through its own bare
+    shift-layer lines (أ آ ’ ‘ ٍ - written in the template, skipped by
+    the generator). NOTE for the future: simulating keys with the
+    `keypress` command DOES deliver both characters - only the real
+    Windows stream drops the ل; do not "fix" this from headless tests.
 
 Table provenance: probed on the target machine from the loaded Arabic
 layout (hkl 0x04010c01, layout id 00000401 = Arabic 101) with
@@ -203,7 +204,14 @@ def _parse_binding(line):
 
 
 def _is_twinable(key):
-    """Bare printable keys, Shift+<printable> and Ctrl+Shift+<printable>."""
+    """Bare printable keys, Shift+<printable> and Ctrl+Shift+<printable>.
+
+    Keys that are already Arabic-script characters (the template's own
+    Arabic-shift lines like "أ") are skipped: they ARE the twins, there is
+    nothing to generate for them.
+    """
+    if any(ord(c) > 0x590 for c in key):
+        return False
     if key.startswith(("Ctrl+", "Alt+", "Win+", "Meta+")):
         if not key.startswith("Ctrl+Shift+"):
             return False

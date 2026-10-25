@@ -25,22 +25,25 @@ class TestSubBackdropToggle(unittest.TestCase):
         cls.verifier = (ROOT / "deploy" / "verifier.py").read_text(encoding="utf-8")
 
     def test_en_binding_is_present_and_no_twin_remains(self):
-        """The Latin binding stays; the Arabic twin is gone.
+        """The Latin binding stays; the only Arabic key is the documented
+        bare shift-layer one (آ - Shift+B under Arabic).
 
         mpv matches the CHARACTER a key produces, so a twin only works
-        while that layout is active. The keyboard-layout guard keeps
-        mpv's window on a latin layout instead, which covers every key.
+        while that layout is active. The bare shift-layer lines give the
+        lam-alef actions a no-Ctrl route under Arabic (measured:
+        Shift+B delivers آ); anything else Arabic-script is a regression.
         """
         template = self.template
         self.assertRegex(template, r"(?m)^b\s+script-binding sub_backdrop/toggle\s*$")
-        # no ACTIVE binding may use a non-latin key (the comments may still
-        # mention the Arabic layout)
+        self.assertRegex(template, r"(?m)^آ\s+script-binding sub_backdrop/toggle\s*$")
         active = [
             line.split(None, 1)[0]
             for line in template.splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
-        self.assertEqual([k for k in active if any(ord(c) > 0x590 for c in k)], [])
+        self.assertEqual(
+            sorted(k for k in active if any(ord(c) > 0x590 for c in k)),
+            sorted(["أ", "’", "ٍ", "آ", "‘"]))
 
     def test_uppercase_sponsorblock_B_binding_untouched(self):
         self.assertIn("B        script-binding sponsorblock_upvote", self.template)
@@ -182,7 +185,8 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
                 self.assertIn(
                     line.split(None, 2)[:2],
                     (["Ctrl+Shift+b", "script-binding"],
-                     ["Ctrl+آ", "script-binding"]),
+                     ["Ctrl+آ", "script-binding"],
+                     ["آ", "script-binding"]),
                     "unexpected rewrite of unrelated binding: %r" % line,
                 )
 
