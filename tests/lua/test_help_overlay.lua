@@ -64,7 +64,7 @@ test('the cheat sheet lists the sections a user needs', function()
     for _, needle in ipairs({ "PLAYBACK", "VIDEO", "SUBTITLES", "MOUSE", "LAYOUT" }) do
         assert(text:find(needle, 1, true), "missing section: " .. needle)
     end
-    for _, needle in ipairs({ "Ctrl+1..Ctrl+6", "Ctrl+g", "cycle", "guard" }) do
+    for _, needle in ipairs({ "Ctrl+1..Ctrl+6", "Ctrl+g", "cycle", "Ctrl+Shift+" }) do
         assert(text:find(needle, 1, true), "missing entry: " .. needle)
     end
 end)

@@ -25,9 +25,9 @@ found during that audit.
 
 import os
 import re
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 INPUT_TEMPLATE = os.path.join(REPO_ROOT, "config", "input.conf.template")
@@ -251,14 +251,18 @@ class TestArabicKeyMigrations(unittest.TestCase):
             for banned in ("Ctrl+ؤ", "Ctrl+ر", "Ctrl+Shift+ر", "Shift+ل", "Ctrl+ﻻ"):
                 self.assertNotIn(banned, bindings, "%s survived migration" % banned)
 
-            # Safe twins exist with their known commands (the legacy fixture
-            # carries no Latin lines to compare against).
-            self.assertEqual(bindings.get("ب"), "script-binding sub_backdrop/toggle")
-            self.assertEqual(bindings.get("ح"), "script-binding memo-history")
-            self.assertEqual(bindings.get("ت"), "script-binding sponsorblock_set_segment")
-            self.assertEqual(bindings.get("م"), "script-binding sponsorblock_submit_segment")
+            # The mnemonic twins (actions on OTHER physical keys) are NOT
+            # force-appended anymore: the same-physical-key twins are
+            # generated from the file's own Latin bindings, and this legacy
+            # fixture carries none (b/ؤ/ش/ب survive as pre-existing lines).
+            self.assertIsNone(bindings.get("ح"), "mnemonic twin ح must not be appended")
+            self.assertIsNone(bindings.get("ت"), "mnemonic twin ت must not be appended")
+            self.assertIsNone(bindings.get("م"), "mnemonic twin م must not be appended")
             self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
             self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")
+            # b's untwinnable action gets the layout-independent backup
+            self.assertEqual(
+                bindings.get("Ctrl+Shift+b"), "script-binding sub_backdrop/toggle")
 
             # Each safe twin appears at most once — pre-existing twins must
             # not be duplicated by the ensure-twins append.

@@ -53,6 +53,11 @@
 # │ G           │  Submit segment to SponsorBlock API              │
 # │ B           │  Upvote segment (👍 = B for Block)               │
 # │ Ctrl+B      │  Downvote segment (👎)                           │
+# ├─────────────┼───────────────────────────────────────────────────┤
+# │             │  🌐 Every-layout combos (Arabic included)         │
+# │ Ctrl+Shift+ │  h = History · m = Mark segment · s = Submit     │
+# │   h m s b u │  b = Backdrop · u = Upvote — the same physical   │
+# │             │  combo works in every keyboard layout             │
 # └─────────────┴───────────────────────────────────────────────────┘
 
 # **----- اختصارات تبديل مؤثرات Anime4K -----**
@@ -180,17 +185,25 @@ n    script-binding autosubsync-menu
 # OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua
 b    script-binding sub_backdrop/toggle
 
-# ─── Keyboard layout ───────────────────────────────────────────────
-# mpv matches a binding against the CHARACTER a key produces, so with
-# an Arabic (or any non-latin) layout active the letter bindings never
-# fire. The keys above therefore assume a latin layout.
+# ─── Keyboard layout (Arabic 101 twins) ────────────────────────────
+# mpv matches a binding against the CHARACTER a key produces ("mpv uses
+# input translated by the current OS keyboard layout, rather than
+# physical scan codes" - the manual), so letter bindings die under an
+# Arabic layout. At deploy time mpv-config regenerates a twin block at
+# the END of this file: for every printable binding, the character the
+# SAME physical key produces on Arabic 101 (c -> ؤ, a -> ش, n -> ى,
+# ? -> ؟, ...). Write only Latin lines here; the twins are automatic.
 #
-# scripts/keyboard_layout.lua takes care of that: while mpv is focused
-# it translates the printable keys to the character the same physical
-# key has on a US layout (script-opts/keyboard_layout.conf, enabled by
-# default). The system layout, the taskbar indicator and every other
-# application are left alone, and Ctrl+<letter>, the function keys and
-# punctuation are layout independent anyway.
+# Five keys CANNOT have a same-key twin: h g b G B - under Arabic they
+# emit lam-alef sequences (b sends "لا" as TWO key events, so binding ل
+# or ا would fire spuriously on b). Their actions get the control-code
+# backups below instead - Ctrl+Shift+<letter> is the SAME physical combo
+# in every layout:
+Ctrl+Shift+h   script-binding memo-history
+Ctrl+Shift+m   script-binding sponsorblock_set_segment
+Ctrl+Shift+s   script-binding sponsorblock_submit_segment
+Ctrl+Shift+b   script-binding sub_backdrop/toggle
+Ctrl+Shift+u   script-binding sponsorblock_upvote
 
 # Explicit Latin bindings for SponsorBlock segment marking
 g        script-binding sponsorblock_set_segment

@@ -1,15 +1,18 @@
-# keyboard_layout.conf - make mpv's letter keys work under any layout.
+# keyboard_layout.conf - the optional keyboard-layout guard hook.
 #
-# mpv matches a key binding against the CHARACTER a key produces, so with
-# an Arabic (or any non-latin) layout active the letter bindings never
-# fire. The guard translates the printable keys while mpv is focused and
-# leaves the system layout, the taskbar indicator and every other
-# application exactly as they were.
+# DISABLED BY DEFAULT: the Arabic layout twins in input.conf (regenerated
+# by every mpv-config install/update, see src/mpv_config/layout_twins.py)
+# cover the same problem with pure config - no hook process, no orphaned
+# python.exe after mpv exits.
 #
-# enabled=no  -> do not start the guard
+# Set enabled=yes to bring the hook back: while mpv is focused it
+# translates printable keys to their US-layout characters, whatever the
+# active layout is. Useful only for non-Latin layouts beyond Arabic 101.
+#
+# enabled=no  -> do not start the guard (default)
 # command=... -> the command line (the installer writes it with the right
 #                python path)
 # log=...     -> where to write what was translated (empty = the config dir)
-enabled=yes
+enabled=no
 command=
 log=

@@ -25,7 +25,7 @@
 Recent work now on `main` (unreleased in the changelog):
 
 - **Playback display-sync fixes** — `tscale=linear` + `video-timing-offset=0.01` for jitter-free `display-resample` at fixed 144 Hz, and a KDE-Wayland-only refresh-rate stabilization profile.
-- **Conflict-free Arabic (AZERTY 102) keybindings** — probed against the real keyboard layout and audited for conflicts (`tests/test_keybinding_conflicts.py`).
+- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`), plus layout-independent `Ctrl+Shift+` backups for the lam-alef keys; the keyboard hook guard is retired to an opt-in.
 - **Hardened management commands** — `rollback` restores only this config's own `mpv.backup.*` folders; `uninstall` can cleanly purge the config, backups, managed dependencies and the install directory.
 - **Robust installers** — `install` / `verify` wired to the real deployer; the shell bootstrap works on PEP 668 systems (Ubuntu 24.04) via a private venv.
 - **Security hygiene** — no key material or personal paths tracked; enforced by `tests/test_repo_hygiene.py`.
@@ -45,7 +45,7 @@ Recent work now on `main` (unreleased in the changelog):
   `B`, `B+B`, `C`, `C+A`); `Ctrl+1`..`Ctrl+6` and `Ctrl+g` change it inside the player and the choice
   is remembered in `script-opts/anime4k.conf`.
 - **A one-key cheat sheet** (`?` or `F9`) listing the keys and the mouse actions, including the Arabic
-  layout twins.
+  layout twins and every-layout combos.
 - **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), applied by the auto-detected `[anime]` profile
   (Anime4K + 2-pass deband) or by the light `[live-action]` one.
 - **gpu-next (libplacebo)** renderer with platform auto-detection: `d3d11` + `d3d11va` zero-copy on Windows (measured 1.4 ms/frame vs 5.3 ms for `nvdec-copy`), Vulkan + `auto-safe` on Linux, VideoToolbox on macOS.
@@ -84,7 +84,7 @@ Recent work now on `main` (unreleased in the changelog):
 - **Clean uninstall** — with optional `--purge-config`, `--remove-backups`, `--remove-deps`, `--remove-install-dir`.
 
 ### 🌍 Arabic layout support
-- Bilingual twin keybindings for the Arabic 102 AZERTY layout, probed from the deployed keyboard layout and audited so no binding can misfire from lam-alef composites (see the keybinding tables below).
+- Same-physical-key twin keybindings for the Arabic 101 layout, generated at deploy time from your own `input.conf` and audited so no twin can misfire from lam-alef sequences (see the keybinding tables below).
 
 ---
 
@@ -167,30 +167,37 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 
 > Everything above also has a mouse equivalent in the uosc toolbar — see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
 
-### Arabic keyboard twins (AZERTY 102)
+### Arabic keyboard twins (same physical key)
 
-mpv matches a binding against the **character** a key produces, so with an Arabic (or any
-non-latin) layout active the letter bindings never fire. `scripts/keyboard_layout.lua` fixes that
-without touching your keyboard layout: while mpv is the focused window it swallows the printable
-keys and injects the character the **same physical key** has on a US layout
-(`script-opts/keyboard_layout.conf`, enabled by default). The system layout, the taskbar indicator
-and every other application keep working exactly as they were, and what it translated is written to
-`%APPDATA%/mpv/keyboard_layout.log`. `Ctrl+<letter>`, the function keys and punctuation are layout
-independent anyway (Windows turns `Ctrl+letter` into a control code), so `Ctrl+1`..`Ctrl+6`
-(Anime4K modes), `Ctrl+g` (cycle), `?`/`F9` (cheat sheet) work in any layout. `Alt+<letter>` is
-*not* layout independent - the mouse menu carries those actions.
+mpv matches a binding against the **character** a key produces ("mpv uses input translated by the
+current OS keyboard layout, rather than physical scan codes"), so with an Arabic layout active the
+Latin letter bindings never fire. The fix is pure config: on every install/update the deployer
+appends a generated twin block to the **deployed** `input.conf` — for each printable Latin binding,
+an extra binding on the character the **same physical key** produces on Arabic 101 (probed from the
+real layout with `ToUnicodeEx`, cross-checked against xkeyboard-config). Your template and your own
+lines stay Latin-only; the twins regenerate themselves, so nothing is maintained by hand, and no
+hook process runs (the previous keyboard hook guard still ships but is disabled by default in
+`script-opts/keyboard_layout.conf` — set `enabled=yes` to bring it back for layouts beyond Arabic
+101).
 
-Ground truth probed from the deployed layout (`00000C01`): `b→لا`, `f→ب`, `j→ت`, `l→م`, `p→ح`, `a→ش`, `c→ؤ`, `n→ى`, `y→غ`, `x→ء`, `r→ق`, `;→ك`. mpv can only bind single codepoints, so the lam-alef composite `لا` can never be bound — those characters are deliberately left unbound, and every twin lives on a safe letter:
+Five keys cannot have a same-key twin: **h g b G B** — under Arabic they emit lam-alef sequences
+(`b` sends `لا` as *two* key events, so binding `ل` or `ا` would fire spuriously on `b`). Their
+actions get layout-independent backups instead: `Ctrl+Shift+<letter>` reaches mpv as a Windows
+control code, i.e. the **same physical combo in every layout**. `Ctrl+<letter>`, the function keys
+and `?` (twin `؟`) likewise work in any layout; `Alt+<letter>` does not — the mouse menu carries
+those actions.
 
 | Key | Physical key | Action |
 | --- | --- | --- |
-| `ؤ` | C | Subtitles menu |
-| `ش` | A | Audio tracks & dubs menu |
-| `ح` | P | Watch history (memo) |
-| `ى` | N | Subtitle sync menu |
-| `ب` | F | Subtitle backdrop toggle |
-| `ت` | J | Mark SponsorBlock segment |
-| `م` | L | Submit SponsorBlock segment |
+| `ؤ` | C | Subtitles menu (twin of `c`) |
+| `ش` | A | Audio tracks & dubs menu (twin of `a`) |
+| `ى` | N | Subtitle sync menu (twin of `n`) |
+| `؟` | `?` | Cheat sheet (twin of `?`) |
+| `Ctrl+Shift+h` | H | Watch history (memo) |
+| `Ctrl+Shift+m` | M | Mark SponsorBlock segment |
+| `Ctrl+Shift+s` | S | Submit SponsorBlock segment |
+| `Ctrl+Shift+b` | B | Subtitle backdrop toggle |
+| `Ctrl+Shift+u` | U | SponsorBlock upvote |
 | `ز` | `.` | Toggle auto-skip (same as `Ctrl+.`) |
 | `د` | `.` | Toggle category auto-skip (same as `Alt+.`) |
 | `غ` | Y | Confirm auto-skip countdown |

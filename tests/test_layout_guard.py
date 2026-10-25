@@ -153,6 +153,11 @@ class LayoutGuardTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL, creationflags=0x08000000)
             time.sleep(1.5)
             guard.terminate()
+            try:
+                guard.wait(timeout=5)
+            except subprocess.TimeoutExpired:  # pragma: no cover
+                guard.kill()
+                guard.wait(timeout=5)
             self.assertTrue(log_path.exists(), "the guard wrote no log")
             self.assertIn("guard started", log_path.read_text(encoding="utf-8"))
 

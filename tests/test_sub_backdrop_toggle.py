@@ -1,5 +1,5 @@
-import re
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -168,9 +168,10 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
                 content,
             )
             # Rule 6 must never invent a script binding for other keys/CIFs:
-            # no sub-back-color cycle-values line may appear, and the ensure-
-            # twins append may only add the documented sub_backdrop twin
-            # (this fixture has no b/ب at all).
+            # no sub-back-color cycle-values line may appear, and the only
+            # sub_backdrop line this fixture ends up with is the
+            # layout-independent backup (no b/ب and no Latin letter
+            # bindings exist here, so no twins are generated).
             self.assertNotIn("cycle-values sub-back-color", content)
             backdrops = [
                 line
@@ -180,7 +181,7 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
             for line in backdrops:
                 self.assertEqual(
                     line.split(None, 2)[:2],
-                    ["ب", "script-binding"],
+                    ["Ctrl+Shift+b", "script-binding"],
                     "unexpected rewrite of unrelated binding: %r" % line,
                 )
 

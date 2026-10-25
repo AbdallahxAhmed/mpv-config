@@ -4,9 +4,10 @@
 -- and says nothing about the mouse-first parts of this configuration. This
 -- shows the curated list instead, grouped by what you actually do.
 --
--- The list also spells out the Arabic twins: on the Arabic 102 AZERTY
--- layout mpv sees the Arabic character a key produces, so the Latin letter
--- bindings only work through their twin.
+-- The list also spells out the Arabic layout story: mpv sees the character
+-- a key produces, so the deployer-generated same-key twins (c a n ? ...) and
+-- the layout-independent Ctrl+Shift+ backups (h g b G B actions) are the
+-- keys that work in both layouts.
 
 local msg = require 'mp.msg'
 
@@ -59,7 +60,8 @@ local SECTIONS = {
     {
         title = "KEYBOARD LAYOUT",
         rows = {
-            { "mpv's window", "runs on a latin layout (the guard keeps it there)" },
+            { "c a n ? , Ctrl+Shift+h/m/s/b/u", "same physical key or combo in the Arabic layout too" },
+            { "h g b G B", "Arabic emits lam-alef sequences - use Ctrl+Shift+h/m/s/b/u" },
             { "Ctrl+<letter>", "always the Latin key (Windows control codes)" },
             { "F-keys, ? , space", "layout independent" },
             { "Alt+<letter>", "layout dependent - use the mouse menu" },

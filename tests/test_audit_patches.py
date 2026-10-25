@@ -187,8 +187,8 @@ class TestAuditPatches(unittest.TestCase):
     def test_migrate_mpv_conf_legacy_intel_removes_vk_gpu_context(self):
         """Existing machines: the gpu-api=opengl repair must also drop a stale
         vk gpu-context line, which is uninitializable after the opengl force."""
-        from deploy.detector import Environment
         from deploy.deployer import _migrate_mpv_conf
+        from deploy.detector import Environment
 
         env = Environment(
             os="linux", platform_key="arch", distro="arch",
@@ -397,8 +397,8 @@ class TestAuditPatches(unittest.TestCase):
 
     def test_migrate_mpv_conf_forces_opengl_on_legacy_intel(self):
         """Haswell-era Intel: patched gpu-api=vulkan renders magenta → opengl."""
-        from deploy.detector import Environment
         from deploy.deployer import _migrate_mpv_conf
+        from deploy.detector import Environment
 
         env = Environment(
             os="linux", platform_key="ubuntu", gpu_vendor="intel", legacy_vulkan_gpu=True
@@ -543,8 +543,8 @@ class TestAuditPatches(unittest.TestCase):
                 self.assertIn("[vcodec!=vp9]", f.read())
 
     def test_patched_mpv_conf_forces_opengl_on_legacy_intel(self):
-        from deploy.detector import Environment
         from deploy.deployer import _patch_mpv_conf
+        from deploy.detector import Environment
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         template = os.path.join(repo_root, "config", "mpv.conf.template")
@@ -676,8 +676,8 @@ class TestAuditPatches(unittest.TestCase):
 
     def test_patched_native_nvdec_requires_libcuda_and_pure_nvidia(self):
         """nvdec forcing only on pure-NVIDIA Linux with a CUDA runtime present."""
-        from deploy.detector import Environment
         from deploy.deployer import _patch_mpv_conf
+        from deploy.detector import Environment
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         template = os.path.join(repo_root, "config", "mpv.conf.template")
@@ -1690,13 +1690,16 @@ class TestAuditPatches(unittest.TestCase):
         self.assertNotIn("keypress", controls[0])
 
     def test_input_conf_has_no_arabic_twin_bindings(self):
-        """The layout guard owns the keyboard layout, so no twin bindings.
+        """The template stays Latin-only; the twins are generated at deploy.
 
         mpv matches a binding against the CHARACTER a key produces, so a
-        twin binding only works while that layout is active. The guard
-        (scripts/keyboard_layout.lua) puts mpv's own window on a latin
-        layout instead, which covers every key at once - so the twins are
-        gone, and the Latin bindings below are the only ones needed.
+        twin binding only works while that layout is active. The deployer
+        (src/mpv_config/layout_twins.py) appends the same-physical-key
+        Arabic twins to the DEPLOYED input.conf on every install/update -
+        the template itself only carries Latin lines plus the
+        layout-independent Ctrl+Shift+ backups (control codes: the same
+        combo in every layout) for the keys whose Arabic twin is
+        impossible (h g b G B emit lam-alef sequences).
         """
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         input_template = os.path.join(repo_root, "config", "input.conf.template")
@@ -1711,7 +1714,7 @@ class TestAuditPatches(unittest.TestCase):
         non_latin = [k for k in active_keys if any(ord(c) > 0x590 for c in k)]
         self.assertEqual(
             non_latin, [],
-            "no twin bindings: the keyboard-layout guard owns the layout",
+            "the template carries only Latin bindings; twins are generated at deploy",
         )
 
         # the Latin bindings are still there
@@ -1728,17 +1731,28 @@ class TestAuditPatches(unittest.TestCase):
                 "the Latin binding for %s is missing" % key,
             )
 
-        # and the guard is wired up
-        self.assertIn("keyboard_layout", content)
-        guard = os.path.join(repo_root, "scripts", "keyboard_layout.lua")
-        self.assertTrue(os.path.isfile(guard))
+        # and the twins section with the layout-independent backups is wired up
+        self.assertIn("Keyboard layout (Arabic 101 twins)", content)
+        for combo in ("Ctrl+Shift+h", "Ctrl+Shift+m", "Ctrl+Shift+s",
+                      "Ctrl+Shift+b", "Ctrl+Shift+u"):
+            self.assertRegex(
+                content, r"(?m)^%s\s" % re.escape(combo),
+                "layout-independent backup %s is missing" % combo)
 
     def test_migrate_input_conf_appends_arabic_twins(self):
         from deploy.deployer import _migrate_input_conf
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
-            old_content = "SPACE cycle pause\nCtrl+v script-binding smart_paste/paste-to-open\n"
+            old_content = (
+                "SPACE cycle pause\n"
+                "Ctrl+v script-binding smart_paste/paste-to-open\n"
+                "c script-binding uosc/subtitles\n"
+                "a script-binding uosc/audio\n"
+                "h script-binding memo-history\n"
+                "n script-binding autosubsync-menu\n"
+                "? no-osd script-message-to help_overlay help\n"
+            )
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
 
@@ -1748,16 +1762,29 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 new_content = f.read()
 
-            self.assertIn("ح        script-binding memo-history", new_content)
-            self.assertIn("ؤ        script-binding uosc/subtitles", new_content)
-            self.assertIn("ش        script-binding uosc/audio", new_content)
-            self.assertIn("ت        script-binding sponsorblock_set_segment", new_content)
-            self.assertIn("م        script-binding sponsorblock_submit_segment", new_content)
-            self.assertIn("ى        script-binding autosubsync-menu", new_content)
-            self.assertNotIn("ا        script-binding", new_content)
-            self.assertNotIn("ل        script-binding", new_content)
-            self.assertNotIn("إ        script-binding", new_content)
+            # same-physical-key twins for the safe letters
+            self.assertRegex(
+                new_content, r"(?m)^ؤ\s+script-binding uosc/subtitles$")
+            self.assertRegex(
+                new_content, r"(?m)^ش\s+script-binding uosc/audio$")
+            self.assertRegex(
+                new_content, r"(?m)^ى\s+script-binding autosubsync-menu$")
+            self.assertRegex(
+                new_content, r"(?m)^؟\s+no-osd script-message-to help_overlay help$")
+            # the Latin originals survive
+            self.assertIn("c script-binding uosc/subtitles", new_content)
+            self.assertIn("h script-binding memo-history", new_content)
+            # lam-alef components and multi-character keys stay unbound...
+            self.assertNotRegex(new_content, r"(?m)^ا\s+script-binding")
+            self.assertNotRegex(new_content, r"(?m)^ل\s+script-binding")
+            self.assertNotRegex(new_content, r"(?m)^إ\s+script-binding")
             self.assertNotIn("ﻻ", new_content)
+            # ...their actions get the layout-independent backups instead
+            self.assertRegex(
+                new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
+            # and the old mnemonic twins (other physical keys) stay gone
+            self.assertNotRegex(new_content, r"(?m)^ح\s+script-binding")
+            self.assertNotRegex(new_content, r"(?m)^ت\s+script-binding")
             self.assertNotIn("Ctrl+ر", new_content)
 
     def test_vendored_scripts_exist_and_patched(self):
