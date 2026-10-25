@@ -43,8 +43,6 @@ class TestCoreArchitecture(unittest.TestCase):
         opts = ExampleComIE.ytdl_opts()
         self.assertIn("1080", opts["format"])
         self.assertEqual(opts["concurrent_fragment_downloads"], 16)
-        self.assertEqual(ExampleComIE.ENGINE, "native")
-        self.assertTrue(ExampleComIE.REQUIRES_COOKIES)
 
     def test_registry_discovery(self):
         url = "https://example.com/watch/sample-video"

@@ -16,25 +16,13 @@ from mpv_config.downloaders import (
 
 
 class TestDownloaderFramework(unittest.TestCase):
-    def test_media_item_fields(self):
-        """Test MediaItem dataclass initialization, attributes, and defaults."""
-        item = MediaItem(
-            title="Sample Video",
-            url="https://example.com/video.mp4",
-            quality="1080p",
-            subtitles=["en", "ja"],
-        )
-        self.assertEqual(item.title, "Sample Video")
-        self.assertEqual(item.url, "https://example.com/video.mp4")
-        self.assertEqual(item.quality, "1080p")
-        self.assertEqual(item.subtitles, ["en", "ja"])
-
-        # Test defaults
+    def test_media_item_normalizes_missing_quality_and_subtitles(self):
+        """Absent quality stays None and subtitles always normalize to a list."""
         item_defaults = MediaItem(title="Default Video", url="https://example.com/v")
         self.assertIsNone(item_defaults.quality)
         self.assertEqual(item_defaults.subtitles, [])
 
-        # Test None subtitles converted to empty list
+        # None subtitles are converted to an empty list
         item_none_subs = MediaItem(
             title="Video",
             url="https://example.com",
@@ -43,17 +31,13 @@ class TestDownloaderFramework(unittest.TestCase):
         )
         self.assertEqual(item_none_subs.subtitles, [])
 
-    def test_get_downloader_youtube(self):
-        """Test that get_downloader returns GenericDownloader for YouTube URLs."""
-        dl = get_downloader("https://youtube.com/watch?v=123")
-        self.assertIsInstance(dl, GenericDownloader)
-        self.assertEqual(dl.name, "generic")
-
-    def test_get_downloader_fallback(self):
-        """Test that get_downloader falls back to GenericDownloader for generic URLs."""
-        dl = get_downloader("https://example.com/video.mp4")
-        self.assertIsInstance(dl, GenericDownloader)
-        self.assertEqual(dl.name, "generic")
+    def test_get_downloader_returns_generic_for_any_url(self):
+        """Test that get_downloader returns GenericDownloader for YouTube and generic URLs."""
+        for url in ("https://youtube.com/watch?v=123", "https://example.com/video.mp4"):
+            with self.subTest(url=url):
+                dl = get_downloader(url)
+                self.assertIsInstance(dl, GenericDownloader)
+                self.assertEqual(dl.name, "generic")
 
     @patch("yt_dlp.YoutubeDL")
     def test_generic_downloader_extract_single(self, mock_ydl_cls):

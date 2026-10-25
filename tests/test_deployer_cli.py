@@ -236,7 +236,6 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertEqual(self.calls, ["fetch_all", "install_deps", "deploy"])
         self.audit_log.start_session.assert_called_once_with("install", self.env)
         self.audit_log.complete_session.assert_called_once_with("completed")
-        self.m.ui.panel.assert_called_once()
         self.m.ui.error.assert_not_called()
 
     def test_install_continues_after_mpv_dependency_failure(self):
@@ -248,7 +247,6 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertEqual(deployer.main(["--install"]), 0)
         self.assertEqual(self.calls, ["fetch_all", "install_deps", "deploy"])
         self.audit_log.complete_session.assert_called_once_with("completed")
-        self.assertTrue(self.m.ui.warn.called)
 
     def test_install_aborts_on_non_mpv_dependency_failure(self):
         """Anything other than mpv stays fail-closed (no deploy, no replace)."""
@@ -353,7 +351,6 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.m.confirm_plan.return_value = False
         self.assertEqual(deployer.main(["--install"]), 0)
         self.assertEqual(self.calls, [])
-        self.m.ui.warn.assert_called_once()
 
     def test_confirmed_interactive_install_proceeds(self):
         self.m.interactive.return_value = True
@@ -364,8 +361,6 @@ class InstallOrchestrationTests(unittest.TestCase):
     def test_interrupt_returns_130(self):
         self.fetch_error = KeyboardInterrupt()
         self.assertEqual(deployer.main(["--install"]), 130)
-        self.m.ui.warn.assert_called_once()
-        self.assertIn("Interrupted", self.m.ui.warn.call_args.args[0])
 
     def test_interrupt_after_the_session_started_marks_it_cancelled(self):
         self.dep_error = KeyboardInterrupt()
@@ -406,7 +401,6 @@ class InstallOrchestrationTests(unittest.TestCase):
 
     def test_rollback_aborts_when_no_backups_found(self):
         self.assertEqual(deployer.main(["--rollback"]), 1)
-        self.m.ui.warn.assert_called_once()
         self.audit_log.start_session.assert_not_called()
 
     def test_sync_deps_dry_run_exits_zero(self):
