@@ -54,10 +54,11 @@
 # │ B           │  Upvote segment (👍 = B for Block)               │
 # │ Ctrl+b      │  Downvote segment (👎)                           │
 # ├─────────────┼───────────────────────────────────────────────────┤
-# │             │  🌐 Every-layout combos (Arabic included)         │
-# │ Ctrl+Shift+ │  h = History · m = Mark segment · s = Submit     │
-# │   h m s b u │  b = Backdrop · u = Upvote — the same physical   │
-# │             │  combo works in every keyboard layout             │
+# │             │  🌐 Arabic layout — same physical keys            │
+# │ c a h n ?   │  all work under Arabic too (twins generated at   │
+# │ b G B       │  deploy; b/G/B fire via key sequences)           │
+# │ Ctrl+Shift+m│  g's Arabic glyph can't be bound - this combo is │
+# │             │  the same in EVERY layout (h b G B have ones too)│
 # └─────────────┴───────────────────────────────────────────────────┘
 
 # **----- اختصارات تبديل مؤثرات Anime4K -----**
@@ -191,15 +192,19 @@ b    script-binding sub_backdrop/toggle
 # input translated by the current OS keyboard layout, rather than
 # physical scan codes" - the manual), so letter bindings die under an
 # Arabic layout. At deploy time mpv-config regenerates a twin block at
-# the END of this file: for every printable binding, the character the
-# SAME physical key produces on Arabic 101 (c -> ؤ, a -> ش, n -> ى,
-# ? -> ؟, ...). Write only Latin lines here; the twins are automatic.
+# the END of this file: for every printable binding, the character(s)
+# the SAME physical key produces on Arabic 101 (c -> ؤ, a -> ش, h -> ا,
+# n -> ى, ? -> ؟, and b/G/B as ل-ا/ل-أ/ل-آ key sequences, since those
+# keys emit lam-alef as TWO key events). Write only Latin lines here;
+# the twins are automatic.
 #
-# Five keys CANNOT have a same-key twin: h g b G B - under Arabic they
-# emit lam-alef sequences (b sends "لا" as TWO key events, so binding ل
-# or ا would fire spuriously on b). Their actions get the control-code
-# backups below instead - Ctrl+Shift+<letter> is the SAME physical combo
-# in every layout:
+# The ONE exception is g: its Arabic character (ل) must stay unbound,
+# because a single-key binding on ل would defeat every lam-alef
+# sequence. Use Ctrl+Shift+m for it under Arabic (and note there is no
+# sequence timeout: an Arabic h pressed immediately after an Arabic g
+# completes the b sequence - rare, accepted). The Ctrl+Shift+ combos
+# below are Windows control codes - the SAME physical combo in every
+# layout - and stay as universal backups:
 Ctrl+Shift+h   script-binding memo-history
 Ctrl+Shift+m   script-binding sponsorblock_set_segment
 Ctrl+Shift+s   script-binding sponsorblock_submit_segment

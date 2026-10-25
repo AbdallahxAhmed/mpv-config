@@ -1762,7 +1762,8 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 new_content = f.read()
 
-            # same-physical-key twins for the safe letters
+            # same-physical-key twins: the safe singles (incl. h -> ا, safe
+            # because completed lam-alef sequences consume the second event)
             self.assertRegex(
                 new_content, r"(?m)^ؤ\s+script-binding uosc/subtitles$")
             self.assertRegex(
@@ -1770,16 +1771,18 @@ class TestAuditPatches(unittest.TestCase):
             self.assertRegex(
                 new_content, r"(?m)^ى\s+script-binding autosubsync-menu$")
             self.assertRegex(
+                new_content, r"(?m)^ا\s+script-binding memo-history$")
+            self.assertRegex(
                 new_content, r"(?m)^؟\s+no-osd script-message-to help_overlay help$")
             # the Latin originals survive
             self.assertIn("c script-binding uosc/subtitles", new_content)
             self.assertIn("h script-binding memo-history", new_content)
-            # lam-alef components and multi-character keys stay unbound...
-            self.assertNotRegex(new_content, r"(?m)^ا\s+script-binding")
+            # ل must stay unbound as a single (it would defeat every
+            # lam-alef sequence); no presentation forms either
             self.assertNotRegex(new_content, r"(?m)^ل\s+script-binding")
             self.assertNotRegex(new_content, r"(?m)^إ\s+script-binding")
             self.assertNotIn("ﻻ", new_content)
-            # ...their actions get the layout-independent backups instead
+            # ...the untwinnable g gets a layout-independent backup
             self.assertRegex(
                 new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
             # and the old mnemonic twins (other physical keys) stay gone

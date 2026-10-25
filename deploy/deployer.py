@@ -726,29 +726,27 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
 
 
 def _layout_twins_module():
-    """Import mpv_config.layout_twins, falling back to the source tree.
+    """Load mpv_config.layout_twins from the adjacent source tree.
 
-    The editable install (deploy clone) may be a commit behind this
-    checkout, in which case the package imports fine but does not know
-    the module yet - and a half-imported parent package stays cached in
-    sys.modules. Loading by file location sidesteps the cache entirely.
+    The editable install (deploy clone) can be a commit behind this
+    checkout, and a stale module silently changes generator behavior -
+    so the source tree next to this file always wins; the package import
+    is only a fallback for trees without src/.
     """
-    try:
-        from mpv_config import layout_twins
-        return layout_twins
-    except ImportError:
-        pass
     import importlib.util
 
     module_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "src", "mpv_config", "layout_twins.py",
     )
-    spec = importlib.util.spec_from_file_location(
-        "mpv_config_layout_twins_local", module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    if os.path.isfile(module_path):
+        spec = importlib.util.spec_from_file_location(
+            "mpv_config_layout_twins_local", module_path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    from mpv_config import layout_twins
+    return layout_twins
 
 
 def _patch_input_conf(template_path, dest_path, env):

@@ -33,7 +33,7 @@
 | **Anime4K modes** | `off` `fast` `A` `A+A` `B` `B+B` `C` `C+A` — shader chains from `ANIME4K_CHAINS`; persisted in `script-opts/anime4k.conf`. |
 | **default streaming quality** | `script-opts/stream_quality.conf` `default_quality` (shipped `1080`; `0` = uncapped) — single source of truth for the stream format. |
 | **fast quality switch** | Toolbar-driven reload of an already-extracted stream (~1 s instead of a ~4–6 s yt-dlp round-trip). |
-| **layout twins** | `src/mpv_config/layout_twins.py` — deploy-time generator appending same-physical-key Arabic-101 twin bindings to the deployed `input.conf` on every install/update (`c→ؤ a→ش n→ى ?→؟`); the lam-alef keys `h g b G B` get `Ctrl+Shift+h/m/s/b/u` control-code backups instead (mechanics: see AGENTS.md). |
+| **layout twins** | `src/mpv_config/layout_twins.py` — deploy-time generator appending same-physical-key Arabic-101 twin bindings to the deployed `input.conf` on every install/update (`c→ؤ a→ش h→ا n→ى ?→؟` singles; `b/G/B` as `ل-ا/ل-أ/ل-آ` key sequences). Only `g` is untwinnable (`ل` must stay unbound) and carries the `Ctrl+Shift+m` control-code backup (mechanics: see AGENTS.md). |
 | **layout guard** | `scripts/keyboard_layout.lua` + `src/mpv_config/layout_guard.py` — the retired Windows keyboard hook (translated keys to US characters while mpv was focused). Opt-in via `script-opts/keyboard_layout.conf` `enabled=yes`; disabled by default since the twins. |
 | **experience profiles** | `--mpv-profile`: `windows-like` / `linux-like` / `native` — the parity mechanism: the same gpu-next baseline everywhere, with only the rendering backend (d3d11 / Vulkan / VideoToolbox) swapped per platform. |
 | **scaler tiers** | `--scaler-tier`: `light` / `balanced` / `quality`. |
@@ -247,7 +247,7 @@ of the custom yt-dlp extractors), `release.yml` (PyPI trusted publishing).
 - **A static `override-display-fps` caused a 282 Hz estimation bug** — the
   Wayland-only conditional `[wayland-144hz-fix]` profile is the deliberate fix.
 - **Runtime VK→char queries are banned in the guard** (`MapVirtualKeyExW`/`ToUnicodeEx` measured returning scan codes, identical across layouts, under polluted key state). The twins table came from a one-shot OFFLINE probe — `ToUnicodeEx` with an explicit layout handle, a zeroed key-state array and the dead-key double-call — cross-checked against xkb `ara(basic)`; that pattern is fine, live queries are not.
-- **Never bind lam-alef components or ASCII twins in input.conf** — `b` emits `لا` as two key events (binding `ل`/`ا` misfires on b), and the Arabic shift layer maps `>`/`<` to plain `.`/`,` (binding those changes US behavior; mpv cannot distinguish `Shift+.` from `.`). `layout_twins._validate` enforces both rules.
+- **Never bind `ل` as a single, or ASCII twins, in input.conf** — `b` emits `لا` as two key events, and mpv key sequences (`ل-ا` etc.) consume both ONLY while `ل` has no single binding of its own (a single-key binding on a sequence's first element wins). `ا` is allowed as `h`'s twin: a completed sequence swallows the second event (measured). The Arabic shift layer maps `>`/`<` to plain `.`/`,` (binding those changes US behavior; mpv cannot distinguish `Shift+.` from `.`). `layout_twins._validate` enforces all of it.
   codes, identical across layouts) — never reintroduce VK→char queries; the
   guard uses the layout HANDLE (`GetKeyboardLayout(mpv_thread)` low word ≠ `0x0409`).
 - **The guard spawn line must end with `>nul 2>&1`** — without it `io.popen`

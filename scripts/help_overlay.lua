@@ -60,8 +60,8 @@ local SECTIONS = {
     {
         title = "KEYBOARD LAYOUT",
         rows = {
-            { "c a n ? , Ctrl+Shift+h/m/s/b/u", "same physical key or combo in the Arabic layout too" },
-            { "h g b G B", "Arabic emits lam-alef sequences - use Ctrl+Shift+h/m/s/b/u" },
+            { "c a h n ? b G B", "same physical key in Arabic (b/G/B via sequences)" },
+            { "g", "Arabic glyph unbindable - use Ctrl+Shift+m" },
             { "Ctrl+<letter>", "always the Latin key (Windows control codes)" },
             { "F-keys, ? , space", "layout independent" },
             { "Alt+<letter>", "layout dependent - use the mouse menu" },

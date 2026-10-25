@@ -25,7 +25,7 @@
 Recent work now on `main` (unreleased in the changelog):
 
 - **Playback display-sync fixes** — `tscale=linear` + `video-timing-offset=0.01` for jitter-free `display-resample` at fixed 144 Hz, and a KDE-Wayland-only refresh-rate stabilization profile.
-- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`), plus layout-independent `Ctrl+Shift+` backups for the lam-alef keys; the keyboard hook guard is retired to an opt-in.
+- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `h→ا`, `n→ى`, `?→؟`, and `b/G/B` as lam-alef key sequences), plus a layout-independent `Ctrl+Shift+m` backup for `g`; the keyboard hook guard is retired to an opt-in.
 - **Hardened management commands** — `rollback` restores only this config's own `mpv.backup.*` folders; `uninstall` can cleanly purge the config, backups, managed dependencies and the install directory.
 - **Robust installers** — `install` / `verify` wired to the real deployer; the shell bootstrap works on PEP 668 systems (Ubuntu 24.04) via a private venv.
 - **Security hygiene** — no key material or personal paths tracked; enforced by `tests/test_repo_hygiene.py`.
@@ -180,24 +180,26 @@ hook process runs (the previous keyboard hook guard still ships but is disabled 
 `script-opts/keyboard_layout.conf` — set `enabled=yes` to bring it back for layouts beyond Arabic
 101).
 
-Five keys cannot have a same-key twin: **h g b G B** — under Arabic they emit lam-alef sequences
-(`b` sends `لا` as *two* key events, so binding `ل` or `ا` would fire spuriously on `b`). Their
-actions get layout-independent backups instead: `Ctrl+Shift+<letter>` reaches mpv as a Windows
-control code, i.e. the **same physical combo in every layout**. `Ctrl+<letter>`, the function keys
-and `?` (twin `؟`) likewise work in any layout; `Alt+<letter>` does not — the mouse menu carries
-those actions.
+The b key emits the lam-alef pair `لا` as *two* key events (shifted G/B emit `لأ`/`لآ`), so those
+keys are twinned as mpv **key sequences** (`ل-ا`, `ل-أ`, `ل-آ` — keys joined with `-`): the twin
+fires exactly once per press and never touches the single-key bindings (measured). The ONE
+exception is **g**: its Arabic character `ل` must stay unbound, because a single-key binding on a
+sequence's first element defeats every sequence — use `Ctrl+Shift+m` for it under Arabic. There is
+no sequence timeout either, so an Arabic `h` pressed immediately after an Arabic `g` completes the
+`b` sequence (rare, accepted). `Ctrl+<letter>`, the function keys and `?` (twin `؟`) work in any
+layout; `Alt+<letter>` does not — the mouse menu carries those actions.
 
 | Key | Physical key | Action |
 | --- | --- | --- |
 | `ؤ` | C | Subtitles menu (twin of `c`) |
 | `ش` | A | Audio tracks & dubs menu (twin of `a`) |
+| `ا` | H | Watch history (twin of `h`) |
 | `ى` | N | Subtitle sync menu (twin of `n`) |
 | `؟` | `?` | Cheat sheet (twin of `?`) |
-| `Ctrl+Shift+h` | H | Watch history (memo) |
-| `Ctrl+Shift+m` | M | Mark SponsorBlock segment |
-| `Ctrl+Shift+s` | S | Submit SponsorBlock segment |
-| `Ctrl+Shift+b` | B | Subtitle backdrop toggle |
-| `Ctrl+Shift+u` | U | SponsorBlock upvote |
+| `ل-ا` | B | Subtitle backdrop toggle (sequence twin of `b`) |
+| `ل-أ` | G | Submit SponsorBlock segment (sequence twin of `G`) |
+| `ل-آ` | B | SponsorBlock upvote (sequence twin of `B`) |
+| `Ctrl+Shift+m` | M | Mark SponsorBlock segment (`g` under Arabic) |
 | `ز` | `.` | Toggle auto-skip (same as `Ctrl+.`) |
 | `د` | `.` | Toggle category auto-skip (same as `Alt+.`) |
 | `غ` | Y | Confirm auto-skip countdown |

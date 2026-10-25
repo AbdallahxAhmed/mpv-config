@@ -35,12 +35,17 @@ _spec.loader.exec_module(layout_twins)
 MPV = r"C:\Program Files\mpv\mpv.exe"
 
 SOURCE_CONF = """c set user-data/t/latin yes
-? no-osd script-message-to help_overlay help
+h set user-data/t/h yes
+b set user-data/t/b yes
+? set user-data/t/q yes
 """
 
 TWINS_TO_CHECK = [
-    # (Arabic key event, user-data flag that must NOT stay unset)
-    ("ؤ", "latin"),
+    # (Arabic key EVENTS as Windows delivers them, flag that must be set)
+    (["ؤ"], "latin"),
+    (["ا"], "h"),          # h's twin: a single ا key event
+    (["ل", "ا"], "b"),     # b's twin: the two-event lam-alef sequence
+    (["؟"], "q"),
 ]
 
 
@@ -102,10 +107,11 @@ class TwinsIntegrationTests(unittest.TestCase):
 
             time.sleep(0.5)  # let input.conf settle
             outcomes = {}
-            for arabic_key, flag in TWINS_TO_CHECK:
-                err = send(["keypress", arabic_key])["error"]
+            for events, flag in TWINS_TO_CHECK:
+                for event in events:
+                    err = send(["keypress", event])["error"]
                 outcome = send(["get_property", "user-data/t/" + flag])
-                outcomes[arabic_key] = (err, outcome.get("data"))
+                outcomes[flag] = (err, outcome.get("data"))
             latin = send(["keypress", "c"])
             latin_flag = send(["get_property", "user-data/t/latin"])
             return outcomes, (latin["error"], latin_flag.get("data"))
@@ -119,29 +125,33 @@ class TwinsIntegrationTests(unittest.TestCase):
                 proc.wait()
 
     def test_arabic_key_fires_the_latin_binding_only_after_generation(self):
-        # red: without twins the Arabic key event matches nothing
+        # red: without twins the Arabic key events match nothing
         outcomes, latin = self._run(self.red_conf)
         self.assertEqual(latin[0], "success")
-        for arabic_key, (err, value) in outcomes.items():
+        for flag, (err, value) in outcomes.items():
             self.assertEqual(err, "success")
             self.assertIsNone(value,
-                              "Arabic key unexpectedly matched: %r" % arabic_key)
+                              "Arabic key unexpectedly matched: %r" % flag)
 
-        # green: with the generated twins the same event fires the binding
+        # green: with the generated twins the same events fire the bindings
         outcomes, latin = self._run(self.green_conf)
         self.assertEqual(latin, ("success", "yes"))
-        for arabic_key, (err, value) in outcomes.items():
+        for flag, (err, value) in outcomes.items():
             self.assertEqual(err, "success")
             self.assertEqual(value, "yes",
-                             "Arabic key %r did not fire its twin" % arabic_key)
+                             "Arabic twin for %r did not fire" % flag)
 
     def test_generated_lines_all_register(self):
         """Every generated twin line must be accepted by mpv's binder:
-        boot with the generated conf and dispatch each twin key name."""
+        boot with the generated conf and dispatch the single-key twins
+        (sequence twins dispatch via their component events, covered by
+        the test above)."""
         generated, report = layout_twins.generate(SOURCE_CONF)
+        source_keys = {line.split(None, 1)[0] for line in SOURCE_CONF.splitlines()}
         twin_lines = [line for line in generated.splitlines()
                       if line and not line.startswith("#")
-                      and line.split(None, 1)[0] not in ("c", "?")]
+                      and line.split(None, 1)[0] not in source_keys
+                      and "-" not in line.split(None, 1)[0]]
         self.assertTrue(twin_lines)
         proc, handle = self._boot(self.green_conf)
         try:
