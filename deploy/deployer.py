@@ -1107,43 +1107,7 @@ def deploy(
         # deployer preserves existing mpv.conf/input.conf/script-opts, so
         # without these migrations an old broken install stays broken even
         # after the templates are fixed.
-        migration_targets = (
-            (
-                "migrate-input-conf",
-                os.path.join(config_dir, "input.conf"),
-                lambda p: _migrate_input_conf(p, audit_log=audit_log),
-            ),
-            (
-                "migrate-mpv-conf",
-                os.path.join(config_dir, "mpv.conf"),
-                lambda p: _migrate_mpv_conf(p, env=env, audit_log=audit_log),
-            ),
-            (
-                "migrate-uosc-conf",
-                os.path.join(config_dir, "script-opts", "uosc.conf"),
-                lambda p: _migrate_uosc_conf(p, audit_log=audit_log),
-            ),
-            (
-                "migrate-smartskip-conf",
-                os.path.join(config_dir, "script-opts", "SmartSkip.conf"),
-                lambda p: _migrate_smartskip_conf(p, audit_log=audit_log),
-            ),
-            (
-                "migrate-keyboard-layout-conf",
-                os.path.join(config_dir, "script-opts", "keyboard_layout.conf"),
-                lambda p: _migrate_keyboard_layout_conf(p, audit_log=audit_log),
-            ),
-        )
-        for migration_name, migration_path, migrate_fn in migration_targets:
-            try:
-                if migrate_fn(migration_path):
-                    results.append(
-                        {"name": migration_name, "status": "ok", "detail": "repaired stale config"}
-                    )
-            except Exception as exc:
-                results.append(
-                    {"name": migration_name, "status": "warn", "detail": str(exc)}
-                )
+        results.extend(_migrate_deployed_configs(config_dir, env, audit_log))
         # Apply uosc Timeline mouse-leave patch to ensure thumbnail cleanup on window exit
         try:
             from pathlib import Path
@@ -1169,6 +1133,55 @@ def deploy(
     if env.os == "windows":
         ensure_windows_shortcuts(env, audit_log=audit_log)
         _deploy_ytdlp_plugins_and_config(env, repo_dir)
+    return results
+
+
+def _migrate_deployed_configs(config_dir, env, audit_log=None):
+    """Run the deployed-config repair migrations, returning result rows.
+
+    Shared by deploy() and cmd_update(): the update path swaps assets only
+    and preserves mpv.conf/input.conf/script-opts verbatim, so without
+    these migrations an old install stays broken even after the templates
+    are fixed - and `mpv-config update` is the standing refresh recipe.
+    """
+    migration_targets = (
+        (
+            "migrate-input-conf",
+            os.path.join(config_dir, "input.conf"),
+            lambda p: _migrate_input_conf(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-mpv-conf",
+            os.path.join(config_dir, "mpv.conf"),
+            lambda p: _migrate_mpv_conf(p, env=env, audit_log=audit_log),
+        ),
+        (
+            "migrate-uosc-conf",
+            os.path.join(config_dir, "script-opts", "uosc.conf"),
+            lambda p: _migrate_uosc_conf(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-smartskip-conf",
+            os.path.join(config_dir, "script-opts", "SmartSkip.conf"),
+            lambda p: _migrate_smartskip_conf(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-keyboard-layout-conf",
+            os.path.join(config_dir, "script-opts", "keyboard_layout.conf"),
+            lambda p: _migrate_keyboard_layout_conf(p, audit_log=audit_log),
+        ),
+    )
+    results = []
+    for migration_name, migration_path, migrate_fn in migration_targets:
+        try:
+            if migrate_fn(migration_path):
+                results.append(
+                    {"name": migration_name, "status": "ok", "detail": "repaired stale config"}
+                )
+        except Exception as exc:
+            results.append(
+                {"name": migration_name, "status": "warn", "detail": str(exc)}
+            )
     return results
 
 
@@ -1994,6 +2007,16 @@ def cmd_update(args):
             "ok",
             "assets and manifest committed; personal configuration preserved",
         )
+        # The update path preserves mpv.conf/input.conf/script-opts
+        # verbatim, so the repair migrations run here too - `mpv-config
+        # update` is the standing refresh recipe and must reach deployed
+        # configs just like a full install does.
+        migration_results = _migrate_deployed_configs(config_dir, env, audit_log)
+        for row in migration_results:
+            if row["status"] == "warn":
+                ui.warn("%s: %s" % (row["name"], row["detail"]))
+            else:
+                ui.info("%s: %s" % (row["name"], row["detail"]))
         audit_log.complete_session("completed")
         ui.panel(
             "Update complete. Personal configuration was preserved.",
