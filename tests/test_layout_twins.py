@@ -25,24 +25,19 @@ class TwinLookupTests(unittest.TestCase):
         self.assertEqual(layout_twins._twin_for("c"), ("ؤ", ""))
         self.assertEqual(layout_twins._twin_for("a"), ("ش", ""))
         self.assertEqual(layout_twins._twin_for("n"), ("ى", ""))
-        self.assertEqual(layout_twins._twin_for("h"), ("ا", ""))
         self.assertEqual(layout_twins._twin_for("?"), ("؟", ""))
 
-    def test_lam_alef_keys_get_sequence_twins(self):
-        """b/G/B emit lam-alef as TWO key events; mpv's dash-joined key
-        sequences consume both (measured: the twin fires once, the
-        completing key's single binding does not)."""
-        self.assertEqual(layout_twins._twin_for("b"), ("ل-ا", ""))
-        self.assertEqual(layout_twins._twin_for("G"), ("ل-أ", ""))
-        self.assertEqual(layout_twins._twin_for("B"), ("ل-آ", ""))
-
-    def test_lam_is_refused_as_a_single(self):
-        """Binding ل would defeat every lam-alef sequence (mpv: a
-        single-key binding on a sequence's first element wins) - g keeps
-        only its Ctrl+Shift+ backup."""
-        twin, reason = layout_twins._twin_for("g")
-        self.assertIsNone(twin)
-        self.assertIn("sequence", reason)
+    def test_lam_alef_keys_are_refused(self):
+        """h g b G B: the REAL key stream aliases them (user's --input-test
+        capture, 2026-10-25: b delivers ONLY ا, so b and h are the same
+        event to mpv; G/H alias on أ, B/N on آ). No twin can exist - the
+        actions carry Ctrl+Shift+ backups instead. NOTE: the `keypress`
+        command DOES deliver both characters, so this cannot be observed
+        from headless tests - only from the real Windows stream."""
+        for key in ("h", "g", "b", "G", "B"):
+            twin, reason = layout_twins._twin_for(key)
+            self.assertIsNone(twin, key)
+            self.assertIn("lam-alef", reason)
 
     def test_ascii_twins_are_refused(self):
         """>/< shift to plain ASCII under Arabic - binding those would
@@ -70,14 +65,13 @@ class TwinLookupTests(unittest.TestCase):
                     self.assertIn("US", reason)
 
     def test_refused_singles_are_never_emitted(self):
-        """ل أ إ آ must never appear as a single-key twin: ل defeats the
-        lam-alef sequences, the others are only sequence components."""
+        """The lam-alef glyphs ل ا أ إ آ must never be bound: the real key
+        stream delivers ا alone for BOTH b and h (aliasing), so any such
+        binding misfires on the other physical key."""
         for table in (layout_twins.ARABIC_PLAIN, layout_twins.ARABIC_SHIFT):
             for key, twin in table.items():
-                if len(twin) == 1 and twin in layout_twins.LAM_ALEF_REFUSED_SINGLES:
-                    emitted, reason = layout_twins._twin_for(key)
-                    if twin == "ا":
-                        continue  # allowed: h's twin, consumed by sequences
+                if len(twin) == 1 and twin in layout_twins.LAM_ALEF_REFUSED:
+                    emitted, _reason = layout_twins._twin_for(key)
                     self.assertIsNone(emitted, key)
 
 
@@ -96,12 +90,12 @@ F9   ignored
         self.assertIn("ؤ script-binding uosc/subtitles", text)
         self.assertIn("# twin of c", text)
         self.assertIn("c    script-binding uosc/subtitles", text)
-        # h's twin is the single ا; b's twin is the ل-ا sequence
-        self.assertIn("ا script-binding memo-history", text)
-        self.assertIn("ل-ا script-binding sub_backdrop/toggle", text)
-        # g (ل) is the one key that cannot be twinned
+        # the lam-alef keys h/g/b are refused on the real key stream
+        self.assertNotRegex(text, r"(?m)^ا\s+script-binding")
+        self.assertNotIn("ل-ا", text)
         reported = dict(report)
-        self.assertIn("sequence", reported["g"])
+        for key in ("h", "g", "b"):
+            self.assertIn("lam-alef", reported[key])
         self.assertTrue(text.endswith("\n"))
 
     def test_idempotent(self):
@@ -127,32 +121,28 @@ F9   ignored
         self.assertIn("ؤ script-binding user/own", text)
 
     def test_shipped_template_gets_the_expected_twins(self):
-        """Pin the actual deployed bindings: the safe single-key twins, the
-        Arabic question mark, and the lam-alef sequence twins; only g is
-        reported as needing the Ctrl+Shift+ backup."""
+        """Pin the actual deployed bindings: the safe single-key twins plus
+        the Arabic question mark; h/g/b/B/G are reported as needing the
+        Ctrl+Shift+ backups (their glyphs alias other keys on the real
+        key stream)."""
         path = os.path.join(REPO, "config", "input.conf.template")
         with open(path, "r", encoding="utf-8") as handle:
             text, report = layout_twins.generate(handle.read())
         for twin, command in [
             ("ؤ", "script-binding uosc/subtitles"),
             ("ش", "script-binding uosc/audio"),
-            ("ا", "script-binding memo-history"),
             ("ى", "script-binding autosubsync-menu"),
-            ("ل-ا", "script-binding sub_backdrop/toggle"),
-            ("ل-أ", "script-binding sponsorblock_submit_segment"),
-            ("ل-آ", "script-binding sponsorblock_upvote"),
             ("؟", "no-osd script-message-to help_overlay help"),
         ]:
             self.assertIn("%s %s" % (twin, command), text)
-        # the refused singles never appear as active keys (exact match:
-        # the sequence twins legitimately START with ل)
+        # the lam-alef glyphs never appear as active keys
         for line in text.splitlines():
             if line and not line.startswith("#"):
                 self.assertNotIn(line.split(None, 1)[0],
-                                 layout_twins.LAM_ALEF_REFUSED_SINGLES,
-                                 "bound a refused lam-alef single: %r" % line)
+                                 layout_twins.LAM_ALEF_REFUSED,
+                                 "bound a lam-alef glyph: %r" % line)
         reported = {key for key, _ in report}
-        self.assertEqual(reported, {"g"})
+        self.assertEqual(reported, {"h", "g", "b", "B", "G"})
 
     def test_block_is_utf8_round_trip(self):
         text, _ = layout_twins.generate(self.MINI)
@@ -220,25 +210,21 @@ class MigrationTests(unittest.TestCase):
             self.assertNotRegex(
                 text, r"^%s[ \t]+.*%s" % (glyph, command))
         self.assertNotIn("Arabic Bilingual Twin Bindings", text)
-        # the same-key twins are present, exactly once each: the singles,
-        # and h via ا and b/G/B via the lam-alef sequences
+        # the same-key twins are present, exactly once each
         for glyph, command in [
             ("ؤ", "script-binding uosc/subtitles"),
             ("ش", "script-binding uosc/audio"),
-            ("ا", "script-binding memo-history"),
             ("ى", "script-binding autosubsync-menu"),
-            ("ل-ا", "script-binding sub_backdrop/toggle"),
             ("؟", "no-osd script-message-to help_overlay help"),
         ]:
             self.assertEqual(
                 len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)),
                                text, re.MULTILINE)), 1)
-        # the refused singles stay unbound (exact match: the sequence
-        # twins legitimately START with ل)
+        # the lam-alef glyphs stay unbound (b/h alias on the real stream)
         for line in text.splitlines():
             if line and not line.startswith("#"):
                 self.assertNotIn(line.split(None, 1)[0],
-                                 layout_twins.LAM_ALEF_REFUSED_SINGLES,
+                                 layout_twins.LAM_ALEF_REFUSED,
                                  repr(line))
         # the Latin bindings survive untouched
         for latin in ("c", "a", "h", "n", "g", "G", "b"):

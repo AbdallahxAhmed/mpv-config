@@ -41,12 +41,17 @@ b set user-data/t/b yes
 """
 
 TWINS_TO_CHECK = [
-    # (Arabic key EVENTS as Windows delivers them, flag that must be set)
+    # (Arabic key EVENTS, flag that must be set)
     (["ؤ"], "latin"),
-    (["ا"], "h"),          # h's twin: a single ا key event
-    (["ل", "ا"], "b"),     # b's twin: the two-event lam-alef sequence
     (["؟"], "q"),
 ]
+# h/b/g are NOT here on purpose: on the REAL Windows key stream b and h
+# deliver the identical character (user's --input-test capture,
+# 2026-10-25 - the ل of the lam-alef pair never reaches mpv), so no twin
+# can distinguish them. The `keypress` command DOES deliver both
+# characters, which once made a ل-ا sequence twin look correct in this
+# headless harness while never firing on real hardware. Do not
+# reintroduce lam-alef twins from headless evidence.
 
 
 @unittest.skipUnless(

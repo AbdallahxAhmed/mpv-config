@@ -60,10 +60,11 @@ local SECTIONS = {
     {
         title = "KEYBOARD LAYOUT",
         rows = {
-            { "c a h n ? b G B", "same physical key in Arabic (b/G/B via sequences)" },
-            { "g", "Arabic glyph unbindable - use Ctrl+Shift+m" },
+            { "c a n ?", "same physical key in Arabic (generated twins)" },
+            { "h g b G B", "alias other keys under Arabic - use Ctrl+Shift+" },
+            { "Ctrl+Shift+h m s b u", "history mark submit backdrop upvote - every layout" },
             { "Ctrl+<letter>", "always the Latin key (Windows control codes)" },
-            { "F-keys, ? , space", "layout independent" },
+            { "F-keys, space", "layout independent" },
             { "Alt+<letter>", "layout dependent - use the mouse menu" },
         },
     },
@@ -87,7 +88,9 @@ end
 mp.register_script_message("help", show)
 mp.register_script_message("toggle-help", show)
 
--- The key is a punctuation key, so it is the same in every layout.
+-- This "?" binding covers Latin layouts; under Arabic the key produces
+-- "؟" and the generated input.conf twin carries the same action (F9 is
+-- the layout-independent fallback, bound in input.conf).
 mp.add_key_binding("?", function() show() end)
 mp.add_key_binding("F9", function() show() end)
 

@@ -1762,8 +1762,9 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 new_content = f.read()
 
-            # same-physical-key twins: the safe singles (incl. h -> ا, safe
-            # because completed lam-alef sequences consume the second event)
+            # same-physical-key twins for the safe letters. ا stays unbound:
+            # the real key stream delivers it for BOTH b and h (measured
+            # via --input-test), so binding it makes b misfire.
             self.assertRegex(
                 new_content, r"(?m)^ؤ\s+script-binding uosc/subtitles$")
             self.assertRegex(
@@ -1771,18 +1772,16 @@ class TestAuditPatches(unittest.TestCase):
             self.assertRegex(
                 new_content, r"(?m)^ى\s+script-binding autosubsync-menu$")
             self.assertRegex(
-                new_content, r"(?m)^ا\s+script-binding memo-history$")
-            self.assertRegex(
                 new_content, r"(?m)^؟\s+no-osd script-message-to help_overlay help$")
             # the Latin originals survive
             self.assertIn("c script-binding uosc/subtitles", new_content)
             self.assertIn("h script-binding memo-history", new_content)
-            # ل must stay unbound as a single (it would defeat every
-            # lam-alef sequence); no presentation forms either
+            # no lam-alef glyph is ever bound, and no presentation forms
+            self.assertNotRegex(new_content, r"(?m)^ا\s+script-binding")
             self.assertNotRegex(new_content, r"(?m)^ل\s+script-binding")
             self.assertNotRegex(new_content, r"(?m)^إ\s+script-binding")
             self.assertNotIn("ﻻ", new_content)
-            # ...the untwinnable g gets a layout-independent backup
+            # ...the aliased keys get layout-independent backups
             self.assertRegex(
                 new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
             # and the old mnemonic twins (other physical keys) stay gone
