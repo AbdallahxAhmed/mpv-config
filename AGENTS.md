@@ -14,7 +14,7 @@ at specs/004-playback-performance/plan.md
 - **Test suites:** `python -m unittest discover -s tests` and `python tests/run_lua_tests.py`.
 
 ### State of main
-- `a3cd4c2` (twins) on `main`, pushed; deployed to `%APPDATA%\mpv` on 2026-10-25. Tests green: 439 Python (43 skipped) + all Lua suites. A rare transient single-error run can hit the network-port tests (unreleased socket); **re-run before believing a failure**.
+- `50ef40a` (twins) on `main`, pushed; deployed to `%APPDATA%\mpv` on 2026-10-25. Tests green: 439 Python (43 skipped) + all Lua suites. A rare transient single-error run can hit the network-port tests (unreleased socket); **re-run before believing a failure**.
 
 ### How the keyboard layout works now (layout twins; hook guard retired to opt-in)
 - mpv matches bindings by the CHARACTER a key produces ("mpv uses input translated by the current OS keyboard layout, rather than physical scan codes"; upstream issue #351 open since 2013 — no native fix). `src/mpv_config/layout_twins.py` generates a twin block appended to the DEPLOYED input.conf on every install/update: for each printable Latin binding, a binding on the Arabic-101 character of the SAME physical key (`c→ؤ a→ش n→ى ?→؟`). Users write Latin only; twins regenerate — nothing maintained by hand, no processes.
