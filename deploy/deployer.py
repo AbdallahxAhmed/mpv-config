@@ -1448,6 +1448,19 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             + "\nF9 no-osd script-message-to help_overlay help\n"
         )
 
+    #    Manual anime-detection override: ensure it on deployed files that
+    #    predate the profile-picker bindings (moved here from Ctrl+Shift+g:
+    #    under Arabic both combos arrive as Ctrl+أ and history owns that).
+    if not re.search(
+            r"^[ \t]*Ctrl\+Shift\+[tT][ \t]+[^\r\n]*profile_picker toggle-manual",
+            updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\n# Manual anime-profile override - Ctrl+Shift+t (was Ctrl+Shift+g:\n"
+            + "# under Arabic, Ctrl+Shift+G arrives as Ctrl+أ like history's combo)\n"
+            + "Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual\n"
+        )
+
     # 5. Fix bindings mpv rejects on every version:
     #    a) CTRL+0 shader clear: change-list needs the empty-string value
     #       ('clr ""'); a bare 'clr' fails with
