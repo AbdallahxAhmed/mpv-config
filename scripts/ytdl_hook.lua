@@ -1478,6 +1478,21 @@ local function on_load_hook(load_fail, hook)
             mp.del_property("user-data/mpv/ytdl/fast-url")
             mp.del_property("user-data/mpv/ytdl/fast-source-url")
             mp.set_property("stream-open-filename", fast_url)
+
+            -- Keep YouTube CDN chunking active on fast-switched streams: without
+            -- bounded request sizes, CDN servers throttle unbounded range requests.
+            local chunk = 10485760
+            mp.set_property_native("file-local-options/curl-max-request-size", chunk)
+            local stream_opts = mp.get_property_native("file-local-options/stream-lavf-o") or {}
+            stream_opts = append_libav_opt(stream_opts, "request_size", tostring(chunk))
+            mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
+
+            local headers = mp.get_property_native("user-data/mpv/ytdl/fast-headers")
+            if headers then
+                set_http_headers(headers)
+                mp.del_property("user-data/mpv/ytdl/fast-headers")
+            end
+
             msg.info("fast switch: skipping extraction for pre-resolved URL")
             return
         end

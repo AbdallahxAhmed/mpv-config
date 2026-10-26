@@ -2042,6 +2042,13 @@ function setup_storyboards()
     local video_url = storyboard_supported_url(path, referer)
     if not video_url then return end
 
+    if last_same_video and using_storyboards and next(storyboard_thumbnails) ~= nil then
+        if real_w and real_h then
+            info(real_w, real_h)
+        end
+        return
+    end
+
     remove_thumbnail_files()
     remove_storyboard_files()
 
@@ -2181,14 +2188,16 @@ function file_load()
     if not same_video then
         active_bgra_path = nil
         has_valid_frame = false
+        using_storyboards = false
+        thumbnail_delta = nil
+        remove_storyboard_files()
+        storyboard_thumbnails = {}
     end
     frame_slot = 0
     if info_timer then
         info_timer:kill()
         info_timer = nil
     end
-    using_storyboards = false
-    thumbnail_delta = nil
     pending_respawn = false
     pending_respawn_time = nil
 

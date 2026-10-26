@@ -262,6 +262,7 @@ local function arm_fast_watch(attempt, target_h, is_cap)
         pcall(mp.del_property, 'user-data/mpv/ytdl/is-youtube')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-headers')
         mp.osd_message('Quality switch failed — reloading a fresh stream', 2)
         msg.warn('fast switch stalled; dropping stale extraction cache')
         if is_cap then
@@ -323,6 +324,10 @@ local function switch_quality(target_h, is_cap)
     if source_snapshot then
         mp.set_property('user-data/mpv/ytdl/fast-source-url', source_snapshot)
     end
+    local headers = video.http_headers or parsed.http_headers
+    if headers then
+        mp.set_property_native('user-data/mpv/ytdl/fast-headers', headers)
+    end
     local args = {'loadfile', load_url, 'replace', -1}
     -- mpv REJECTS an empty per-file options table ("argument options has
     -- incompatible type"), so the table is only passed when it carries
@@ -337,6 +342,7 @@ local function switch_quality(target_h, is_cap)
     if not res then
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-url')
         pcall(mp.del_property, 'user-data/mpv/ytdl/fast-source-url')
+        pcall(mp.del_property, 'user-data/mpv/ytdl/fast-headers')
         msg.warn('fast switch failed to load: ' .. tostring(err))
         return false
     end

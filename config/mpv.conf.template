@@ -206,7 +206,7 @@ video-timing-offset       = 0.01
 # Re-evaluate after KDE Plasma 7 or when compositor timing improves.
 [wayland-144hz-fix]
 profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"
-profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and string.find(p["options/gpu-context"] or "", "wayland") ~= nil
+profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and (string.find(p["current-gpu-context"] or "", "wayland") ~= nil or (type(p["options/gpu-context"]) == "string" and string.find(p["options/gpu-context"], "wayland") ~= nil))
 display-fps-override      = 143.981
 profile-restore           = copy
 
@@ -248,6 +248,8 @@ demuxer-readahead-secs    = 60
 demuxer-seekable-cache    = yes
 force-seekable            = yes
 stream-buffer-size        = 512KiB
+curl-max-request-size     = 10MiB
+stream-lavf-o-append      = request_size=10485760
 # video-sync and interpolation inherited from base config (display-resample /
 # {{INTERPOLATION}} with tscale=linear) for smooth 24/30/60fps on 144Hz panel.
 # Buffer starvation protected by cache-pause=yes so stalls pause instead of dropping frames.
