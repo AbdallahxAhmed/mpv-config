@@ -1,18 +1,14 @@
-# keyboard_layout.conf - the optional keyboard-layout guard hook.
+# keyboard_layout.conf - configure keyboard layout support.
 #
-# DISABLED BY DEFAULT: the Arabic layout twins in input.conf (regenerated
-# by every mpv-config install/update, see src/mpv_config/layout_twins.py)
-# cover the same problem with pure config - no hook process, no orphaned
-# python.exe after mpv exits.
+# Hardware scan-code helper via AutoHotkey (Windows):
+# Active by default (ahk=yes). Translates physical keys when mpv is focused
+# and Arabic layout is active, providing 1:1 hardware key parity for bare keys
+# (h, b, g, etc.). Cleanly auto-terminates 2 seconds after mpv closes.
 #
-# Set enabled=yes to bring the hook back: while mpv is focused it
-# translates printable keys to their US-layout characters, whatever the
-# active layout is. Useful only for non-Latin layouts beyond Arabic 101.
+# On Linux / macOS, layout twins in input.conf handle Arabic mappings
+# with pure config and zero runtime processes.
 #
-# enabled=no  -> do not start the guard (default)
-# command=... -> the command line (the installer writes it with the right
-#                python path)
-# log=...     -> where to write what was translated (empty = the config dir)
+ahk=yes
 enabled=no
 command=
 log=

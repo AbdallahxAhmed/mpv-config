@@ -76,7 +76,7 @@ local function build()
     for _, section in ipairs(SECTIONS) do
         lines[#lines + 1] = "{\\b1}" .. section.title .. "{\\b0}"
         for _, row in ipairs(section.rows) do
-            lines[#lines + 1] = string.format("  {\\b0}%s{\\b0}   %s", row[1], row[2])
+            lines[#lines + 1] = string.format("  {\\b1}%s{\\b0}   %s", row[1], row[2])
         end
     end
     return table.concat(lines, "\\N")
