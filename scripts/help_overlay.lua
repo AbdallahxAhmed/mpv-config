@@ -82,6 +82,12 @@ local function build()
     return table.concat(lines, "\\N")
 end
 
+local overlay = nil
+if mp.create_osd_overlay then
+    overlay = mp.create_osd_overlay("ass-events")
+    overlay.z = 2000
+end
+
 local overlay_visible = false
 local overlay_timer = nil
 
@@ -91,7 +97,11 @@ local function hide()
         overlay_timer:kill()
         overlay_timer = nil
     end
-    mp.commandv("show-text", "", 0)
+    if overlay then
+        overlay:remove()
+    elseif mp.osd_message then
+        mp.osd_message("", 0)
+    end
 end
 
 local function show()
@@ -100,11 +110,17 @@ local function show()
         return
     end
     overlay_visible = true
-    mp.commandv("show-text", "${osd-ass-cc/0}{\\fs16}" .. build(), 12000)
+    if overlay then
+        overlay.data = "{\\an7\\pos(30,30)\\fs14\\bord1\\shad1\\q2}" .. build()
+        overlay:update()
+    elseif mp.osd_message then
+        mp.osd_message(build(), 12)
+    end
     if overlay_timer then overlay_timer:kill() end
     overlay_timer = mp.add_timeout(12, function()
         overlay_visible = false
         overlay_timer = nil
+        if overlay then overlay:remove() end
     end)
 end
 

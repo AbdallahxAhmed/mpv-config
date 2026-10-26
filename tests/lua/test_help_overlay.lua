@@ -27,10 +27,18 @@ local function create_harness()
         get_property = function() return nil end,
         get_property_native = function() return nil end,
         set_property = function() end,
-        commandv = function(name, text, duration)
-            if name == "show-text" then
-                h.osds[#h.osds + 1] = {text = text, duration = (tonumber(duration) or 0) / 1000}
-            end
+        commandv = function() end,
+        create_osd_overlay = function(format)
+            local ov = {
+                format = format,
+                data = "",
+                z = 0,
+                update = function(self)
+                    h.osds[#h.osds + 1] = {text = self.data, duration = 12}
+                end,
+                remove = function(self) end,
+            }
+            return ov
         end,
         add_timeout = function(sec, fn) local t = {fn = fn, kill = function() end}; return t end,
         add_periodic_timer = function() return {kill = function() end} end,
