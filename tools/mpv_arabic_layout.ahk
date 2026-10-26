@@ -12,6 +12,8 @@ WatchMpv() {
 IsArabic() {
     hwnd := WinActive("ahk_exe mpv.exe")
     if !hwnd
+        hwnd := WinActive("ahk_class mpv")
+    if !hwnd
         return false
     threadId := DllCall("GetWindowThreadProcessId", "Ptr", hwnd, "Ptr", 0, "UInt")
     if !threadId
@@ -21,7 +23,7 @@ IsArabic() {
     return primaryLang == 0x01 || ((layout & 0xFFFF) != 0x0409 && primaryLang != 0x09)
 }
 
-#HotIf WinActive("ahk_exe mpv.exe") and IsArabic()
+#HotIf (WinActive("ahk_exe mpv.exe") or WinActive("ahk_class mpv")) and IsArabic()
 
 ; Number row / tilde
 SC029::Send("{Blind}``")

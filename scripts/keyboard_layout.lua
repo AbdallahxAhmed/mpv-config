@@ -107,13 +107,15 @@ local function start_guard()
     msg.info("keyboard layout: guard started")
 end
 
--- The guard is a python process: starting it costs ~120ms, so it
--- waits for the first file instead of delaying the player's start.
 local started = false
-mp.register_event("file-loaded", function()
+local function init_guard()
     if started then return end
     started = true
     start_guard()
-end)
+end
+
+-- Start immediately on script load so idle mode and initial player window have the layout helper active
+init_guard()
+mp.register_event("file-loaded", init_guard)
 
 _G.keyboard_layout = { options = o, start = start_guard }

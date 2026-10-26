@@ -82,12 +82,35 @@ local function build()
     return table.concat(lines, "\\N")
 end
 
+local overlay_visible = false
+local overlay_timer = nil
+
+local function hide()
+    overlay_visible = false
+    if overlay_timer then
+        overlay_timer:kill()
+        overlay_timer = nil
+    end
+    mp.commandv("show-text", "", 0)
+end
+
 local function show()
-    mp.osd_message(build(), 12)
+    if overlay_visible then
+        hide()
+        return
+    end
+    overlay_visible = true
+    mp.commandv("show-text", "${osd-ass-cc/0}{\\fs16}" .. build(), 12000)
+    if overlay_timer then overlay_timer:kill() end
+    overlay_timer = mp.add_timeout(12, function()
+        overlay_visible = false
+        overlay_timer = nil
+    end)
 end
 
 mp.register_script_message("help", show)
 mp.register_script_message("toggle-help", show)
+mp.register_script_message("hide-help", hide)
 
 -- This "?" binding covers Latin layouts; under Arabic the key produces
 -- "؟" and the generated input.conf twin carries the same action (F9 is
@@ -95,4 +118,4 @@ mp.register_script_message("toggle-help", show)
 mp.add_key_binding("?", function() show() end)
 mp.add_key_binding("F9", function() show() end)
 
-_G.help_overlay = { SECTIONS = SECTIONS, build = build }
+_G.help_overlay = { SECTIONS = SECTIONS, build = build, show = show, hide = hide }
