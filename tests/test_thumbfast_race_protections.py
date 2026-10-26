@@ -721,6 +721,55 @@ class TestThumbfastQualitySwitchKeepsThumbnail(unittest.TestCase):
         for name in ("last_loaded_path", "last_loaded_duration", "last_loaded_title"):
             self.assertIn("local %s = nil" % name, self.thumbfast_lua)
 
+    def test_same_video_preserves_active_bgra_path_and_valid_frame(self):
+        """Quality switch must not wipe active_bgra_path or has_valid_frame when same_video is true."""
+        load_idx = self.thumbfast_lua.find("function file_load()")
+        self.assertNotEqual(load_idx, -1)
+        body = self.thumbfast_lua[load_idx : load_idx + 2500]
+        self.assertIn("if not same_video then", body)
+        self.assertIn("active_bgra_path = nil", body)
+        self.assertIn("has_valid_frame = false", body)
+
+    def test_same_video_retains_auth_headers(self):
+        """Quality switch must retain auth headers across same-video reloads to prevent 403 Forbidden."""
+        load_idx = self.thumbfast_lua.find("function file_load()")
+        self.assertNotEqual(load_idx, -1)
+        body = self.thumbfast_lua[load_idx : load_idx + 2500]
+        self.assertIn("stream_ctx.user_agent = stream_ctx.user_agent or stream_ctx.prev_user_agent", body)
+        self.assertIn("stream_ctx.header_fields = stream_ctx.header_fields or stream_ctx.prev_header_fields", body)
+
+    def test_remove_thumbnail_files_spares_active_frame_on_same_video(self):
+        """Active frame buffer must not be deleted while waiting for replacement worker frame."""
+        rem_idx = self.thumbfast_lua.find("local function remove_thumbnail_files()")
+        self.assertNotEqual(rem_idx, -1)
+        body = self.thumbfast_lua[rem_idx : rem_idx + 1500]
+        self.assertIn("if not last_same_video or f1 ~= active_bgra_path then", body)
+        self.assertIn("if not last_same_video then", body)
+
+    def test_draw_permits_prior_seq_buffer_while_same_video(self):
+        """draw() must allow active_bgra_path from previous sequence when last_same_video is true."""
+        draw_idx = self.thumbfast_lua.find("local function draw(w, h, script)")
+        self.assertNotEqual(draw_idx, -1)
+        body = self.thumbfast_lua[draw_idx : draw_idx + 600]
+        self.assertIn("last_same_video and mp.utils.file_info(active_bgra_path)", body)
+
+    def test_worker_vid_auto_for_direct_network_urls(self):
+        """Direct stream URLs must use --vid=auto so worker does not fail on single-track streams."""
+        spawn_idx = self.thumbfast_lua.find("local function spawn(time)")
+        self.assertNotEqual(spawn_idx, -1)
+        body = self.thumbfast_lua[spawn_idx : spawn_idx + 3500]
+        self.assertIn('local worker_vid = "auto"', body)
+        self.assertIn('if not is_net or is_edl then', body)
+        self.assertIn('"--vid="..worker_vid', body)
+
+    def test_sync_changes_vid_re_enables_info_immediately(self):
+        """sync_changes('vid') must call info() when track recovers from disabled state."""
+        sync_idx = self.thumbfast_lua.find("local function sync_changes(prop, val)")
+        self.assertNotEqual(sync_idx, -1)
+        body = self.thumbfast_lua[sync_idx : sync_idx + 600]
+        self.assertIn("if has_vid == 1 and (last_has_vid == 0 or disabled) and effective_w and effective_h then", body)
+        self.assertIn("info(effective_w, effective_h)", body)
+
 
 class TestThumbfastNetworkWorkerDoesNotStarvePlayback(unittest.TestCase):
     """The thumbnail worker is a second mpv downloading the same stream.

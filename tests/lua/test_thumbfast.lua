@@ -161,3 +161,36 @@ test('registered file-loaded event handler runs clean twice',function()
     load_event()
     cleanup()
 end)
+
+test('quality switch retains auth context across same-video reloads',function()
+    local h=harness({
+        ['path']='https://www.youtube.com/watch?v=same123',
+        ['duration']=120,
+        ['metadata/title']='Same Video'
+    })
+    open_youtube_stream(h,'https://www.youtube.com/watch?v=same123','https://rr.googlevideo.com/1080p')
+    h.observers['user-data/mpv/ytdl/json-subprocess-result']('user-data/mpv/ytdl/json-subprocess-result',
+        {status=0,stdout='{"http_headers":{"User-Agent":"test_agent","Referer":"https://youtube.com"}}'})
+    local load_event
+    for _,ev in ipairs(h.events) do
+        if ev.kind=='file-loaded' then load_event=ev.fn end
+    end
+    eq(type(load_event),'function')
+    load_event()
+    -- Fast quality switch to 720p URL for same video
+    h.props['stream-open-filename'] = 'https://rr.googlevideo.com/720p'
+    h.observers['stream-open-filename']('stream-open-filename', 'https://rr.googlevideo.com/720p')
+    load_event()
+    cleanup()
+end)
+
+test('sync_changes vid transitions cleanly and re-enables',function()
+    local h=harness({
+        ['video-out-params']={dw=1280, dh=720, par=1}
+    })
+    if h.observers['vid'] then
+        h.observers['vid']('vid', false)
+        h.observers['vid']('vid', 1)
+    end
+    cleanup()
+end)

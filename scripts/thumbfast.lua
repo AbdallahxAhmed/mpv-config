@@ -72,6 +72,10 @@ local stream_ctx = {
     auth_path = nil,
     is_ready = false,
     created_at = nil,
+    prev_user_agent = nil,
+    prev_referer = nil,
+    prev_header_fields = nil,
+    prev_cookies_file = nil,
 }
 
 local pending_spawn_target = nil
@@ -100,6 +104,10 @@ end
 
 local function reset_stream_ctx()
     stream_ctx.generation_id = stream_ctx.generation_id + 1
+    stream_ctx.prev_user_agent = stream_ctx.user_agent or stream_ctx.prev_user_agent
+    stream_ctx.prev_referer = stream_ctx.referer or stream_ctx.prev_referer
+    stream_ctx.prev_header_fields = stream_ctx.header_fields or stream_ctx.prev_header_fields
+    stream_ctx.prev_cookies_file = stream_ctx.cookies_file or stream_ctx.prev_cookies_file
     stream_ctx.original_path = nil
     stream_ctx.resolved_url = nil
     stream_ctx.user_agent = nil
@@ -251,6 +259,7 @@ local has_valid_frame = false
 local last_loaded_path = nil
 local last_loaded_duration = nil
 local last_loaded_title = nil
+local last_same_video = false
 
 -- Single-flight overlay dispatcher state
 local overlay_busy = false
@@ -684,11 +693,19 @@ local function remove_thumbnail_files()
     end
     for seq = 0, file_seq do
         for slot = 1, 3 do
-            os.remove(base_thumbnail.."_"..seq.."."..seq.."."..slot..".bgra")
-            os.remove(base_thumbnail.."_"..seq.."."..slot..".bgra")
+            local f1 = base_thumbnail.."_"..seq.."."..seq.."."..slot..".bgra"
+            local f2 = base_thumbnail.."_"..seq.."."..slot..".bgra"
+            if not last_same_video or f1 ~= active_bgra_path then
+                os.remove(f1)
+            end
+            if not last_same_video or f2 ~= active_bgra_path then
+                os.remove(f2)
+            end
         end
     end
-    active_bgra_path = nil
+    if not last_same_video then
+        active_bgra_path = nil
+    end
     frame_slot = 0
 end
 
@@ -712,7 +729,10 @@ local function spawn(time)
     if not effective_w or not effective_h then
         calc_dimensions()
     end
-    if not effective_w or not effective_h then return end
+    if not effective_w or not effective_h then
+        pending_spawn_target = time
+        return
+    end
 
     local path = properties["path"]
     if path == nil then return end
@@ -748,12 +768,19 @@ local function spawn(time)
     thumbnail_path = options.thumbnail
 
     local vid = properties["vid"]
-    has_vid = vid or 0
+    local is_edl = spawn_path and spawn_path:find("^edl://") ~= nil
+    local worker_vid = "auto"
+    if type(vid) == "number" and vid > 0 then
+        if not is_net or is_edl then
+            worker_vid = tostring(vid)
+        end
+    end
+    has_vid = (vid == false or vid == "no" or vid == 0) and 0 or 1
 
     local args = {
         mpv_path, "--no-config", "--msg-level=all=warn", "--idle", "--pause", "--keep-open=always", "--no-terminal",
         "--load-scripts=no", "--osc=no", "--load-stats-overlay=no", "--load-osd-console=no", "--load-auto-profiles=no",
-        "--edition="..(properties["edition"] or "auto"), "--vid="..(vid or "auto"), "--no-sub", "--no-audio",
+        "--edition="..(properties["edition"] or "auto"), "--vid="..worker_vid, "--no-sub", "--no-audio",
         "--start="..time, seek_mode,
         "--ytdl-format=worst", "--demuxer-readahead-secs="..reahead_secs, "--demuxer-max-bytes="..demux_bytes,
         "--cookies="..(properties["cookies"] or "no"),
@@ -1048,8 +1075,10 @@ local function draw(w, h, script)
     if active_bgra_path then
         local prefix = thumbnail_path .. "." .. file_seq .. "."
         if not string.find(active_bgra_path, prefix, 1, true) then
-            mp.msg.trace("DRAW: discarding stale bgra path (wrong file_seq): " .. tostring(active_bgra_path) .. " expected_prefix=" .. tostring(prefix))
-            return
+            if not (last_same_video and mp.utils.file_info(active_bgra_path)) then
+                mp.msg.trace("DRAW: discarding stale bgra path (wrong file_seq): " .. tostring(active_bgra_path) .. " expected_prefix=" .. tostring(prefix))
+                return
+            end
         end
     end
     if x ~= nil then
@@ -1277,6 +1306,7 @@ local function check_new_thumb()
         local target_bgra = thumbnail_path .. "." .. file_seq .. "." .. frame_slot .. ".bgra"
         move_file(tmp, target_bgra)
         active_bgra_path = target_bgra
+        last_same_video = false
 
         real_w, real_h = w, h
 
@@ -1636,7 +1666,11 @@ local function sync_changes(prop, val)
     end
 
     if prop == "vid" then
-        has_vid = 1
+        has_vid = (val == "no" or val == 0) and 0 or 1
+        if has_vid == 1 and (last_has_vid == 0 or disabled) and effective_w and effective_h then
+            last_has_vid = 1
+            info(effective_w, effective_h)
+        end
     end
 
     if not spawned then return end
@@ -2126,6 +2160,7 @@ function file_load()
     -- the new frame has been captured.
     local loaded_path = mp.get_property("path") or ""
     local same_video = is_same_video(loaded_path)
+    last_same_video = same_video
     clear(same_video)
     spawned = false
     dirty = true
@@ -2143,7 +2178,10 @@ function file_load()
     seek_pipeline.in_flight_target = nil
     seek_pipeline.in_flight_generation = 0
     seek_pipeline.pending_target = nil
-    active_bgra_path = nil
+    if not same_video then
+        active_bgra_path = nil
+        has_valid_frame = false
+    end
     frame_slot = 0
     if info_timer then
         info_timer:kill()
@@ -2151,11 +2189,25 @@ function file_load()
     end
     using_storyboards = false
     thumbnail_delta = nil
-    has_valid_frame = false
     pending_respawn = false
     pending_respawn_time = nil
 
     reset_stream_ctx()
+    if same_video then
+        stream_ctx.user_agent = stream_ctx.user_agent or stream_ctx.prev_user_agent
+        stream_ctx.referer = stream_ctx.referer or stream_ctx.prev_referer
+        stream_ctx.header_fields = stream_ctx.header_fields or stream_ctx.prev_header_fields
+        stream_ctx.cookies_file = stream_ctx.cookies_file or stream_ctx.prev_cookies_file
+        stream_ctx.auth_path = loaded_path
+        if stream_ctx.user_agent or stream_ctx.header_fields then
+            stream_ctx.is_ready = true
+        end
+    else
+        stream_ctx.prev_user_agent = nil
+        stream_ctx.prev_referer = nil
+        stream_ctx.prev_header_fields = nil
+        stream_ctx.prev_cookies_file = nil
+    end
 
     run("quit")
     if winapi then
