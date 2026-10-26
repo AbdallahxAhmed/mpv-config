@@ -34,7 +34,7 @@
 | **default streaming quality** | `script-opts/stream_quality.conf` `default_quality` (shipped `1080`; `0` = uncapped) — single source of truth for the stream format. |
 | **fast quality switch** | Toolbar-driven reload of an already-extracted stream (~1 s instead of a ~4–6 s yt-dlp round-trip). |
 | **layout twins** | `src/mpv_config/layout_twins.py` — deploy-time generator appending same-physical-key Arabic-101 twin bindings to the deployed `input.conf` on every install/update (`c→ؤ a→ش n→ى ?→؟`). `h g b G B` are untwinnable bare — the real key stream aliases b≡h on `ا`, G≡H on `أ`, B≡N on `آ` (measured via `--input-test`) — and their `Ctrl+Shift+h/m/s/b/u` backups are ALSO twinned (under Arabic those combos arrive as `Ctrl+أ/’/ٍ/آ/‘` — measured), and the template binds the bare shift-layer glyphs `أ/’/ٍ/آ/‘` so Shift+letter works with no Ctrl (mechanics: see AGENTS.md). |
-| **layout guard** | `scripts/keyboard_layout.lua` + `src/mpv_config/layout_guard.py` — the retired Windows keyboard hook (translated keys to US characters while mpv was focused). Opt-in via `script-opts/keyboard_layout.conf` `enabled=yes`; disabled by default since the twins. |
+| **keyboard layout helper** | `scripts/keyboard_layout.lua` + `tools/mpv_arabic_layout.ahk` (AutoHotkey v2 hardware scan-code helper on Windows) + `src/mpv_config/layout_twins.py` (offline layout twins generator for `input.conf`). |
 | **experience profiles** | `--mpv-profile`: `windows-like` / `linux-like` / `native` — the parity mechanism: the same gpu-next baseline everywhere, with only the rendering backend (d3d11 / Vulkan / VideoToolbox) swapped per platform. |
 | **scaler tiers** | `--scaler-tier`: `light` / `balanced` / `quality`. |
 | **display modes** | `--display-mode`: `fixed` (display-resample, default) / `vrr` (audio-sync, no interpolation). |
@@ -61,8 +61,8 @@ scripts/         custom + vendored Lua; scripts/modules/ = shared Lua modules
                  (stream_policy.lua; main.lua is just a scanner marker)
 deploy/          the deploy engine: registry, detector, fetcher, planner,
                  installer (system deps), transaction, verifier, audit_log, ui
-src/mpv_config/  the pip package: cli/ (the mpv-config command), layout_guard.py
-                 (Windows keyboard hook), downloaders/ (plugin framework)
+src/mpv_config/  the pip package: cli/ (the mpv-config command),
+                 downloaders/ (plugin framework), layout_twins.py
 tools/           download_worker.py (16-connection turbo), universal_downloader,
                  vtt_translate, yt_dlp_plugins/extractor (custom yt-dlp
                  extractors + _sitekit.py site-policy mixin), extension/ +
