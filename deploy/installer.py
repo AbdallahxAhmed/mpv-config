@@ -2001,6 +2001,8 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
     # Core deps always, optional deps we just warn about
     core_deps = ["mpv", "yt-dlp", "ffmpeg", "python", "uv"]
     optional_deps = ["ffsubsync", "alass"]
+    if env.os == "windows":
+        optional_deps.append("autohotkey")
 
     to_install = []
     already_ok = []
@@ -2436,7 +2438,53 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
             ui.warn(f"ffsubsync install notice: {e}")
             results.append({"name": "ffsubsync", "status": "failed", "detail": str(e)})
 
-    # 5. Local deployment artifact: update active ytdl_hook.conf
+    # 5. autohotkey (Windows only, keyboard scan-code layout helper)
+    if env.os == "windows":
+        ui.step("Checking autohotkey (keyboard scan-code layout helper)...")
+        ahk_exe = os.path.join(target, "AutoHotkey64.exe")
+        if dry_run:
+            results.append({"name": "autohotkey", "status": "skipped", "detail": "dry-run"})
+        else:
+            try:
+                if not force and (
+                    os.path.isfile(ahk_exe)
+                    or shutil.which("AutoHotkey64.exe")
+                    or shutil.which("AutoHotkey.exe")
+                ):
+                    ui.success(f"autohotkey: available ({ahk_exe})")
+                    results.append({"name": "autohotkey", "status": "ok", "path": ahk_exe})
+                else:
+                    release = _fetch_latest_release("AutoHotkey/AutoHotkey")
+                    patterns = [r"^AutoHotkey_.*\.zip$"]
+                    asset = _select_release_asset(release, patterns)
+                    if asset:
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            archive_path = os.path.join(tmpdir, asset["name"])
+                            ui.step(
+                                f"Downloading {asset['name']} ({asset.get('size', 0) / (1024*1024):.1f} MB)..."
+                            )
+                            _download_asset(asset["browser_download_url"], archive_path)
+                            with zipfile.ZipFile(archive_path) as zf:
+                                for name in zf.namelist():
+                                    if name.lower() in ("autohotkey64.exe", "autohotkey.exe"):
+                                        zf.extract(name, target)
+                                        _unblock_path(os.path.join(target, name))
+                        ui.success(f"autohotkey: verified at {ahk_exe}")
+                        results.append({"name": "autohotkey", "status": "ok", "path": ahk_exe})
+                        if audit_log:
+                            audit_log.record_file(
+                                ahk_exe, "download", "ok", "AutoHotkey binary"
+                            )
+                    else:
+                        ui.warn("No matching AutoHotkey asset found")
+                        results.append(
+                            {"name": "autohotkey", "status": "skipped", "detail": "no asset"}
+                        )
+            except Exception as e:
+                ui.warn(f"autohotkey fetch notice: {e}")
+                results.append({"name": "autohotkey", "status": "failed", "detail": str(e)})
+
+    # 6. Local deployment artifact: update active ytdl_hook.conf
     try:
         from deploy.deployer import _resolve_ytdl_path
 

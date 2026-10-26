@@ -14,6 +14,7 @@ WINDOWS_YTDLP_DIR = os.path.join(WINDOWS_MPV_DIR, "yt-dlp")
 WINDOWS_UV_DIR = os.path.join(WINDOWS_MPV_DIR, "uv")
 WINDOWS_FFSUBSYNC_DIR = os.path.join(WINDOWS_MPV_DIR, "ffsubsync")
 WINDOWS_ALASS_DIR = os.path.join(WINDOWS_MPV_DIR, "alass")
+WINDOWS_AUTOHOTKEY_DIR = os.path.join(WINDOWS_MPV_DIR, "autohotkey")
 WINDOWS_FFMPEG_BIN_DIR = os.path.join(WINDOWS_FFMPEG_DIR, "bin")
 # Standalone GitHub binaries (alass, yt-dlp on distros with frozen packages)
 # go into the user's own PATH dir; Ubuntu/Fedora add ~/.local/bin to PATH
@@ -419,6 +420,20 @@ SYSTEM_DEPS = {
         "fedora": {"method": "uv"},
         "macos": {"method": "uv"},
         "verify": ["uv", "--version"],
+    },
+    "autohotkey": {
+        "windows": {
+            "method": "github_release_zip",
+            "repo": "AutoHotkey/AutoHotkey",
+            "asset_patterns": [
+                r"^AutoHotkey_.*\.zip$",
+            ],
+            "install_dir": WINDOWS_AUTOHOTKEY_DIR,
+            "expected_bins": ["AutoHotkey64.exe"],
+            "ensure_in_dir": WINDOWS_AUTOHOTKEY_DIR,
+            "bin_names": ["AutoHotkey64.exe"],
+        },
+        "verify": ["AutoHotkey64.exe", "/?"],
     },
 }
 

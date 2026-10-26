@@ -212,7 +212,6 @@ class TestSmartSkipConflictAudit(unittest.TestCase):
             "add_chapter_keybind": "ء",
             "remove_chapter_keybind": "ق",
             "write_chapters_keybind": "ك",
-            "silence_skip_keybind": "؟",
         }
         for name, arabic in expected_subset.items():
             self.assertIn(arabic, self.conf.get(name, []), "SmartSkip %s lost its %r twin" % (name, arabic))

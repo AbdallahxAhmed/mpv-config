@@ -103,6 +103,8 @@ Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual
 # "?" is a punctuation key, so it works in every layout.
 ? no-osd script-message-to help_overlay help
 F9 no-osd script-message-to help_overlay help
+# Prevent accidental volume drop when pressing physical '/' without Shift
+/ ignore
 
 
 # **----- اختصارات مفيدة إضافية (تم التصحيح) -----**

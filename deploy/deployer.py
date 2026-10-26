@@ -1168,6 +1168,11 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             os.path.join(config_dir, "script-opts", "keyboard_layout.conf"),
             lambda p: _migrate_keyboard_layout_conf(p, audit_log=audit_log),
         ),
+        (
+            "migrate-arabic-layout-ahk",
+            os.path.join(config_dir, "tools", "mpv_arabic_layout.ahk"),
+            lambda p: _migrate_arabic_layout_ahk(config_dir, audit_log=audit_log),
+        ),
     )
     results = []
     for migration_name, migration_path, migrate_fn in migration_targets:
@@ -1475,6 +1480,12 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             updated_content.rstrip()
             + "\nF9 no-osd script-message-to help_overlay help\n"
         )
+    if not re.search(r"^[ \t]*/[ \t]+ignore", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\n# Prevent accidental volume drop when pressing physical '/' without Shift\n"
+            + "/ ignore\n"
+        )
 
     #    Manual anime-detection override: ensure it on deployed files that
     #    predate the profile-picker bindings (moved here from Ctrl+Shift+g:
@@ -1608,6 +1619,14 @@ def _migrate_smartskip_conf(conf_path, audit_log=None):
             'write_chapters_keybind=["ctrl+n", "ctrl+ى"]',
             'write_chapters_keybind=["ctrl+n", "ك"]',
         ),
+        (
+            'silence_skip_keybind=["?", "؟"]',
+            'silence_skip_keybind=["ctrl+?"]',
+        ),
+        (
+            'silence_skip_keybind=["?"]',
+            'silence_skip_keybind=["ctrl+?"]',
+        ),
     )
 
     for old, new in replacements:
@@ -1654,6 +1673,29 @@ def _migrate_keyboard_layout_conf(conf_path, audit_log=None):
             )
         return True
     return False
+
+
+def _migrate_arabic_layout_ahk(config_dir, audit_log=None):
+    """Deploy or update mpv_arabic_layout.ahk in %APPDATA%/mpv/tools."""
+    source = os.path.join(str(REPO_ROOT), "tools", "mpv_arabic_layout.ahk")
+    if not os.path.isfile(source):
+        return False
+    target_tools = os.path.join(config_dir, "tools")
+    os.makedirs(target_tools, exist_ok=True)
+    target = os.path.join(target_tools, "mpv_arabic_layout.ahk")
+    if os.path.isfile(target):
+        try:
+            with open(source, "rb") as f1, open(target, "rb") as f2:
+                if f1.read() == f2.read():
+                    return False
+        except OSError:
+            pass
+    shutil.copy2(source, target)
+    if audit_log:
+        audit_log.record_file(
+            target, "copy", "ok", "deployed mpv_arabic_layout.ahk helper"
+        )
+    return True
 
 
 def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):

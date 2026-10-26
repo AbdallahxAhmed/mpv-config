@@ -22,26 +22,75 @@ local options = require 'mp.options'
 
 local o = {
     enabled = true,
+    ahk = true,
     command = "",
     log = "",
 }
 options.read_options(o, "keyboard_layout")
 
+local function file_exists(path)
+    local f = io.open(path, "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+local function resolve_ahk()
+    local ok_dir, dir = pcall(mp.get_property, "config-dir")
+    if not ok_dir or not dir or dir == "" then return nil, nil end
+    local sep = dir:sub(-1)
+    if sep ~= "/" and sep ~= "\\" then dir = dir .. "/" end
+
+    local ahk_script = dir .. "tools/mpv_arabic_layout.ahk"
+    if not file_exists(ahk_script) then
+        ahk_script = dir .. "mpv_arabic_layout.ahk"
+        if not file_exists(ahk_script) then
+            return nil, nil
+        end
+    end
+
+    local candidates = {
+        dir .. "tools/AutoHotkey64.exe",
+        dir .. "tools/autohotkey/AutoHotkey64.exe",
+        dir .. "AutoHotkey64.exe",
+        "C:\\Program Files\\mpv\\autohotkey\\AutoHotkey64.exe",
+        "C:\\Program Files\\mpv\\tools\\AutoHotkey64.exe",
+        "C:\\Program Files\\AutoHotkey\\v2\\AutoHotkey64.exe",
+        "C:\\Program Files\\AutoHotkey\\AutoHotkey64.exe",
+    }
+    for _, exe in ipairs(candidates) do
+        if file_exists(exe) then
+            return exe, ahk_script
+        end
+    end
+    return nil, nil
+end
+
 local function start_guard()
+    -- 1. Automatic AutoHotkey scan-code helper for Windows
+    if o.ahk then
+        local ahk_exe, ahk_script = resolve_ahk()
+        if ahk_exe and ahk_script then
+            local cmd = 'start "" /B "' .. ahk_exe:gsub("/", "\\") .. '" "' .. ahk_script:gsub("/", "\\") .. '" >nul 2>&1'
+            local ok, err = pcall(io.popen, cmd, "r")
+            if ok then
+                msg.info("keyboard layout: AHK helper started")
+                return
+            end
+        end
+    end
+
+    -- 2. Legacy Python ctypes guard (requires enabled=yes and explicit command)
     if not o.enabled or o.command == "" then return end
     if not o.command:find("mpv_config%.layout_guard") then
         msg.warn("keyboard layout: the configured command does not look like the guard")
         return
     end
-    -- start /B detaches: mpv must not wait for the guard.
-    -- The output is redirected as well: without it the guard keeps mpv's
-    -- pipe open and io.popen never returns, which blocks this script's
-    -- thread for as long as the guard runs.
     local command = o.command
     local log = o.log
     if log == "" then
-        -- mp.get_config_dir does not exist in this mpv (probe: nil), but
-        -- the config-dir property is always there.
         local ok_dir, dir = pcall(mp.get_property, "config-dir")
         if ok_dir and dir and dir ~= "" then
             local sep = dir:sub(-1)
