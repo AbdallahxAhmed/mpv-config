@@ -712,7 +712,8 @@ end
 local function remove_storyboard_files()
     local atlas = 0
     for thumb_index, thumb_filename in pairs(storyboard_thumbnails) do
-        atlas_index = math.ceil(thumb_index / thumb_count_per_storyboard)
+        local atlas_index = thumb_count_per_storyboard and thumb_count_per_storyboard > 0
+            and math.ceil(thumb_index / thumb_count_per_storyboard) or 0
         if atlas_index > atlas then
             atlas = atlas_index
             os.remove(options.thumbnail..".ytdl"..tostring(atlas_index))

@@ -283,6 +283,7 @@ local function arm_fast_watch(attempt, target_h, is_cap)
             mp.unregister_event(on_loaded)
             pending_fast = nil
             if attempt.timer then pcall(attempt.timer.kill, attempt.timer) end
+            pcall(mp.del_property, 'user-data/mpv/ytdl/fast-headers')
             fast_switch_restore(attempt)
         end
     end

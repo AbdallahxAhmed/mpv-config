@@ -313,6 +313,18 @@ local function append_libav_opt(props, name, value)
     return props
 end
 
+-- YouTube and similar CDNs throttle unbounded range requests down to ~9 KB/s.
+-- Enforce a bounded 10 MiB request chunk size to maintain full download bandwidth.
+local DEFAULT_HTTP_CHUNK_SIZE = 10 * 1024 * 1024
+
+local function set_stream_chunk_size(chunk_size)
+    if not chunk_size or chunk_size <= 0 or chunk_size == math.huge then return end
+    mp.set_property_native("file-local-options/curl-max-request-size", chunk_size)
+    local stream_opts = mp.get_property_native("file-local-options/stream-lavf-o") or {}
+    stream_opts = append_libav_opt(stream_opts, "request_size", tostring(chunk_size))
+    mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
+end
+
 local function edl_escape(data)
     data = tostring(data):gsub("\r\n", " "):gsub("[\r\n]", " ")
     return "%" .. string.len(data) .. "%" .. data
@@ -1022,11 +1034,10 @@ local function add_single_video(json)
         end
     end
     if chunk_size < math.huge then
-        stream_opts = append_libav_opt(stream_opts, "request_size", tostring(chunk_size))
-        mp.set_property_native("file-local-options/curl-max-request-size", chunk_size)
+        set_stream_chunk_size(chunk_size)
+    else
+        mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
     end
-
-    mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
 end
 
 -- Rebuild the argv without the extractor-args override. The hook emits the
@@ -1462,6 +1473,21 @@ local function run_ytdl_hook(url)
     msg.debug('script running time: '..os.clock()-start_time..' seconds')
 end
 
+local function apply_fast_switch(fast_url)
+    mp.del_property("user-data/mpv/ytdl/fast-url")
+    mp.del_property("user-data/mpv/ytdl/fast-source-url")
+    mp.set_property("stream-open-filename", fast_url)
+    set_stream_chunk_size(DEFAULT_HTTP_CHUNK_SIZE)
+
+    local headers = mp.get_property_native("user-data/mpv/ytdl/fast-headers")
+    if headers then
+        set_http_headers(headers)
+        mp.del_property("user-data/mpv/ytdl/fast-headers")
+    end
+
+    msg.info("fast switch: skipping extraction for pre-resolved URL")
+end
+
 local function on_load_hook(load_fail, hook)
     local url = mp.get_property("stream-open-filename", "")
     -- Fast quality switch: the toolbar loads an already-resolved media URL
@@ -1475,25 +1501,7 @@ local function on_load_hook(load_fail, hook)
         local fast_url = mp.get_property_native("user-data/mpv/ytdl/fast-url")
         local fast_source = mp.get_property_native("user-data/mpv/ytdl/fast-source-url")
         if fast_url and (fast_url == url or (fast_source and fast_source == url)) then
-            mp.del_property("user-data/mpv/ytdl/fast-url")
-            mp.del_property("user-data/mpv/ytdl/fast-source-url")
-            mp.set_property("stream-open-filename", fast_url)
-
-            -- Keep YouTube CDN chunking active on fast-switched streams: without
-            -- bounded request sizes, CDN servers throttle unbounded range requests.
-            local chunk = 10485760
-            mp.set_property_native("file-local-options/curl-max-request-size", chunk)
-            local stream_opts = mp.get_property_native("file-local-options/stream-lavf-o") or {}
-            stream_opts = append_libav_opt(stream_opts, "request_size", tostring(chunk))
-            mp.set_property_native("file-local-options/stream-lavf-o", stream_opts)
-
-            local headers = mp.get_property_native("user-data/mpv/ytdl/fast-headers")
-            if headers then
-                set_http_headers(headers)
-                mp.del_property("user-data/mpv/ytdl/fast-headers")
-            end
-
-            msg.info("fast switch: skipping extraction for pre-resolved URL")
+            apply_fast_switch(fast_url)
             return
         end
     end
