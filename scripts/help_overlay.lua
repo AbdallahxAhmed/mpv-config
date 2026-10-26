@@ -60,9 +60,9 @@ local SECTIONS = {
     {
         title = "KEYBOARD LAYOUT",
         rows = {
-            { "c a n ?", "same physical key in Arabic (generated twins)" },
-            { "Shift+h m s b u", "history mark submit backdrop upvote (Arabic, no Ctrl)" },
-            { "h g b G B", "bare keys alias under Arabic - Shift or Ctrl+Shift routes" },
+            { "All physical keys", "work identically in Arabic & English (AHK hardware scan codes)" },
+            { "c a n ?", "same physical key in Arabic (built-in layout twins)" },
+            { "h g b", "playback history, mark segment, backdrop toggle (same physical keys)" },
             { "Ctrl+Shift+t", "manual anime-detection override (was Ctrl+Shift+g)" },
             { "Ctrl+<letter>", "always the Latin key (Windows control codes)" },
             { "F-keys, space", "layout independent" },
