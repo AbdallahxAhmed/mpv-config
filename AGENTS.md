@@ -4,7 +4,7 @@ shell commands, and other important information, read the current plan
 at specs/004-playback-performance/plan.md
 <!-- SPECKIT END -->
 
-## Agent context — current status (refreshed 2026-10-25, layout twins shipped)
+## Agent context — current status (refreshed 2026-10-26, Arabic keyboard: bare-shift route shipped)
 
 ### Where things live
 - **This repo (source of truth):** `~\Desktop\mpv-config-clean` — all edits, tests and commits happen here; origin `github.com/AbdallahxAhmed/mpv-config.git`.
@@ -14,9 +14,19 @@ at specs/004-playback-performance/plan.md
 - **Test suites:** `python -m unittest discover -s tests` and `python tests/run_lua_tests.py`.
 
 ### State of main
-- `12f848a` (twins + sequences) on `main`, pushed; deployed to `%APPDATA%\mpv` on 2026-10-25. Tests green: 439 Python (43 skipped) + all Lua suites. A rare transient single-error run can hit the network-port tests (unreleased socket); **re-run before believing a failure**.
+- `7a3eaf2` on `main`, pushed; deployed to `%APPDATA%\mpv` on 2026-10-25 (idempotent, 0 repairs on re-run). Tests green: 441 Python (43 skipped) + all Lua suites. A rare transient single-error run can hit the network-port tests (unreleased socket); **re-run before believing a failure**.
 
-### How the keyboard layout works now (layout twins; hook guard retired to opt-in)
+### Arabic keyboard — what works NOW (deployed, verified in live headless mpv)
+| User presses (Arabic layout) | Delivers to mpv | Fires |
+| --- | --- | --- |
+| `C` `A` `N` bare | `ؤ` `ش` `ى` | subtitles / audio / sync menus — **user-confirmed working** |
+| `Shift+H` `Shift+M` `Shift+S` `Shift+B` `Shift+U` (no Ctrl) | `أ` `’` `ٍ` `آ` `‘` | history / mark / submit / backdrop / upvote — **deployed 2026-10-25, NOT yet user-accepted** |
+| `Ctrl+Shift+H/M/S/B/U` | `Ctrl+أ/’/ٍ/آ/‘` | same five actions — **user capture confirmed the delivery; bindings matched** |
+| `Shift+G` | `أ` (same as Shift+H) | history (mark lives on Shift+M) |
+| English layout | Latin | everything as always |
+| `?` under Arabic | **UNKNOWN — no `؟` event ever captured** | cheat sheet NOT confirmed; `F9` always works |
+
+### How the keyboard layout works (layout twins; hook guard retired to opt-in)
 - mpv matches bindings by the CHARACTER a key produces ("mpv uses input translated by the current OS keyboard layout, rather than physical scan codes"; upstream issue #351 open since 2013 — no native fix). `src/mpv_config/layout_twins.py` generates a twin block appended to the DEPLOYED input.conf on every install/update: for each printable Latin binding, a binding on the Arabic-101 character of the SAME physical key (`c→ؤ a→ش n→ى ?→؟`), AND for each `Ctrl+Shift+<letter>` binding a modified twin on `Ctrl+<the shift-layer Arabic char>` (`Ctrl+Shift+h→Ctrl+أ m→Ctrl+’ s→Ctrl+ٍ b→Ctrl+آ u→Ctrl+‘`). Users write Latin only; twins regenerate — nothing maintained by hand, no processes.
 - Table provenance: one-shot offline probe of the loaded Arabic layout (hkl `0x04010c01`, KLID `00000401` = Arabic 101) via `ToUnicodeEx` with an explicit hkl + zeroed state + dead-key double-call, agreeing with xkb `ara(basic)` and with the old session's probe. This is NOT the guard's banned RUNTIME VK→char path (that trap was about live queries under polluted key state). User's layouts (registry): US + `00000c01` substituted to `00000401`.
 - Bare keys `h g b G B` are untwinnable — MEASURED on the real key stream (user's `--input-test` capture 2026-10-25): a b keypress delivers ONLY `ا` to mpv; the `ل` of every lam-alef pair NEVER arrives. So b≡h (both send `ا`), G≡H (`أ`), B≡N (`آ`) — physically aliased, no config can separate them; a `ل-ا` sequence twin looked correct headlessly but never fires on hardware (experiment 2026-10-25, reverted same day). Their actions are covered by the Ctrl+Shift+ backups' modified twins (`Ctrl+أ` etc. — SEE NEXT BULLET).
@@ -26,8 +36,10 @@ at specs/004-playback-performance/plan.md
 - The hook guard (`scripts/keyboard_layout.lua` + `src/mpv_config/layout_guard.py`) still ships but is `enabled=no` by default (template) and migrated off on existing installs (`_migrate_keyboard_layout_conf`). Re-enable in `script-opts/keyboard_layout.conf` for layouts beyond Arabic 101. Its traps (spawn `>nul 2>&1`, `mp.get_config_dir` absent) live in CONTEXT.md §9.
 - Deployer seams: `_patch_input_conf` (fresh installs) and `_migrate_input_conf` rule 8 (updates; also removes the legacy "Arabic Bilingual Twin Bindings" mnemonic block — actions on OTHER physical keys like `ح`=P — and ensures the backups). Tests: `tests/test_layout_twins.py` (unit + migration) and `tests/test_layout_twins_integration.py` (agent-owned `--no-config` mpv over a unique IPC pipe: `keypress` an Arabic char, assert via `user-data` that the twin fired — red without the block, green with it).
 
-### Open item — user-side acceptance (blocked on the user)
-The physical keystroke half cannot be verified headlessly (synthetic injection would type into the user's apps; `keypress` does not match the real stream for multi-char keys). Recipe after deploy: restart mpv → switch to Arabic while mpv is focused → `C` `A` `N` bare (CONFIRMED WORKING in his capture); **`Shift+h` → history, `Shift+b` → backdrop, `Shift+m/s/u` → mark/submit/upvote — bare, no Ctrl (the bare-shift route, deployed 2026-10-25)**; `Ctrl+Shift+H/B/M/S/U` also work (modified twins `Ctrl+أ/آ/’/ٍ/‘` — confirmed by his capture matching memo-history/backdrop). `?` still unconfirmed (his capture had no ؟ event; F9 covers the cheat sheet).
+### Open items
+1. **User-side acceptance of the bare-shift route** (deployed AFTER his last test): restart mpv → Arabic layout focused → `Shift+H` history, `Shift+B` backdrop, `Shift+M/S/U` mark/submit/upvote. The mechanics are proven (his capture showed Shift-delivery of shift-layer chars; live mpv shows the bindings registered); only his hands can confirm the feel.
+2. **`؟` (cheat sheet under Arabic) is unexplained**: his two captures contain NO `؟`-key event at all — either he never pressed it during a capture, or the key delivers something unexpected (dead key?). Next step: ask him for an `--input-test` capture where he presses Shift+the-`?`-key specifically, then twin whatever character actually arrives. F9 covers the cheat sheet meanwhile.
+3. **Standing, unsolvable, do not retry**: bare `h` and bare `b` (and bare `g`) can NEVER work under Arabic — their key stream is identical/absent (`b`≡`h` on `ا`, `g` delivers nothing). Also do NOT reintroduce lam-alef sequence twins (`ل-ا`) from headless evidence: `keypress` delivers both characters but the real stream drops the `ل` (2026-10-25 experiment, reverted). The `Ctrl+<letter>` delivery under Arabic (e.g. `Ctrl+H`→`Ctrl+ا`) was observed in a capture but is deliberately unbound — binding it would alias Ctrl+B's downvote onto history; revisit only with the user.
 
 ### Shipped earlier this cycle (all deployed)
 - Fast quality switch (`96490e4`): wide→narrow is instant, playlist keeps canonical URLs.
