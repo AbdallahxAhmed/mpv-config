@@ -20,14 +20,14 @@ local SECTIONS = {
             { "m", "mute" },
             { "f", "fullscreen" },
             { "F3 / F4", "toggle deband / interpolation" },
-            { "Alt+t", "motion scaler: oversample <-> linear" },
+            { "Shift+F4 / Alt+t", "motion scaler: oversample <-> linear" },
             { "Ctrl+Alt+m", "Smart Motion on/off" },
         },
     },
     {
         title = "VIDEO",
         rows = {
-            { "Ctrl+1..Ctrl+6", "Anime4K mode A / B / C / A+A / B+B / C+A" },
+            { "Ctrl+1..Ctrl+6", "Anime4K: A / B / C / A+A / B+B / C+A (saved as default)" },
             { "Ctrl+0", "shaders off" },
             { "Ctrl+g", "cycle the Anime4K mode" },
             { "F5 / F6 / F7", "cycle audio / subtitle / subtitle visibility" },

@@ -366,6 +366,70 @@ class TestAuditPatches(unittest.TestCase):
             # Idempotent for these two fixes specifically.
             self.assertNotIn("clr;", new_content)
 
+    def test_migrate_input_conf_updates_f4_and_shift_f4(self):
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                "SPACE cycle pause\n"
+                'F4 cycle interpolation ; show-text "Motion Interpolation: ${interpolation}"\n'
+                'Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler (tscale): ${tscale}"\n'
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("Shift+F4 cycle-values tscale", new_content)
+            self.assertIn("${?interpolation==yes:ON (144Hz Smooth)}", new_content)
+            self.assertIn("Alt+t cycle-values tscale", new_content)
+
+    def test_migrate_anime4k_conf_seeds_default_a_plus_a(self):
+        from deploy.deployer import _migrate_anime4k_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "script-opts", "anime4k.conf")
+            self.assertFalse(os.path.exists(conf_path))
+
+            migrated = _migrate_anime4k_conf(conf_path)
+            self.assertTrue(migrated)
+            self.assertTrue(os.path.exists(conf_path))
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("mode=A+A", content)
+
+            self.assertFalse(_migrate_anime4k_conf(conf_path))
+
+    def test_migrate_mpv_conf_user_prunes_legacy_audio_sync_override(self):
+        from deploy.deployer import _migrate_mpv_conf_user
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            user_path = os.path.join(tmpdir, "mpv.conf.user")
+            old_content = (
+                "tscale = oversample\n\n"
+                "[protocol.https]\n"
+                "video-sync = audio\n"
+                "interpolation = no\n"
+            )
+            with open(user_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_mpv_conf_user(user_path)
+            self.assertTrue(migrated)
+
+            with open(user_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn("tscale = oversample", new_content)
+            self.assertNotIn("video-sync = audio", new_content)
+            self.assertNotIn("[protocol.https]", new_content)
+
     def test_migrate_mpv_conf_renames_override_display_fps(self):
         from deploy.deployer import _migrate_mpv_conf
 

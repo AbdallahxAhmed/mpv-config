@@ -191,6 +191,7 @@ test('the Anime4K mode is applied with the anime profile', function()
     h.events['file-loaded']()
     local shaders = h.props['glsl-shaders']
     assert(shaders:find('Anime4K_Restore_CNN_VL', 1, true), tostring(shaders))
+    assert(shaders:find('Anime4K_Restore_CNN_M', 1, true), tostring(shaders))
     assert(shaders:find('~~/shaders/', 1, true), tostring(shaders))
 end)
 
@@ -199,7 +200,7 @@ test('a manual chain change is recognised and persisted', function()
     h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
     h.props['track-list'] = JPN
     h.events['file-loaded']()
-    eq('A', pp.state.mode)
+    eq('A+A', pp.state.mode)
     -- the user pressed Ctrl+2: the chain changes under our feet. This is
     -- exactly the chain the shipped Ctrl+2 binding writes.
     h.observers['glsl-shaders']('glsl-shaders',
@@ -229,7 +230,7 @@ test('an empty chain is not a mode change', function()
     -- the base configuration has no shaders: that is not the user asking
     -- for "off"
     h.observers['glsl-shaders']('glsl-shaders', '')
-    eq('A', pp.state.mode)
+    eq('A+A', pp.state.mode)
 end)
 
 test('the profile own chain is not mistaken for a user choice', function()
@@ -237,17 +238,18 @@ test('the profile own chain is not mistaken for a user choice', function()
     h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
     h.props['track-list'] = JPN
     h.events['file-loaded']()
-    eq('A', pp.state.mode)
+    eq('A+A', pp.state.mode)
     -- mpv applies the profile's chain right after the profile is applied;
     -- the observer must ignore it
     h.observers['glsl-shaders']('glsl-shaders',
         '~~/shaders/Anime4K_Clamp_Highlights.glsl;'
         .. '~~/shaders/Anime4K_Restore_CNN_VL.glsl;'
         .. '~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl;'
+        .. '~~/shaders/Anime4K_Restore_CNN_M.glsl;'
         .. '~~/shaders/Anime4K_AutoDownscalePre_x2.glsl;'
         .. '~~/shaders/Anime4K_AutoDownscalePre_x4.glsl;'
         .. '~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl')
-    eq('A', pp.state.mode)
+    eq('A+A', pp.state.mode)
 end)
 
 test('a stream is classified but keeps the light profile', function()
@@ -262,7 +264,7 @@ test('a stream is classified but keeps the light profile', function()
     eq('live-action', h.commands[1][2])
 end)
 
-test('a local anime file gets the anime profile', function()
+test('a local anime file gets the anime profile and active verification OSD', function()
     local h, pp = load_script()
     h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
     h.props['track-list'] = JPN
@@ -270,6 +272,13 @@ test('a local anime file gets the anime profile', function()
     eq(1, #h.commands)
     eq('apply-profile', h.commands[1][1])
     eq('anime', h.commands[1][2])
+    local found_osd = false
+    for _, osd in ipairs(h.osds) do
+        if osd.text:find('Anime Detected: Anime4K %[A%+A%] Active') then
+            found_osd = true
+        end
+    end
+    assert(found_osd, "Anime detection OSD notification was not shown")
 end)
 
 print('Profile picker tests passed: ' .. total)

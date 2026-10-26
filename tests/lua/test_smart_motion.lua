@@ -58,8 +58,18 @@ test('stream_detection: recognizes streaming protocols and rejects local files',
     eq(false, sm.is_network_stream(nil))
 end)
 
-test('stream_web_parity: network streams automatically get native audio-sync & no interpolation', function()
+test('default stream sync: network streams maintain display-resample for 144Hz UI', function()
     local _, sm = load_script()
+    local p = sm.evaluate_motion_profile(143.981, 25.0, true)
+    eq("high_refresh_anti_smear", p.mode)
+    eq("display-resample", p.video_sync)
+    eq(true, p.interpolation)
+    eq("oversample", p.tscale)
+end)
+
+test('stream_web_parity: opt-in web parity gets native audio-sync & no interpolation', function()
+    local _, sm = load_script()
+    sm.options.stream_web_parity = true
     local p = sm.evaluate_motion_profile(143.981, 25.0, true)
     eq("stream_web_parity", p.mode)
     eq("audio", p.video_sync)

@@ -22,6 +22,7 @@
 # │ F2          │  Screenshot (with subtitles)                     │
 # │ F3          │  Toggle deband filter                            │
 # │ F4          │  Toggle interpolation (motion smoothing)         │
+# │ Shift+F4    │  Switch motion scaler (oversample / linear)      │
 # │ F5          │  Cycle audio track                               │
 # │ F6          │  Cycle subtitle track                            │
 # │ F7          │  Show/hide subtitles                             │
@@ -119,10 +120,11 @@ F2 no-osd screenshot
 F3 cycle deband
 
 # F4: تفعيل/تعطيل سلاسة الحركة (Interpolation).
-F4 cycle interpolation ; show-text "Motion Interpolation: ${interpolation}"
+F4 cycle interpolation ; show-text "Motion Interpolation: ${?interpolation==yes:ON (144Hz Smooth)}${?interpolation==no:OFF (Native Cadence)}"
 
-# Alt+t: التبديل بين محددات الحركة الزمنية (oversample حاد بدون تغبيش / linear ناعم)
-Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler (tscale): ${tscale}"
+# Shift+F4 / Alt+t: التبديل بين محددات الحركة الزمنية (oversample حاد بدون تغبيش / linear ناعم)
+Shift+F4 cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler: [${tscale}] ${?tscale==oversample:Crisp (Zero Blur)}${?tscale==linear:Smooth (Blended)}"
+Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler: [${tscale}] ${?tscale==oversample:Crisp (Zero Blur)}${?tscale==linear:Smooth (Blended)}"
 
 # Ctrl+Alt+m: تفعيل/تعطيل محرك الحركة الذكي التلقائي (Smart Motion Engine)
 Ctrl+Alt+m script-binding smart_motion/toggle

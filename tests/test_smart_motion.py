@@ -30,13 +30,14 @@ class TestSmartMotion(unittest.TestCase):
     def test_script_opts_config_defaults(self):
         self.assertTrue(self.conf_path.is_file())
         self.assertIn("enabled=yes", self.conf_content)
-        self.assertIn("stream_web_parity=yes", self.conf_content)
+        self.assertIn("stream_web_parity=no", self.conf_content)
         self.assertIn("high_fps_threshold=50.0", self.conf_content)
 
     def test_input_conf_keybinding_registered(self):
         self.assertIn("Ctrl+Alt+m script-binding smart_motion/toggle", self.input_content)
         # Manual override hotkeys preserved
         self.assertIn("F4 cycle interpolation", self.input_content)
+        self.assertIn("Shift+F4 cycle-values tscale", self.input_content)
         self.assertIn("Alt+t cycle-values tscale", self.input_content)
 
     def test_verifier_checks_smart_motion(self):

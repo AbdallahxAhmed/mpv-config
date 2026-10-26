@@ -68,7 +68,7 @@ local CHAINS = {
         .. "Anime4K_Upscale_CNN_x2_M",
 }
 
-local MODE_ORDER = { "A", "A+A", "B", "B+B", "C+A", "fast", "off" }
+local MODE_ORDER = { "A+A", "A", "B", "B+B", "C+A", "fast", "off" }
 
 local MODE_LABELS = {
     ["off"] = "off",
@@ -109,7 +109,7 @@ local state = {
     applied = nil,     -- profile currently in effect ("anime"/"live-action")
     detected = nil,    -- what the detector decided for the current file
     manual = nil,      -- "anime"/"live-action": the user's explicit choice
-    mode = "A",        -- Anime4K mode in effect
+    mode = "A+A",      -- Anime4K mode in effect
     expect = {},       -- chains WE set - the observer must not read them as a user choice
 }
 
@@ -374,7 +374,7 @@ local function apply_mode(mode, announce)
     state.expect[chain] = true
     mp.set_property("glsl-shaders", chain)
     if announce then
-        mp.osd_message("Anime4K: " .. mode .. " - " .. (MODE_LABELS[mode] or mode), 2)
+        mp.osd_message("Anime4K: " .. mode .. " - " .. (MODE_LABELS[mode] or mode) .. " (Saved as Default)", 2.5)
     end
     return true
 end
@@ -393,7 +393,10 @@ local function apply_profile(anime)
         state.expect[profile_chain] = true
     end
     -- the profile may carry its own chain; the user's mode wins
-    if anime then apply_mode(state.mode, false) end
+    if anime then
+        apply_mode(state.mode, false)
+        mp.osd_message(string.format("Anime Detected: Anime4K [%s] Active", state.mode), 2.5)
+    end
     return true
 end
 
@@ -489,6 +492,6 @@ mp.register_script_message("cycle-mode", function() return M.cycle_mode() end)
 mp.register_script_message("toggle-manual", function() return M.toggle_manual() end)
 mp.register_script_message("detect-profile", function() decide() end)
 
-state.mode = read_mode() or "A"
+state.mode = read_mode() or "A+A"
 
 _G.profile_picker = M

@@ -77,7 +77,7 @@ def _resolve_screenshot_dir(env):
 
 
 def _resolve_anime_chain(preset, shader_sep):
-    chain = ANIME4K_CHAINS.get(preset, ANIME4K_CHAINS["A"])
+    chain = ANIME4K_CHAINS.get(preset, ANIME4K_CHAINS["A+A"])
     if not chain:
         return ""
     parts = [name.strip() for name in chain.split(";") if name.strip()]
@@ -86,7 +86,7 @@ def _resolve_anime_chain(preset, shader_sep):
 
 def _write_anime4k_conf(path, preset):
     """Seed the runtime Anime4K mode the anime profile picks up."""
-    mode = preset if preset in ANIME4K_CHAINS else "A"
+    mode = preset if preset in ANIME4K_CHAINS else "A+A"
     with open(path, "w", encoding="utf-8") as stream:
         stream.write("# Anime4K shader mode used by the anime profile.\n")
         stream.write("# one of: " + " | ".join(ANIME4K_CHAINS.keys()) + "\n")
@@ -338,7 +338,7 @@ def _patch_mpv_conf(
     env,
     selected_profile,
     resolved_defaults,
-    anime_preset="A",
+    anime_preset="A+A",
     scaler_tier="balanced",
     display_mode="fixed",
     dither_depth="auto",
@@ -947,7 +947,7 @@ def deploy(
     dry_run=False,
     audit_log=None,
     mpv_profile=MPV_PROFILE_DEFAULT,
-    anime_preset="A",
+    anime_preset="A+A",
     scaler_tier="balanced",
     stream_quality="1080",
     display_mode="fixed",
@@ -1173,6 +1173,16 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             os.path.join(config_dir, "tools", "mpv_arabic_layout.ahk"),
             lambda p: _migrate_arabic_layout_ahk(config_dir, audit_log=audit_log),
         ),
+        (
+            "migrate-anime4k-conf",
+            os.path.join(config_dir, "script-opts", "anime4k.conf"),
+            lambda p: _migrate_anime4k_conf(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-mpv-conf-user",
+            os.path.join(config_dir, "mpv.conf.user"),
+            lambda p: _migrate_mpv_conf_user(p, audit_log=audit_log),
+        ),
     )
     results = []
     for migration_name, migration_path, migrate_fn in migration_targets:
@@ -1226,6 +1236,30 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         )
         if old_comment in updated_content:
             updated_content = updated_content.replace(old_comment, new_comment)
+
+    # 1b. Migrate F4 interpolation and Shift+F4 motion scaler bindings
+    new_f4_binding = (
+        'F4 cycle interpolation ; show-text "Motion Interpolation: '
+        '${?interpolation==yes:ON (144Hz Smooth)}${?interpolation==no:OFF (Native Cadence)}"'
+    )
+    pattern_f4 = re.compile(
+        r"^[ \t]*F4[ \t]+cycle[ \t]+interpolation[ \t]*;[ \t]*show-text[ \t]+[^\r\n]+",
+        re.MULTILINE,
+    )
+    if pattern_f4.search(updated_content):
+        updated_content = pattern_f4.sub(new_f4_binding, updated_content)
+
+    new_scaler_binding = (
+        "# Shift+F4 / Alt+t: التبديل بين محددات الحركة الزمنية (oversample حاد بدون تغبيش / linear ناعم)\n"
+        'Shift+F4 cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler: [${tscale}] ${?tscale==oversample:Crisp (Zero Blur)}${?tscale==linear:Smooth (Blended)}"\n'
+        'Alt+t cycle-values tscale "oversample" "linear" ; show-text "Motion Scaler: [${tscale}] ${?tscale==oversample:Crisp (Zero Blur)}${?tscale==linear:Smooth (Blended)}"'
+    )
+    pattern_alt_t = re.compile(
+        r"(?:#[^\r\n]*Alt\+t[^\r\n]*\r?\n)?[ \t]*Alt\+t[ \t]+cycle-values[ \t]+tscale[ \t]+[^\r\n]+",
+        re.MULTILINE,
+    )
+    if pattern_alt_t.search(updated_content) and "Shift+F4" not in updated_content:
+        updated_content = pattern_alt_t.sub(new_scaler_binding, updated_content)
 
     # 2. Migrate / ensure MBTN_RIGHT and MBTN_RIGHT_DBL mouse bindings
     mbtn_right_match = re.search(
@@ -1829,6 +1863,26 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     # And strip options the installed mpv cannot parse (no-op when it is
     # already new enough or its version is unknown).
     updated, sanitized_count = _sanitize_mpv_conf_for_mpv_version(updated, mpv_version)
+
+    # Update cache-pause in [protocol.https] to prevent streaming buffer stalls
+    updated, cache_pause_fixed = re.subn(
+        r"^([ \t]*)cache-pause([ \t]*)=[ \t]*yes\b[^\r\n]*$",
+        lambda m: m.group(1) + "cache-pause".ljust(26) + "= no",
+        updated,
+        flags=re.MULTILINE,
+    )
+    updated, cache_wait_removed = re.subn(
+        r"^[ \t]*cache-pause-wait[ \t]*=[ \t]*[0-9.]+[^\r\n]*\r?\n?",
+        "",
+        updated,
+        flags=re.MULTILINE,
+    )
+    # Update default anime profile description to Mode A+A
+    updated = re.sub(
+        r'profile-desc[ \t]*=[ \t]*"Anime: Anime4K Mode A"',
+        'profile-desc              = "Anime: Anime4K Mode A+A"',
+        updated,
+    )
     if updated == content:
         return False
     with open(mpv_conf_path, "w", encoding="utf-8") as f:
@@ -1876,6 +1930,47 @@ def _migrate_uosc_conf(uosc_conf_path, audit_log=None):
             "removed volume_max (dropped in uosc 5.13)",
         )
     return True
+
+
+def _migrate_anime4k_conf(anime4k_conf_path, audit_log=None):
+    """Seed or update script-opts/anime4k.conf with default A+A preset."""
+    if not os.path.exists(anime4k_conf_path):
+        os.makedirs(os.path.dirname(anime4k_conf_path), exist_ok=True)
+        _write_anime4k_conf(anime4k_conf_path, "A+A")
+        if audit_log:
+            audit_log.record_file(
+                anime4k_conf_path,
+                "create",
+                "ok",
+                "seeded anime4k.conf with A+A default",
+            )
+        return True
+    return False
+
+
+def _migrate_mpv_conf_user(user_conf_path, audit_log=None):
+    """Prune legacy streaming audio-sync override from mpv.conf.user."""
+    if not os.path.isfile(user_conf_path):
+        return False
+    with open(user_conf_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    pattern = re.compile(
+        r"(?:#[^\r\n]*\r?\n)*[ \t]*\[protocol\.https\][ \t]*\r?\n[ \t]*video-sync[ \t]*=[ \t]*audio[ \t]*\r?\n[ \t]*interpolation[ \t]*=[ \t]*no[ \t]*\r?\n?",
+        re.MULTILINE,
+    )
+    if pattern.search(content):
+        updated = pattern.sub("", content)
+        with open(user_conf_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        if audit_log:
+            audit_log.record_file(
+                user_conf_path,
+                "modify",
+                "ok",
+                "pruned legacy streaming audio-sync override",
+            )
+        return True
+    return False
 
 
 def _extract_overrides(content, defaults):
@@ -1973,10 +2068,13 @@ def _resolve_anime_preset(args):
     if _is_interactive_session():
         ui.header("Anime4K shader mode")
         ui.info("The anime profile uses this chain. Heavier modes cost GPU time")
-        ui.info("at 144Hz: A is the sweet spot for 1080p, A+A/B are the")
-        ui.info("sharpest/softest, 'off' disables the shaders.")
+        ui.info("at 144Hz: A+A is the ultra sharp sweet spot for 1080p, 'off' disables the shaders.")
         try:
-            chosen = ui.ask_choice("Anime4K mode", list(ANIME4K_CHAINS.keys()))
+            order = ["A+A", "A", "B", "B+B", "C", "C+A", "fast", "off"]
+            choices = [m for m in order if m in ANIME4K_CHAINS] + [
+                m for m in ANIME4K_CHAINS if m not in order
+            ]
+            chosen = ui.ask_choice("Anime4K mode", choices)
         except (EOFError, KeyboardInterrupt):
             ui.warn("No mode chosen; keeping the default.")
             return _DEPLOY_DEFAULTS["anime_preset"]

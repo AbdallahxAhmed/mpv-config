@@ -176,12 +176,12 @@ tscale                    = linear
 video-timing-offset       = 0.01
 
 #######################################################################################
-# PROFILE: anime — Anime4K Mode A (RTX 3060 sweet spot at 1080p 144Hz)
+# PROFILE: anime — Anime4K Mode A+A (Ultra Sharp sweet spot at 1080p 144Hz)
 #######################################################################################
 [anime]
-profile-desc              = "Anime: Anime4K Mode A"
+profile-desc              = "Anime: Anime4K Mode A+A"
 profile-restore           = copy-equal
-# Mode A chain — official bloc97 v4.0.1 for 1080p sources
+# Mode A+A chain — official bloc97 v4.0.1 for 1080p sources
 # Lighter scale= because Anime4K handles upscaling; ewa_lanczos on top = frame drops
 glsl-shaders              = "{{ANIME_CHAIN}}"
 scale                     = spline36
@@ -239,8 +239,7 @@ profile                   = live-action
 profile-desc              = "Network streaming: 144Hz display-synced, cache-protected"
 profile-restore           = copy-equal
 cache                     = yes
-cache-pause               = yes
-cache-pause-wait          = 1
+cache-pause               = no
 cache-pause-initial       = no
 demuxer-max-bytes         = 800MiB
 demuxer-max-back-bytes    = 800MiB
@@ -251,8 +250,8 @@ stream-buffer-size        = 512KiB
 curl-max-request-size     = 10MiB
 stream-lavf-o-append      = request_size=10485760
 # video-sync and interpolation inherited from base config (display-resample /
-# {{INTERPOLATION}} with tscale=linear) for smooth 24/30/60fps on 144Hz panel.
-# Buffer starvation protected by cache-pause=yes so stalls pause instead of dropping frames.
+# {{INTERPOLATION}} with tscale=oversample) for smooth 24/30/60fps on 144Hz panel.
+# Smooth playback protected by cache-pause=no to prevent buffer freezing stalls.
 ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=vbr,abr
 ytdl-raw-options-append   = socket-timeout=15

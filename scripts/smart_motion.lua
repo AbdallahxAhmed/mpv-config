@@ -9,7 +9,7 @@ local options = require "mp.options"
 
 local o = {
     enabled = true,
-    stream_web_parity = true,
+    stream_web_parity = false,
     high_fps_threshold = 50.0,
     cadence_tolerance = 0.005,
     osd_notifications = false,
