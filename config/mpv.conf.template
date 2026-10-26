@@ -206,7 +206,7 @@ video-timing-offset       = 0.01
 # Re-evaluate after KDE Plasma 7 or when compositor timing improves.
 [wayland-144hz-fix]
 profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"
-profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and ((type(p["current-gpu-context"]) == "string" and string.find(p["current-gpu-context"], "wayland") ~= nil) or (type(p["options/gpu-context"]) == "string" and string.find(p["options/gpu-context"], "wayland") ~= nil))
+profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and ((type(p["current-gpu-context"]) == "string" and p["current-gpu-context"]:find("wayland") ~= nil) or (type(p["options/gpu-context"]) == "string" and p["options/gpu-context"]:find("wayland") ~= nil) or (type(p["options/gpu-context"]) == "table" and table.concat(p["options/gpu-context"], ","):find("wayland") ~= nil))
 display-fps-override      = 143.981
 profile-restore           = copy
 

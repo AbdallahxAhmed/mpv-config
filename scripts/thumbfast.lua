@@ -1793,7 +1793,7 @@ local function fetch_fragment(storyboard, i, thumbnail_size, storyboard_scale, s
         table.insert(args, "--vf=" .. video_filters)
     end
 
-    if os_name == "Mac" then
+    if os_name == "darwin" then
         table.insert(args, "--macos-app-activation-policy=prohibited")
     end
 

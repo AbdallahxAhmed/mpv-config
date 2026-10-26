@@ -67,7 +67,7 @@ end
 
 local function start_guard()
     -- 1. Automatic AutoHotkey scan-code helper for Windows
-    if o.ahk then
+    if o.ahk and mp.get_property("platform") == "windows" then
         local ahk_exe, ahk_script = resolve_ahk()
         if ahk_exe and ahk_script then
             local cmd = 'start "" /B "' .. ahk_exe:gsub("/", "\\") .. '" "' .. ahk_script:gsub("/", "\\") .. '" >nul 2>&1'
