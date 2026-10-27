@@ -293,35 +293,6 @@ def confirm(text):
             return False
 
 
-def ask_choice(text, choices, default=None):
-    """Ask the user to pick one of ``choices``; Enter accepts ``default``.
-
-    ``default`` (when given) must be one of ``choices`` and is the pre-selected
-    answer shown with the prompt. Invalid input re-prompts. Under the plain
-    (non-rich) fallback, EOF/Ctrl+C exits with status 0 — callers that want to
-    keep their own default must catch (EOFError, KeyboardInterrupt).
-    """
-    if default is not None and default not in choices:
-        raise ValueError(f"default {default!r} is not one of {list(choices)}")
-    if _RICH_AVAILABLE:
-        from rich.prompt import Prompt
-
-        if default is not None:
-            return str(Prompt.ask(f"[yellow]?[/yellow] {text}", choices=choices, default=default))
-        return str(Prompt.ask(f"[yellow]?[/yellow] {text}", choices=choices))
-    while True:
-        try:
-            reply = input(f"  {_C.YELLOW}?{_C.RESET} {text} [{'/'.join(choices)}]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            sys.exit(0)
-        if not reply and default is not None:
-            return default
-        if reply in choices:
-            return reply
-        print(f"  {_C.RED}Invalid choice.{_C.RESET}")
-
-
 # ─── Numbered Menu (install-time preset pickers) ─────────────────────
 
 

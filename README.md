@@ -60,7 +60,7 @@
 | --- | --- |
 | Release | **v1.0.0** (2026-10-07) — see [CHANGELOG.md](CHANGELOG.md) |
 | CLI | `mpv-config` with `install` / `verify` / `update` / `rollback` / `status` / `sync-deps` / `download` / `uninstall` |
-| Tests | 454 Python tests + 11 Lua test suites on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
+| Tests | 465 Python tests + 11 Lua test suites on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
 | Platforms | Windows 10/11, Linux (X11 & KDE Wayland), macOS |
 | Requires | mpv ≥ 0.40 (auto-upgraded by the installer), Python 3.10+ |
 
@@ -82,7 +82,7 @@ Recent work now on `main` (unreleased in the changelog):
 <a id="playback-quality"></a>
 ### 🎬 Playback quality
 - **Automatic anime detection & default A+A preset** — `scripts/profile_picker.lua` automatically identifies anime releases offline (release groups, Japanese audio track, episode markers, multi-language tags, or titles in `script-opts/anime_series.conf`). When detected, it activates Anime4K on the **"A+A (Ultra Sharp)"** preset by default and presents an on-screen verification badge (`Anime Detected: Anime4K [A+A] Active`). Japanese live action and Hollywood movies remain unscaled on the clean `[live-action]` profile.
-- **Select your default preset during installation** — the interactive installer prompts you to select your preferred Anime4K chain, where **A+A** is the #1 recommended default alongside `A`, `B`, `B+B`, `C`, `C+A`, `fast`, and `off`. Non-interactive installs accept `--anime-preset <MODE>`.
+- **Select your default preset during installation** — the interactive installer shows a numbered **1–8 menu** with a short description per preset (arrow keys + `Enter` to browse, digits `1`–`8` select instantly, `Esc` keeps the default), where **A+A (Ultra Sharp)** is pre-highlighted as the #1 recommended default alongside `A`, `B`, `B+B`, `C`, `C+A`, `fast`, and `off`. Non-interactive installs accept `--anime-preset <MODE>`.
 - **Change and save your default preset anytime (3 methods)**:
   1. *In-player shortcuts*: Press `Ctrl+1`..`Ctrl+6`, `Ctrl+0` (off), or `Ctrl+g` (cycle). The choice is instantly applied, displayed on-screen (`Anime4K: <MODE> - <LABEL> (Saved as Default)`), and persisted to `script-opts/anime4k.conf`.
   2. *Configuration file*: Edit `script-opts/anime4k.conf` directly (e.g. `mode=A+A`).
@@ -330,7 +330,7 @@ curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/inst
 
 The script installs the CLI into its own virtual environment (`~/.local/share/mpv-config/venv`) and links `mpv-config` into `~/.local/bin`, so it also works on distributions that refuse `pip install --user` (PEP 668, e.g. Ubuntu 24.04). It needs Python 3.10+ (on Debian/Ubuntu also `python3-venv`). Pass options through with `... | bash -s -- --dry-run`.
 
-`mpv-config install` — which both bootstrap scripts run for you — is interactive in a real terminal: it asks which Anime4K chain the auto-detected `[anime]` profile should use, with **A+A (Ultra Sharp)** pre-selected as the #1 recommended default. Press `Enter` to keep A+A, or type one of `A`, `B`, `B+B`, `C`, `C+A`, `fast`, `off`. Piped or CI runs never see the prompt (the shipped A+A default applies), and an explicit `--anime-preset <MODE>` skips it.
+`mpv-config install` — which both bootstrap scripts run for you — is interactive in a real terminal: it shows a numbered menu (1–8) of the Anime4K chains the auto-detected `[anime]` profile can use, with **A+A (Ultra Sharp)** highlighted as the #1 recommended default. Press `Enter` to keep the highlighted row, move with `Up`/`Down`, press `1`–`8` to select directly, or press `Esc` to keep the default. Piped or CI runs never see the menu (the shipped A+A default applies), and an explicit `--anime-preset <MODE>` skips it.
 
 ---
 
@@ -352,7 +352,7 @@ Deploy-time options (forwarded to the deployer; run `python -m deploy.deployer -
 | Option | Choices (default) | Meaning |
 | --- | --- | --- |
 | `--mpv-profile` | `windows-like` / `linux-like` / `native` (OS-dependent) | GPU API, hardware decoder and VO selection |
-| `--anime-preset` | `off` / `fast` / `A` / `A+A` / `B` / `B+B` / `C` / `C+A` (`A+A`) | Anime4K preset powering the auto `[anime]` profile. Interactive install asks (`A+A` #1 recommended). |
+| `--anime-preset` | `off` / `fast` / `A` / `A+A` / `B` / `B+B` / `C` / `C+A` (`A+A`) | Anime4K preset powering the auto `[anime]` profile. Interactive install shows the numbered menu (`A+A` #1 highlighted). |
 | `--scaler-tier` | `light` / `balanced` / `quality` (`balanced`) | `scale` / `cscale` / `dscale` quality tier |
 | `--display-mode` | `auto` / `fixed` / `vrr` (`fixed`) | Display-sync mode; `fixed` = display-resample, `vrr` opt-in for FreeSync/G-Sync |
 | `--dither-depth` | `auto` / `8` / `10` (`auto`, auto-resolved) | Output dither depth |

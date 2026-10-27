@@ -153,31 +153,6 @@ class DeployerParserTests(unittest.TestCase):
             deployer._is_interactive_session = original_interactive
             deployer.ui.menu_select = original_menu
 
-    def test_ask_choice_fallback_accepts_enter_default_and_typed_choice(self):
-        """Without rich, Enter returns the default and typed input must match a choice."""
-        import builtins
-
-        ui = deployer.ui
-        original_rich = ui._RICH_AVAILABLE
-        original_input = builtins.input
-        ui._RICH_AVAILABLE = False
-        try:
-            with redirect_stdout(io.StringIO()):
-                # Enter (empty reply) accepts the pre-selected default.
-                builtins.input = lambda prompt="": ""
-                self.assertEqual(ui.ask_choice("Anime4K mode", ["A+A", "B"], default="A+A"), "A+A")
-                # Invalid input re-prompts; a typed choice is accepted.
-                replies = iter(["zzz", "B+B"])
-                builtins.input = lambda prompt="": next(replies)
-                self.assertEqual(ui.ask_choice("Anime4K mode", ["A+A", "B+B"]), "B+B")
-        finally:
-            builtins.input = original_input
-            ui._RICH_AVAILABLE = original_rich
-
-    def test_ask_choice_rejects_a_default_outside_the_choices(self):
-        with self.assertRaises(ValueError):
-            deployer.ui.ask_choice("Anime4K mode", ["A", "B"], default="A+A")
-
     def test_every_registry_preset_and_profile_is_selectable(self):
         parser = deployer.build_arg_parser()
         for preset in deployer.ANIME4K_CHAINS:
