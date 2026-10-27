@@ -18,6 +18,7 @@ from pathlib import Path
 from deploy import transaction as tx
 from deploy import ui
 from deploy.audit_log import AuditLog
+from deploy.dep_actions import compute_dep_actions
 from deploy.detector import detect, probe_mpv_version
 from deploy.fetcher import fetch_all
 from deploy.installer import install_deps
@@ -2162,7 +2163,11 @@ def cmd_install(args):
     """
     ui.banner()
     env = detect()
-    plan = build_install_plan(env)
+    # ONE decision source for the whole session: the plan below and the
+    # installer both render/execute these exact actions (plan cannot
+    # contradict installer, and the write probe runs once, pre-download).
+    dep_actions = compute_dep_actions(env)
+    plan = build_install_plan(env, dep_actions=dep_actions)
     display_plan(plan, "Installation Plan")
     if args.dry_run:
         ui.info("[DRY RUN] No downloads, installs, audit writes, or replacements.")
@@ -2187,7 +2192,11 @@ def cmd_install(args):
             audit_log.start_session("install", env)
             try:
                 dep_results = install_deps(
-                    env, dry_run=False, audit_log=audit_log, mpv_version=args.mpv_version
+                    env,
+                    dry_run=False,
+                    audit_log=audit_log,
+                    mpv_version=args.mpv_version,
+                    dep_actions=dep_actions,
                 )
                 ui.summary(dep_results)
                 # mpv is deliberately not fatal: its install can fail for
@@ -2195,7 +2204,10 @@ def cmd_install(args):
                 # absent network) and the fail-closed abort would leave the
                 # usable machine un-deployed. The deploy adapts the config
                 # to whatever mpv exists (too-new options get commented).
-                # Every other dependency stays fail-closed.
+                # Every other dependency stays fail-closed. "skipped" rows
+                # are deliberate no-ops (kept a working binary after a
+                # failed refresh, optional tool with an unwritable target)
+                # and never fail the run.
                 fatal_failures = [
                     result
                     for result in dep_results

@@ -13,7 +13,8 @@ import os
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from deploy import ui
-from deploy.registry import MPV_MINIMUM_VERSION, SCRIPTS, SHADERS, SYSTEM_DEPS
+from deploy.dep_actions import compute_dep_actions
+from deploy.registry import SCRIPTS, SHADERS
 
 if TYPE_CHECKING:
     from deploy.detector import Environment
@@ -41,60 +42,24 @@ class PlanEntry:
 # ─── Plan builders ─────────────────────────────────────────────────────
 
 
-def build_install_plan(env: "Environment") -> List[PlanEntry]:
+def build_install_plan(env: "Environment", dep_actions=None) -> List[PlanEntry]:
     """
     Inspect the environment and return a plan of all install actions.
     Read-only analysis — nothing is executed here.
+
+    The package section renders ``dep_actions`` (a caller that already
+    computed them — e.g. cmd_install, shared with install_deps — passes the
+    list so plan and execution can never diverge; otherwise it is computed
+    here).
     """
     plan: List[PlanEntry] = []
 
     # ── System packages ──────────────────────────────────────────────
-    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python", "uv"]
-    optional_deps = ["ffsubsync", "alass"]
-
-    for name in core_deps + optional_deps:
-        is_optional = name in optional_deps
-        if env.installed.get(name, False):
-            if (
-                name == "mpv"
-                and env.mpv_version is not None
-                and env.mpv_version < MPV_MINIMUM_VERSION
-            ):
-                # Mirror installer.install_deps: a distro build below the
-                # config's minimum is "installed" but must be upgraded.
-                plan.append(
-                    PlanEntry(
-                        "package",
-                        "install",
-                        name,
-                        f"installed {'.'.join(map(str, env.mpv_version))} < required "
-                        f"{'.'.join(map(str, MPV_MINIMUM_VERSION))} — upgrade via "
-                        "ppa:ubuntuhandbook1/mpv",
-                    )
-                )
-            else:
-                plan.append(
-                    PlanEntry(
-                        "package",
-                        "skip",
-                        name,
-                        "already installed — no change",
-                    )
-                )
-        else:
-            dep_info = SYSTEM_DEPS.get(name, {})
-            pkg_info = dep_info.get(env.platform_key) or dep_info.get("all") or {}
-            method = pkg_info.get("method", "unknown")
-            pkg = pkg_info.get("pkg") or pkg_info.get("id") or name
-            suffix = " (optional)" if is_optional else " (required)"
-            plan.append(
-                PlanEntry(
-                    "package",
-                    "install",
-                    name,
-                    f"install via {method}: {pkg}{suffix}",
-                )
-            )
+    actions = dep_actions if dep_actions is not None else compute_dep_actions(env)
+    for action in actions:
+        plan.append(
+            PlanEntry("package", action.kind, action.name, action.detail)
+        )
 
     # ── Scripts & shaders to download ────────────────────────────────
     for script in SCRIPTS:
@@ -381,6 +346,8 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
             act = entry.action.upper()
             if entry.action == "install":
                 act_styled = f"[yellow]+ {act}[/yellow]"
+            elif entry.action == "refresh":
+                act_styled = f"[yellow]↻ {act}[/yellow]"
             elif entry.action == "remove":
                 act_styled = f"[red]- {act}[/red]"
             elif entry.action == "fetch":

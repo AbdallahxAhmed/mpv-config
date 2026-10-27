@@ -1636,6 +1636,21 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn('ui.step(f"Installing {name} (optional)...")', src)
         self.assertNotIn("ui.spinner", src)
 
+    def test_install_deps_never_prompts_itself(self):
+        """The Installation Plan is the ONLY confirmation gate for installs.
+
+        install_deps used to ask a second "[y/n] Install N packages?" after
+        cmd_install already walked the user through the plan (user report
+        2026-10-27). Its cancellation path is the plan's, not a second one.
+        """
+        import inspect
+
+        from deploy import installer
+
+        src = inspect.getsource(installer.install_deps)
+        self.assertNotIn("ui.confirm", src)
+        self.assertNotIn("user skipped", src)
+
     def test_mpv_flow_breadcrumbs_exist(self):
         """Every mpv stage prints what it is doing before doing it."""
         import inspect
@@ -1663,7 +1678,7 @@ class TestAuditPatches(unittest.TestCase):
         src = inspect.getsource(installer.install_deps)
         self.assertIn("Preauthenticating sudo", src)
         warm_up_at = src.index('["sudo", "-v"]')
-        loop_at = src.index("for name in to_install:")
+        loop_at = src.index("for action in to_install:")
         self.assertLess(warm_up_at, loop_at)
 
     def test_mpv_repo_source_parses_pacman_output(self):
@@ -2546,32 +2561,32 @@ class YtDlpFreshnessTests(unittest.TestCase):
         self.assertEqual(SYSTEM_DEPS["yt-dlp"]["windows"]["refresh_days"], 7)
 
     def test_freshness_stamp_matrix(self):
-        from deploy import installer
+        from deploy import dep_actions
 
         with tempfile.TemporaryDirectory() as tmpdir:
             info = {"install_dir": tmpdir, "dest_name": "yt-dlp"}
             dest = os.path.join(tmpdir, "yt-dlp")
 
             # No binary at all.
-            self.assertFalse(installer._dep_is_fresh(info, 7))
+            self.assertFalse(dep_actions.dep_is_fresh(info, 7))
 
             # Binary exists but no stamp (apt-installed class) → stale.
             with open(dest, "wb") as fh:
                 fh.write(b"ELF")
-            self.assertFalse(installer._dep_is_fresh(info, 7))
+            self.assertFalse(dep_actions.dep_is_fresh(info, 7))
 
             # A refresh install stamps it → fresh within the window.
-            installer._write_refresh_stamp(info)
+            dep_actions.write_refresh_stamp(info)
             self.assertTrue(os.path.isfile(dest + ".stamp"))
-            self.assertTrue(installer._dep_is_fresh(info, 7))
+            self.assertTrue(dep_actions.dep_is_fresh(info, 7))
 
             # Stamp older than the window → stale again.
             old = time.time() - 8 * 86400
             os.utime(dest + ".stamp", (old, old))
-            self.assertFalse(installer._dep_is_fresh(info, 7))
+            self.assertFalse(dep_actions.dep_is_fresh(info, 7))
 
     def test_install_deps_refresh_gate_requeues_stale_launcher(self):
-        from deploy import installer
+        from deploy import dep_actions, installer
 
         env = Environment(
             os="linux",
@@ -2585,7 +2600,7 @@ class YtDlpFreshnessTests(unittest.TestCase):
             },
             mpv_version=(0, 41, 0),
         )
-        with mock.patch.object(installer, "_dep_is_fresh", return_value=False):
+        with mock.patch.object(dep_actions, "dep_is_fresh", return_value=False):
             results = installer.install_deps(env, dry_run=True)
 
         by_name = {r["name"]: r for r in results}
@@ -2597,7 +2612,7 @@ class YtDlpFreshnessTests(unittest.TestCase):
         self.assertEqual(by_name["yt-dlp"]["detail"], "dry run")
 
     def test_install_deps_refresh_gate_respects_fresh_stamp(self):
-        from deploy import installer
+        from deploy import dep_actions, installer
 
         env = Environment(
             os="linux",
@@ -2611,7 +2626,7 @@ class YtDlpFreshnessTests(unittest.TestCase):
             },
             mpv_version=(0, 41, 0),
         )
-        with mock.patch.object(installer, "_dep_is_fresh", return_value=True):
+        with mock.patch.object(dep_actions, "dep_is_fresh", return_value=True):
             results = installer.install_deps(env, dry_run=True)
 
         by_name = {r["name"]: r for r in results}

@@ -22,6 +22,12 @@ import urllib.request
 import zipfile
 
 from deploy import ui
+from deploy.dep_actions import (
+    compute_dep_actions,
+    dir_is_writable,
+    installable,
+    write_refresh_stamp,
+)
 from deploy.detector import probe_mpv_version
 from deploy.registry import MPV_MINIMUM_VERSION, SYSTEM_DEPS
 
@@ -838,7 +844,7 @@ def _install_github_release_file(name, info, env):
     else:
         _add_to_path(install_dir)
 
-    _write_refresh_stamp(info)
+    write_refresh_stamp(info)
     ui.success(f"{name}: installed to {dest_path}")
     return True
 
@@ -867,7 +873,7 @@ def _install_direct_url(name, info, env):
     else:
         _add_to_path(install_dir)
 
-    _write_refresh_stamp(info)
+    write_refresh_stamp(info)
     ui.success(f"{name}: installed to {dest_path}")
     return True
 
@@ -1487,7 +1493,7 @@ def _install_aur_fallback(name, dep_info, env):
     return _install_one(name, synthetic, env)
 
 
-def _install_one(name, dep_info, env, mpv_version=None):
+def _install_one(name, dep_info, env, mpv_version=None, landing_dir=None):
     """Install a single dependency using the appropriate method."""
     platform = env.platform_key
 
@@ -1498,6 +1504,14 @@ def _install_one(name, dep_info, env, mpv_version=None):
         return False
     if name == "mpv" and mpv_version:
         info = {**info, "pin": mpv_version}
+    if landing_dir:
+        # The plan-time dep_actions probe picked a writable landing dir that
+        # differs from the registered one (e.g. Program Files not writable
+        # in this shell). Redirect every path-like key there.
+        info = {
+            key: landing_dir if key in ("install_dir", "ensure_in_dir") else value
+            for key, value in info.items()
+        }
 
     method = info["method"]
 
@@ -1738,45 +1752,7 @@ def uninstall_deps(env, remove_python=False, dry_run=False, pre_existing_pkgs=No
     return results
 
 
-def _dep_dest(info):
-    """Absolute binary path that a file-based install method produces (or None)."""
-    install_dir = info.get("install_dir")
-    dest_name = info.get("dest_name")
-    if install_dir and dest_name:
-        return os.path.join(install_dir, dest_name)
-    return None
-
-
-def _write_refresh_stamp(info):
-    """Record a file-method install as "fresh" (sidecar <binary>.stamp file)."""
-    dest = _dep_dest(info)
-    if not dest or not os.path.isfile(dest):
-        return
-    try:
-        with open(dest + ".stamp", "w", encoding="utf-8") as fh:
-            fh.write(str(int(time.time())))
-    except OSError:
-        pass
-
-
-def _dep_is_fresh(info, refresh_days):
-    """True when the file-method binary exists AND was installed < refresh_days.
-
-    A binary without a stamp (e.g. apt's frozen /usr/bin/yt-dlp) counts as
-    STALE so the file-based installer gets the chance to shadow it with a
-    current build — YouTube extractor rules go stale weekly.
-    """
-    dest = _dep_dest(info)
-    if not dest:
-        return False
-    try:
-        stamp_mtime = os.stat(dest + ".stamp").st_mtime
-    except OSError:
-        return False
-    return (time.time() - stamp_mtime) < refresh_days * 86400
-
-
-def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
+def install_deps(env, dry_run=False, audit_log=None, mpv_version=None, dep_actions=None):
     """
     Install all missing system dependencies.
 
@@ -1786,6 +1762,10 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
         Optional :class:`~deploy.audit_log.AuditLog` instance.  When
         supplied, the pre-existing state and install outcome for each package
         is recorded so future uninstall operations can be safe.
+    dep_actions:
+        Pre-computed actions from ``compute_dep_actions`` — a caller that
+        already built the Installation Plan passes them so execution runs
+        exactly what the plan announced. Computed here when omitted.
 
     Returns list of result dicts.
     """
@@ -1801,124 +1781,87 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
         ui.info("Preauthenticating sudo — type your password if prompted (once for all install steps)...")
         _run(["sudo", "-v"], check=False, timeout=120)
 
-    # Determine what's needed
-    # Core deps always, optional deps we just warn about
-    core_deps = ["mpv", "yt-dlp", "ffmpeg", "python", "uv"]
-    optional_deps = ["ffsubsync", "alass"]
-    if env.os == "windows":
-        optional_deps.append("autohotkey")
-
-    to_install = []
-    already_ok = []
-    optional_missing = []
-
-    for name in core_deps:
-        if env.installed.get(name, False):
-            if (
-                name == "mpv"
-                and env.mpv_version is not None
-                and env.mpv_version < MPV_MINIMUM_VERSION
-            ):
-                # "Installed" but below the config's minimum (e.g. a distro
-                # build) — force an upgrade instead of skipping.
-                version_str = ".".join(map(str, env.mpv_version))
-                ui.warn(
-                    f"mpv {version_str} is older than required "
-                    f"{'.'.join(map(str, MPV_MINIMUM_VERSION))} — will upgrade"
-                )
-                to_install.append(name)
-            else:
-                # Time-boxed self-refresh: extractor-class tools that
-                # upstream services (YouTube) break on a weekly cadence
-                # must not skip installs forever just because a stale
-                # binary happens to exist (entries carry "refresh_days").
-                info = SYSTEM_DEPS.get(name, {}).get(env.platform_key) or {}
-                refresh_days = info.get("refresh_days")
-                if refresh_days and not _dep_is_fresh(info, refresh_days):
-                    ui.info(
-                        f"{name}: refreshing (older than {refresh_days} days — "
-                        "goes stale too fast to trust)"
-                    )
-                    to_install.append(name)
-                else:
-                    already_ok.append(name)
-        else:
-            to_install.append(name)
-
-    for name in optional_deps:
-        if not env.installed.get(name, False):
-            optional_missing.append(name)
+    # Plan and install share ONE decision source: the actions the plan
+    # announced are executed verbatim here, so the plan can never
+    # contradict the installer (and decisions such as "refresh" or the
+    # write-probed landing dir are computed exactly once per session).
+    actions = dep_actions if dep_actions is not None else compute_dep_actions(env)
+    to_install = [action for action in actions if not action.optional and action.kind != "skip"]
+    optional_missing = [action for action in actions if action.optional and action.kind != "skip"]
+    already_ok = [action for action in actions if action.kind == "skip"]
 
     # Report what's already installed
-    if already_ok:
-        for name in already_ok:
-            ui.success(f"{name}: already installed")
-            if audit_log:
-                audit_log.record_package(name, True, "none", "ok", "already installed")
+    for action in already_ok:
+        ui.success(f"{action.name}: already installed")
+        if audit_log:
+            audit_log.record_package(action.name, True, "none", "ok", "already installed")
 
     # Nothing to install?
     if not to_install and not optional_missing:
         ui.success("All dependencies are already installed!")
-        # Record optional packages that are also present
-        for name in optional_deps:
-            if env.installed.get(name, False) and audit_log:
-                audit_log.record_package(name, True, "none", "ok", "already installed")
         return [
-            {"name": n, "status": "ok", "detail": "already installed"}
-            for n in core_deps + optional_deps
-            if env.installed.get(n)
+            {"name": action.name, "status": "ok", "detail": "already installed"}
+            for action in already_ok
         ]
 
     # Show install plan
-    results = [{"name": n, "status": "ok", "detail": "already installed"} for n in already_ok]
+    results = [
+        {"name": action.name, "status": "ok", "detail": "already installed"}
+        for action in already_ok
+    ]
 
     if to_install:
-        ui.step(f"Need to install: {', '.join(to_install)}")
+        ui.step(f"Need to install: {', '.join(action.name for action in to_install)}")
 
     if optional_missing:
-        ui.info(f"Optional (will attempt): {', '.join(optional_missing)}")
+        ui.info(f"Optional (will attempt): {', '.join(action.name for action in optional_missing)}")
 
     if dry_run:
-        for name in to_install + optional_missing:
-            results.append({"name": name, "status": "skipped", "detail": "dry run"})
+        for action in to_install + optional_missing:
+            results.append({"name": action.name, "status": "skipped", "detail": "dry run"})
             if audit_log:
-                audit_log.record_package(name, False, "install", "skipped", "dry run")
+                audit_log.record_package(action.name, False, "install", "skipped", "dry run")
         return results
 
-    # Confirm — never prompt in non-interactive sessions (curl | bash):
-    # prompts there crash with "EOF when reading a line". Non-interactive
-    # installs auto-proceed, matching cmd_install's plan confirmation.
-    if to_install:
-        proceed = True
-        if ui.is_interactive():
-            proceed = ui.confirm(
-                f"Install {len(to_install)} core + {len(optional_missing)} optional packages?"
-            )
-        if not proceed:
-            ui.warn("Skipping dependency installation")
-            for name in to_install:
-                results.append({"name": name, "status": "skipped", "detail": "user skipped"})
-                if audit_log:
-                    audit_log.record_package(name, False, "install", "skipped", "user skipped")
-            for name in optional_missing:
-                results.append({"name": name, "status": "skipped", "detail": "user skipped"})
-                if audit_log:
-                    audit_log.record_package(name, False, "install", "skipped", "user skipped")
-            return results
-
     # Install core
-    for name in to_install:
+    for action in to_install:
+        name = action.name
         try:
+            if not installable(action):
+                # The plan probed a destination this shell cannot write
+                # (non-elevated vs Program Files ACLs). Fail before network:
+                # the bytes could never land — an Admin re-run is what's
+                # needed, not a multi-megabyte doomed download.
+                hint = (
+                    f"{action.landing_dir} is not writable in this shell (needs Administrator)"
+                    " — did not download"
+                )
+                ui.error(f"{name}: cannot install — {hint}")
+                results.append({"name": name, "status": "failed", "detail": hint})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "failed", hint)
+                continue
             # Plain step + streamed command output (see _run): a rich spinner
             # here redraws over apt's own progress lines and reads as "frozen".
             ui.step(f"Installing {name}...")
             dep_info = SYSTEM_DEPS.get(name, {})
-            ok = _install_one(name, dep_info, env, mpv_version=mpv_version)
+            ok = _install_one(
+                name, dep_info, env, mpv_version=mpv_version, landing_dir=action.landing_dir
+            )
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})
                 if audit_log:
                     audit_log.record_package(name, False, "install", "ok", "freshly installed")
+            elif action.kind == "refresh":
+                # Refreshing a WORKING binary is best-effort: keep the old,
+                # still-running copy instead of failing the fail-closed
+                # pipeline over a stale-but-functional yt-dlp.
+                kept = "kept existing binary (refresh failed)"
+                ui.warn(f"{name}: {kept} — re-run as Administrator to refresh in place")
+                results.append({"name": name, "status": "skipped", "detail": kept})
+                if audit_log:
+                    audit_log.record_package(name, False, "refresh", "skipped", kept)
             else:
                 ui.error(f"{name}: installation failed")
                 results.append({"name": name, "status": "failed", "detail": "install failed"})
@@ -1942,11 +1885,24 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
                 )
 
     # Install optional (don't fail the whole process)
-    for name in optional_missing:
+    for action in optional_missing:
+        name = action.name
         try:
+            if not installable(action):
+                # Skip WITHOUT downloading: an optional tool cannot justify
+                # megabytes aimed at a directory this user cannot write.
+                note = (
+                    f"{action.landing_dir} is not writable in this shell (needs Administrator)"
+                    " — did not download"
+                )
+                ui.warn(f"{name}: skipped (optional) — {note}")
+                results.append({"name": name, "status": "skipped", "detail": note})
+                if audit_log:
+                    audit_log.record_package(name, False, "install", "skipped", note)
+                continue
             ui.step(f"Installing {name} (optional)...")
             dep_info = SYSTEM_DEPS.get(name, {})
-            ok = _install_one(name, dep_info, env)
+            ok = _install_one(name, dep_info, env, landing_dir=action.landing_dir)
             if ok:
                 ui.success(f"{name}: installed successfully")
                 results.append({"name": name, "status": "ok", "detail": "freshly installed"})
@@ -1995,18 +1951,13 @@ def _get_target_tools_dir(env=None):
     prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
     mpv_dir = os.path.join(prog_files, "mpv")
 
-    is_writable = False
     try:
         os.makedirs(mpv_dir, exist_ok=True)
-        test_path = os.path.join(mpv_dir, ".perm_test")
-        with open(test_path, "w") as f:
-            f.write("ok")
-        os.remove(test_path)
-        is_writable = True
-    except Exception:
-        is_writable = False
-
-    if is_writable:
+    except OSError:
+        # E.g. Program Files denies directory creation to this user — the
+        # writable check below must not probe a dir that could not exist.
+        mpv_dir = None
+    if mpv_dir is not None and dir_is_writable(mpv_dir):
         return mpv_dir
 
     appdata = os.environ.get("APPDATA")

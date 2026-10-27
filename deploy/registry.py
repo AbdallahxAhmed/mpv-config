@@ -16,6 +16,14 @@ WINDOWS_FFSUBSYNC_DIR = os.path.join(WINDOWS_MPV_DIR, "ffsubsync")
 WINDOWS_ALASS_DIR = os.path.join(WINDOWS_MPV_DIR, "alass")
 WINDOWS_AUTOHOTKEY_DIR = os.path.join(WINDOWS_MPV_DIR, "autohotkey")
 WINDOWS_FFMPEG_BIN_DIR = os.path.join(WINDOWS_FFMPEG_DIR, "bin")
+# User-writable landing dir for file-method deps installed in a shell that
+# cannot write into Program Files (matches _get_target_tools_dir's choice).
+_appdata = os.environ.get("APPDATA")
+WINDOWS_USER_TOOLS_DIR = (
+    os.path.join(_appdata, "mpv", "tools") if _appdata else os.path.expanduser("~/.mpv/tools")
+)
+WINDOWS_FFMPEG_FALLBACK_DIR = os.path.join(WINDOWS_USER_TOOLS_DIR, "ffmpeg")
+WINDOWS_UV_FALLBACK_DIR = os.path.join(WINDOWS_USER_TOOLS_DIR, "uv")
 # Standalone GitHub binaries (alass, yt-dlp on distros with frozen packages)
 # go into the user's own PATH dir; Ubuntu/Fedora add ~/.local/bin to PATH
 # via the profile when it exists. The installer also symlinks into
@@ -276,6 +284,7 @@ SYSTEM_DEPS = {
             "ensure_in_dir": WINDOWS_YTDLP_DIR,
             "bin_names": ["yt-dlp.exe"],
             "refresh_days": 7,
+            "fallback_install_dir": WINDOWS_USER_TOOLS_DIR,
         },
         "arch": {"method": "pacman", "pkg": "yt-dlp", "prefer_optimized_repo": True},
         # x86_64 hosts only: yt-dlp_linux is the official standalone build
@@ -312,6 +321,7 @@ SYSTEM_DEPS = {
             ],
             "install_dir": WINDOWS_FFMPEG_DIR,
             "bin_subdir": "bin",
+            "fallback_install_dir": WINDOWS_FFMPEG_FALLBACK_DIR,
             "expected_bins": ["ffmpeg.exe", "ffprobe.exe", "ffplay.exe"],
             "ensure_in_dir": WINDOWS_FFMPEG_BIN_DIR,
             "bin_names": ["ffmpeg.exe"],
@@ -429,6 +439,7 @@ SYSTEM_DEPS = {
             "expected_bins": ["uv.exe"],
             "ensure_in_dir": WINDOWS_UV_DIR,
             "bin_names": ["uv.exe"],
+            "fallback_install_dir": WINDOWS_UV_FALLBACK_DIR,
         },
         "arch": {"method": "uv"},
         "ubuntu": {"method": "uv"},

@@ -198,7 +198,7 @@ class InstallOrchestrationTests(unittest.TestCase):
                 raise self.fetch_error
             return self.fetch_results, "lockfile-sentinel"
 
-        def install_deps(env, dry_run=False, audit_log=None, mpv_version=None):
+        def install_deps(env, dry_run=False, audit_log=None, mpv_version=None, dep_actions=None):
             self.calls.append("install_deps")
             if self.dep_error:
                 raise self.dep_error
@@ -220,6 +220,9 @@ class InstallOrchestrationTests(unittest.TestCase):
             "display_plan": mock.patch.object(deployer, "display_plan", autospec=True),
             "confirm_plan": mock.patch.object(
                 deployer, "confirm_plan", autospec=True, return_value=True
+            ),
+            "dep_actions": mock.patch.object(
+                deployer, "compute_dep_actions", autospec=True, return_value=[]
             ),
             "interactive": mock.patch.object(
                 deployer, "_is_interactive_session", autospec=True, return_value=False
