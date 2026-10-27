@@ -91,7 +91,7 @@ class LandingProbeTests(unittest.TestCase):
     def test_writable_primary_is_the_landing_dir(self):
         info = {
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
-            "fallback_install_dir": r"C:\users\x\tools",
+            "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
         with mock.patch.object(dep_actions, "dir_is_writable", _probe_table({info["install_dir"]: True})):
             self.assertEqual(dep_actions._landing(info, dep_actions.dir_is_writable),
@@ -100,7 +100,7 @@ class LandingProbeTests(unittest.TestCase):
     def test_readonly_primary_lands_in_the_fallback_dir(self):
         info = {
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
-            "fallback_install_dir": r"C:\users\x\tools",
+            "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
         probe = _probe_table({info["fallback_install_dir"]: True})
         self.assertEqual(dep_actions._landing(info, probe), (info["fallback_install_dir"], True))
@@ -108,7 +108,7 @@ class LandingProbeTests(unittest.TestCase):
     def test_neither_writable_keeps_primary_marked_unwritable(self):
         info = {
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
-            "fallback_install_dir": r"C:\users\x\tools",
+            "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
         self.assertEqual(
             dep_actions._landing(info, _probe_table({})), (info["install_dir"], False)
@@ -209,7 +209,7 @@ class ComputeActionTests(unittest.TestCase):
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
             "dest_name": "yt-dlp.exe",
             "refresh_days": 7,
-            "fallback_install_dir": r"C:\users\x\tools",
+            "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
         env = Environment(os="windows", platform_key="windows", installed={})
         with mock.patch.dict(SYSTEM_DEPS, {"yt-dlp": {"windows": reg_info}}):
