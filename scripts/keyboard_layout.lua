@@ -67,16 +67,30 @@ end
 
 local function start_guard()
     -- 1. Automatic AutoHotkey scan-code helper for Windows
+    -- Runs 100% silently via mpv's native Win32 subprocess API with CREATE_NO_WINDOW
+    -- and detached execution, completely eliminating cmd.exe / io.popen console popups.
     if o.ahk and mp.get_property("platform") == "windows" then
         local ahk_exe, ahk_script = resolve_ahk()
         if ahk_exe and ahk_script then
-            local cmd = 'start "" /B "' .. ahk_exe:gsub("/", "\\") .. '" "' .. ahk_script:gsub("/", "\\") .. '" >nul 2>&1'
-            local ok, p = pcall(io.popen, cmd, "r")
-            if ok and p then
-                p:close()
-                msg.info("keyboard layout: AHK helper started")
-                return true
+            local cmd = {
+                name = "subprocess",
+                args = { ahk_exe, ahk_script },
+                playback_only = false,
+                detach = true,
+            }
+            if mp.command_native_async then
+                mp.command_native_async(cmd, function(success, result, error)
+                    if success then
+                        msg.info("keyboard layout: AHK helper started asynchronously")
+                    else
+                        msg.warn("keyboard layout: failed to start AHK helper: " .. tostring(error))
+                    end
+                end)
+            elseif mp.command_native then
+                mp.command_native(cmd)
+                msg.info("keyboard layout: AHK helper started via native subprocess")
             end
+            return true
         end
     end
 

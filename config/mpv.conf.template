@@ -115,7 +115,7 @@ screenshot-template       = "%F_%P"
 # mpv.conf.user still overrides it for every stream.
 ytdl                      = no
 ytdl-raw-options-append = no-playlist=
-ytdl-raw-options-append = format-sort=vbr,abr
+ytdl-raw-options-append = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr
 ytdl-raw-options-append = socket-timeout=15
 # 2026-10: dropping `web` client (which requires an external JS runtime like Deno
 # that standard installs lack, causing failing extraction attempts) while keeping
@@ -142,6 +142,18 @@ cscale-antiring           = 0.5
 dither-depth              = {{DITHER_DEPTH}}
 temporal-dither           = yes
 
+# ─── Deband defaults — off by default, zero artificial grain ─────────
+# Press F3 anytime to toggle deband on when severe gradient banding appears.
+deband                    = no
+deband-iterations         = 1
+deband-threshold          = 48
+deband-range              = 16
+deband-grain              = 0
+
+# ─── Native sharpening — off by default (100% natural pixels) ────────
+# Press F10 anytime to toggle native sharpening (0.35 / off).
+sharpen                   = 0
+
 # ==========================================
 # إعدادات واجهة البرنامج (OSD) والترجمة (SRT)
 # ==========================================
@@ -158,19 +170,18 @@ temporal-dither           = yes
 #   interpolation=no
 # The [protocol.https] streaming profile already uses this mode.
 [live-action]
-profile-desc              = "Live-action: no shaders, mild deband"
+profile-desc              = "Live-action: clean native playback"
 profile-restore           = copy-equal
 glsl-shaders              =
 scale                     = {{SCALE}}
 cscale                    = {{CSCALE}}
-# Calibrated deband: 1 pass is enough for clean sources; higher iterations
-# posterize and flatten fine detail (hair, film grain). grain=24 re-seeds
-# just enough noise to hide residual banding without a visible "snow" layer.
-deband                    = yes
+# Clean deband: off by default; zero synthetic grain when toggled via F3.
+deband                    = no
 deband-iterations         = 1
 deband-threshold          = 48
 deband-range              = 16
-deband-grain              = 24
+deband-grain              = 0
+sharpen                   = 0
 interpolation             = {{INTERPOLATION}}
 tscale                    = linear
 video-timing-offset       = 0.01
@@ -249,11 +260,14 @@ force-seekable            = yes
 stream-buffer-size        = 512KiB
 curl-max-request-size     = 10MiB
 stream-lavf-o-append      = request_size=10485760
+# Deband off for network streams: avoids blurring compression artifacts into muddy textures.
+# Press F3 anytime to toggle deband on when severe gradient banding is visible.
+deband                    = no
 # video-sync and interpolation inherited from base config (display-resample /
 # {{INTERPOLATION}} with tscale=oversample) for smooth 24/30/60fps on 144Hz panel.
 # Smooth playback protected by cache-pause=no to prevent buffer freezing stalls.
 ytdl-raw-options-append   = no-playlist=
-ytdl-raw-options-append   = format-sort=vbr,abr
+ytdl-raw-options-append   = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr
 ytdl-raw-options-append   = socket-timeout=15
 
 [protocol.http]

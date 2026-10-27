@@ -145,9 +145,20 @@ local function cached_stream_json()
     return parsed
 end
 
+-- Modern codecs deliver significantly higher visual quality and fewer compression
+-- artifacts at lower nominal bitrates (AV1 > VP9 > H.264/AVC).
+local function codec_score(vcodec)
+    if type(vcodec) ~= 'string' then return 0 end
+    local c = vcodec:lower()
+    if c:find('av01', 1, true) or c:find('av1', 1, true) then return 3 end
+    if c:find('vp09', 1, true) or c:find('vp9', 1, true) then return 2 end
+    if c:find('avc', 1, true) or c:find('h264', 1, true) or c:find('x264', 1, true) then return 1 end
+    return 0
+end
+
 -- Pick one video row for the switch. is_cap=true matches the streaming
 -- default semantics: best row at or below the ceiling, ordered by height,
--- then fps, then bitrate — yt-dlp's own selection weighs height first too.
+-- then fps, then modern codec tier, then bitrate — yt-dlp's own selection weighs height first too.
 -- HLS/fragmented rows load through the regular reload path instead.
 local function pick_video_format(formats, target_h, is_cap)
     local best
@@ -166,11 +177,15 @@ local function pick_video_format(formats, target_h, is_cap)
                 matches = math.abs(f.height - target_h) <= 15
             end
             if matches then
+                local c_score = codec_score(f.vcodec)
+                local best_c_score = best and codec_score(best.vcodec) or 0
                 local better = not best
                     or f.height > best.height
                     or (f.height == best.height
                         and ((f.fps or 0) > (best.fps or 0)
-                            or (f.fps == best.fps and (f.tbr or 0) > (best.tbr or 0))))
+                            or (f.fps == best.fps
+                                and (c_score > best_c_score
+                                    or (c_score == best_c_score and (f.tbr or 0) > (best.tbr or 0))))))
                 if better then best = f end
             end
         end

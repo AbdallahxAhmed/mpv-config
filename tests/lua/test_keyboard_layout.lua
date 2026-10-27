@@ -9,7 +9,7 @@ local SCRIPT = here .. '../../scripts/keyboard_layout.lua'
 
 local function create_harness()
     _G.mp = nil
-    local h = {props = {}, warnings = {}, infos = {}, timeouts = {}}
+    local h = {props = {}, warnings = {}, infos = {}, timeouts = {}, async_commands = {}}
     _G.mp = {
         log = function() end,
         msg = {
@@ -30,6 +30,11 @@ local function create_harness()
         observe_property = function() end,
         register_script_message = function() end,
         commandv = function() end,
+        command_native_async = function(cmd, callback)
+            h.async_commands[#h.async_commands + 1] = cmd
+            if callback then callback(true, {status = 0}, nil) end
+            return 1
+        end,
         find_config_file = function() return nil end,
     }
     package.loaded['mp.msg'] = nil
@@ -67,6 +72,29 @@ test('a command that is not the guard is refused', function()
     kl.start()
     eq(1, #h.warnings)
     assert(h.warnings[1]:find("guard", 1, true))
+end)
+
+test('AHK helper is started via silent native subprocess on Windows', function()
+    local h, kl = load_script()
+    h.props["platform"] = "windows"
+    _G.mp.find_config_file = function(path)
+        if path:find("AutoHotkey") then return "C:/Program Files/mpv/tools/AutoHotkey64.exe" end
+        if path:find("mpv_arabic_layout.ahk") then return "C:/mpv/tools/mpv_arabic_layout.ahk" end
+        return nil
+    end
+    local started = kl.start()
+    eq(true, started)
+    eq(1, #h.async_commands)
+    eq("subprocess", h.async_commands[1].name)
+    eq(true, h.async_commands[1].detach)
+    eq(false, h.async_commands[1].playback_only)
+    eq("C:/Program Files/mpv/tools/AutoHotkey64.exe", h.async_commands[1].args[1])
+    eq("C:/mpv/tools/mpv_arabic_layout.ahk", h.async_commands[1].args[2])
+    local has_info = false
+    for _, msg in ipairs(h.infos) do
+        if msg:find("AHK helper started asynchronously") then has_info = true end
+    end
+    assert(has_info, "info log must confirm AHK helper started asynchronously")
 end)
 
 print('Keyboard layout tests passed: ' .. total)

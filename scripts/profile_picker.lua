@@ -313,7 +313,13 @@ end
 
 local function mode_file_path()
     local found = mp.find_config_file and mp.find_config_file("script-opts/anime4k.conf")
-    if found then return found end
+    if found and found ~= "" then return found end
+    if mp.command_native then
+        local expanded = mp.command_native({"expand-path", "~~/script-opts/anime4k.conf"})
+        if expanded and expanded ~= "" and not expanded:find("^~~/") then
+            return expanded
+        end
+    end
     -- mp.get_config_dir does not exist in this mpv; use the property.
     local ok_dir, dir = pcall(mp.get_property, "config-dir")
     dir = (ok_dir and dir) or ""
@@ -432,6 +438,7 @@ M.has_jpn_audio = has_jpn_audio
 M.split_list = split_list
 M.state = state
 M.CHAINS = CHAINS
+M.mode_file_path = mode_file_path
 
 function M.set_mode(mode)
     if CHAINS[mode] == nil then

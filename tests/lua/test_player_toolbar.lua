@@ -319,6 +319,23 @@ test('set-quality reuses signed URLs instead of re-extracting',function()
     eq(h.native_commands[#h.native_commands][2],'https://media.example/v1080')
     os.remove(path)
 end)
+test('set-quality prefers AV1 over VP9 and AVC1 at identical resolution and framerate',function()
+    local path=sandbox_conf()
+    local h=harness(nil,nil,{conf_path=path})
+    h.props['height']=720; h.props['duration']=200; h.props['time-pos']=10
+    -- AVC has the highest tbr (4000), VP9 is medium (2500), AV1 has lowest tbr (1500)
+    h.parsed_json={formats={
+        {height=1080,vcodec='avc1.64002a',fps=60,protocol='https',url='https://media.example/v1080-avc',tbr=4000},
+        {height=1080,vcodec='vp09.00.41',fps=60,protocol='https',url='https://media.example/v1080-vp9',tbr=2500},
+        {height=1080,vcodec='av01.0.08m',fps=60,protocol='https',url='https://media.example/v1080-av1',tbr=1500},
+        {vcodec='none',acodec='opus',protocol='https',url='https://media.example/a-hi',abr=160},
+    }}
+    h.props['user-data/mpv/ytdl/json-subprocess-result']={status=0,stdout='fixture'}
+    h.messages['set-quality']('1080','1080p60')
+    -- AV1 must be picked despite lower bitrate due to superior codec efficiency
+    eq(h.props['user-data/mpv/ytdl/fast-url'],'https://media.example/v1080-av1')
+    os.remove(path)
+end)
 test('fast switch restores the wiped extraction cache when the load settles',function()
     local path=sandbox_conf()
     local h=harness(nil,nil,{conf_path=path})

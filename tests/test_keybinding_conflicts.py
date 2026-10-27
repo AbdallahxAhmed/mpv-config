@@ -40,7 +40,7 @@ SMARTSKIP_CONF = os.path.join(REPO_ROOT, "config", "script-opts", "SmartSkip.con
 # pops on every press of the physical b key.
 LAM_ALEF_COMPOSITE_GLYPHS = ("لا", "لآ", "لأ", "لإ")
 
-SPECIAL_KEY_RE = re.compile(r"^(?:F[1-9]|MBTN\S*|WHEEL\S*|CLOSE_WIN|CTRL\+\d|SPC|TAB|ENTER)$", re.IGNORECASE)
+SPECIAL_KEY_RE = re.compile(r"^(?:F\d+|MBTN\S*|WHEEL\S*|CLOSE_WIN|CTRL\+\d|SPC|TAB|ENTER)$", re.IGNORECASE)
 
 
 def _active_lines(path):

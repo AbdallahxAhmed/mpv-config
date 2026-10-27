@@ -30,6 +30,7 @@ local SECTIONS = {
             { "Ctrl+1..Ctrl+6", "Anime4K: A / B / C / A+A / B+B / C+A (saved as default)" },
             { "Ctrl+0", "shaders off" },
             { "Ctrl+g", "cycle the Anime4K mode" },
+            { "F10", "toggle sharpening (crisp 0.35 / off)" },
             { "F5 / F6 / F7", "cycle audio / subtitle / subtitle visibility" },
             { "F8", "stable volume filter" },
             { "F1 / F2", "screenshot without / with subtitles" },

@@ -1602,7 +1602,10 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("ytdl-raw-options-append = socket-timeout=15", content)
         # Quality is chosen by ytdl_hook from script-opts/stream_quality.conf;
         # the template stays free of a pinned res ceiling.
-        self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", content)
+        self.assertIn(
+            "ytdl-raw-options-append = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr",
+            content,
+        )
         self.assertNotIn("res:1080", content)
         # No active (non-comment) ytdl-format anywhere: the hook builds it.
         self.assertNotRegex(content, r"(?m)^\s*ytdl-format\s*=")
@@ -1718,8 +1721,11 @@ class TestAuditPatches(unittest.TestCase):
         # (keeps the obsolete vp09 filter exclusion)
         self.assertNotIn("vp0?9", content)
 
-        # Bitrate sorting without a pinned resolution tie-break
-        self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", content)
+        # Codec-first quality sorting prioritizing modern hardware-decodeable streams (AV1 > VP9 > H.264)
+        self.assertIn(
+            "ytdl-raw-options-append = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr",
+            content,
+        )
         self.assertNotIn("res:1080", content)
 
         # The single source of truth ships with the historic 1080p default

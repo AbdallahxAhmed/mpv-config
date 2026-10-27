@@ -11,7 +11,7 @@ local SCRIPT = here .. '../../scripts/profile_picker.lua'
 
 local function create_harness()
     _G.mp = nil
-    local h = {props = {}, osds = {}, events = {}, observers = {}, commands = {}, files = {}, messages = {}}
+    local h = {props = {}, osds = {}, events = {}, observers = {}, commands = {}, files = {}, messages = {}, expanded_paths = {}}
     _G.mp = {
         log = function() end,
         msg = {info = function() end, warn = function() end, debug = function() end},
@@ -23,6 +23,12 @@ local function create_harness()
         set_property_bool = function(k, v) h.props[k] = v end,
         osd_message = function(text, duration) h.osds[#h.osds + 1] = {text = text, duration = duration} end,
         commandv = function(...) h.commands[#h.commands + 1] = { ... } end,
+        command_native = function(args)
+            if type(args) == "table" and args[1] == "expand-path" and h.expanded_paths then
+                return h.expanded_paths[args[2]]
+            end
+            return nil
+        end,
         register_event = function(name, fn) h.events[name] = fn end,
         observe_property = function(name, typ, fn) h.observers[name] = fn end,
         register_script_message = function(name, fn) h.messages[name] = fn end,
@@ -279,6 +285,18 @@ test('a local anime file gets the anime profile and active verification OSD', fu
         end
     end
     assert(found_osd, "Anime detection OSD notification was not shown")
+end)
+
+test('mode_file_path resolves correctly on Linux via expand-path', function()
+    local h, pp = load_script()
+    h.expanded_paths['~~/script-opts/anime4k.conf'] = '/home/user/.config/mpv/script-opts/anime4k.conf'
+    eq('/home/user/.config/mpv/script-opts/anime4k.conf', pp.mode_file_path())
+end)
+
+test('mode_file_path resolves correctly on Windows via expand-path', function()
+    local h, pp = load_script()
+    h.expanded_paths['~~/script-opts/anime4k.conf'] = 'C:/Users/User/AppData/Roaming/mpv/script-opts/anime4k.conf'
+    eq('C:/Users/User/AppData/Roaming/mpv/script-opts/anime4k.conf', pp.mode_file_path())
 end)
 
 print('Profile picker tests passed: ' .. total)
