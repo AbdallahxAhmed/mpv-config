@@ -362,22 +362,35 @@ def _menu_rows(items, highlight_index):
     return rows
 
 
-def _menu_frame(items, highlight_index, default_index):
-    """One full menu body: rows + legend. The legend is joined without a
-    newline so the cursor position is identical before and after a repaint."""
+def _menu_frame(items, highlight_index):
+    """Just the item rows, each pre-terminated by an erase-line escape so a
+    repaint overwrites cleanly. The legend is NOT part of the frame — it is
+    printed once in the static head, so a repaint can never trail a
+    duplicate legend below the menu.
+
+    The frame emits exactly ``len(items) - 1`` newlines (rows joined, no
+    trailing newline) and the cursor rests at the END of the last row —
+    _repaint_menu climbs by exactly this newline count, and the menu
+    repaint test pins the equality so the pair can never drift."""
     clear = "\x1b[K" if USE_COLOR else ""
-    rows = "\n".join(row + clear for row in _menu_rows(items, highlight_index))
-    return f"{rows}\n{_C.DIM}{_menu_legend(items, default_index)}{clear}{_C.RESET}"
+    return "\n".join(row + clear for row in _menu_rows(items, highlight_index))
 
 
-def _repaint_menu(items, highlight_index, default_index):
-    """Redraw the menu body in place when the terminal supports it; a plain
-    scroll re-print keeps the fallback terminals readable."""
-    if USE_COLOR:
-        _print(f"\x1b[{len(items) + 1}F", end="")
-        _print(_menu_frame(items, highlight_index, default_index), end="")
-    else:
-        _print(_menu_frame(items, highlight_index, default_index))
+def _repaint_menu(items, highlight_index):
+    """Redraw the item rows in place: climb from the end of the last row up
+    by exactly the newline count the frame emitted, then re-print it. A
+    non-color terminal cannot move the cursor, so it scroll re-prints for
+    readability."""
+    frame = _menu_frame(items, highlight_index)
+    if not USE_COLOR:
+        _print(frame)
+        return
+    climb = frame.count("\n")
+    # A single-row menu would emit \x1b[0A, which some emulations treat as a
+    # misleading "up one line" — keep the ambiguous case out of the stream.
+    if climb:
+        _print(f"\x1b[{climb}A\r", end="")
+    _print(frame, end="")
 
 
 def _windows_key_reader():
@@ -481,16 +494,21 @@ def _keep_default(default_value):
 
 
 def _run_keystroke_menu(text, items, default_index, read_key):
-    """Repainting menu driven by single keystrokes from ``read_key``."""
+    """Repainting menu driven by single keystrokes from ``read_key``.
+
+    Static head (printed once): the question line and the legend. Only the
+    item rows repaint, so _repaint_menu must never touch the head — that is
+    what keeps the legend from duplicating on every arrow key."""
     highlight_index = default_index
     _print(f"  {_C.YELLOW}?{_C.RESET} {_C.BOLD}{text}{_C.RESET}")
-    _print(_menu_frame(items, highlight_index, default_index), end="")
+    _print(f"{_C.DIM}{_menu_legend(items, default_index)}{_C.RESET}")
+    _print(_menu_frame(items, highlight_index), end="")
     while True:
         key = read_key()
         if key in ("up", "down"):
             direction = 1 if key == "down" else -1
             highlight_index = (highlight_index + direction) % len(items)
-            _repaint_menu(items, highlight_index, default_index)
+            _repaint_menu(items, highlight_index)
         elif key == "enter":
             _print()
             return items[highlight_index][0]

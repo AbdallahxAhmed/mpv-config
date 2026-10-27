@@ -10,6 +10,7 @@ ordering itself rather than a mock of it.
 import inspect
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -613,6 +614,38 @@ class MenuSelectTests(unittest.TestCase):
         self.assertEqual(self.select_via_keys(reader), "A+A")
         reader = self.keystrokes([KeyboardInterrupt()])
         self.assertEqual(self.select_via_keys(reader), "A+A")
+
+    def test_repaint_climb_matches_initial_render_newline_count(self):
+        """The drift-proof cursor ledger. The row block from the initial paint
+        ends where the cursor rests; every repaint must climb by exactly the
+        number of \n characters inside that row block. Anything else makes the
+        menu crawl up the screen over adjacent lines or trail duplicate
+        legend lines below — the bug this pins shut."""
+        blob = io.StringIO()
+        reader = self.keystrokes(["down", "enter"])  # exactly one repaint
+        with redirect_stdout(blob):
+            self.assertEqual(
+                deployer.ui.menu_select("Anime4K mode", self.ITEMS, _read_key=reader), "A"
+            )
+
+        output = blob.getvalue()
+        climb_match = re.search(r"\x1b\[(\d+)A\r", output)
+        self.assertIsNotNone(climb_match, "repaint must climb with CursorUp + CR")
+        climb = int(climb_match.group(1))
+
+        initial_render = output[: climb_match.start()]
+        head_lines = initial_render.split("\n")
+        legend_index = next(
+            index for index, line in enumerate(head_lines) if "press 1-" in line
+        )
+        row_lines = head_lines[legend_index + 1 :]
+        self.assertEqual(len(row_lines), len(self.ITEMS))
+        self.assertEqual(climb, len(row_lines) - 1)
+
+        # The legend renders exactly once (static head), and the repaint
+        # rewrote every row without growing or shrinking the block.
+        self.assertEqual(output.count("press 1-"), 1)
+        self.assertEqual(output.count("2) A"), 2)  # initial + one repaint
 
     def test_menu_select_rejects_empty_items_and_a_bad_default_row(self):
         with self.assertRaises(ValueError):
