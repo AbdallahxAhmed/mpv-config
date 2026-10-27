@@ -212,59 +212,58 @@ def progress(current, total, name):
 
 
 def summary(results):
+    """Close a batch of component results: counts plus failing rows only.
+
+    Components announce what they are doing while running (steps, per-item
+    lines), so re-listing every row here duplicated the 45-row verification
+    table under itself on every deploy. Failing rows stay visible so a
+    broken check can never scroll past unnoticed; the complete listing
+    remains with the component that produced the results.
+    """
+    ok_count = sum(1 for r in results if r.get("status") == "ok")
+    skip_count = sum(1 for r in results if r.get("status") == "skipped")
+    failures = [r for r in results if r.get("status") not in ("ok", "skipped")]
+    fail_count = len(failures)
+
+    if failures:
+        if _RICH_AVAILABLE:
+            table = Table(title="Summary", box=None)
+            table.add_column("Name")
+            table.add_column("Detail", style="dim")
+            for r in failures:
+                table.add_row(f"[red]✗[/red] {r['name']}", r.get("detail", ""))
+            _console.print(table)
+        else:
+            _print(f"\n{_C.BOLD}Failed:{_C.RESET}")
+            for r in failures:
+                detail = r.get("detail", "")
+                suffix = f" {_C.DIM}-- {detail}{_C.RESET}" if detail else ""
+                _print(f"  {_C.RED}{S.CROSS}{_C.RESET} {r['name']}{suffix}")
+
+    parts = []
+    if ok_count:
+        parts.append(("ok", f"{ok_count} succeeded"))
+    if skip_count:
+        parts.append(("skip", f"{skip_count} skipped"))
+    if fail_count:
+        parts.append(("fail", f"{fail_count} failed"))
+    if not parts:
+        active = "nothing to report"
+        if _RICH_AVAILABLE:
+            _console.print(f"[dim]{active}[/dim]")
+        else:
+            _print(f"  {_C.DIM}{active}{_C.RESET}")
+        return
+
     if _RICH_AVAILABLE:
-        table = Table(title="Summary", box=None)
-        table.add_column("Status", justify="center")
-        table.add_column("Name")
-        table.add_column("Detail", style="dim")
-
-        ok_count = skip_count = fail_count = 0
-
-        for r in results:
-            if r["status"] == "ok":
-                icon = "[green]✓[/green]"
-                ok_count += 1
-            elif r["status"] == "skipped":
-                icon = "[yellow]o[/yellow]"
-                skip_count += 1
-            else:
-                icon = "[red]✗[/red]"
-                fail_count += 1
-            table.add_row(icon, r["name"], r.get("detail", ""))
-
-        _console.print(table)
-
-        msg = f"[green]{ok_count} succeeded[/green]"
-        if skip_count:
-            msg += f"  [yellow]{skip_count} skipped[/yellow]"
-        if fail_count:
-            msg += f"  [red]{fail_count} failed[/red]"
-        _console.print(msg)
+        styled = []
+        for kind, text in parts:
+            style = {"ok": "green", "skip": "yellow", "fail": "red"}[kind]
+            styled.append(f"[{style}]{text}[/{style}]")
+        _console.print("  ".join(styled))
     else:
-        _print(f"\n{_C.BOLD}{'=' * 56}")
-        _print("  Summary")
-        _print(f"{'=' * 56}{_C.RESET}")
-
-        ok_count = sum(1 for r in results if r["status"] == "ok")
-        skip_count = sum(1 for r in results if r["status"] == "skipped")
-        fail_count = sum(1 for r in results if r["status"] == "failed")
-
-        for r in results:
-            if r["status"] == "ok":
-                icon = f"{_C.GREEN}{S.CHECK}{_C.RESET}"
-            elif r["status"] == "skipped":
-                icon = f"{_C.YELLOW}{S.SKIP}{_C.RESET}"
-            else:
-                icon = f"{_C.RED}{S.CROSS}{_C.RESET}"
-            detail = f" {_C.DIM}-- {r.get('detail', '')}{_C.RESET}" if r.get("detail") else ""
-            _print(f"  {icon} {r['name']}{detail}")
-
-        _print(f"\n  {_C.GREEN}{ok_count} succeeded{_C.RESET}", end="")
-        if skip_count:
-            _print(f"  {_C.YELLOW}{skip_count} skipped{_C.RESET}", end="")
-        if fail_count:
-            _print(f"  {_C.RED}{fail_count} failed{_C.RESET}", end="")
-        _print(f"\n{'=' * 56}\n")
+        style_by_kind = {"ok": _C.GREEN, "skip": _C.YELLOW, "fail": _C.RED}
+        _print("  " + "  ".join(f"{style_by_kind[k]}{t}{_C.RESET}" for k, t in parts))
 
 
 def is_interactive():
