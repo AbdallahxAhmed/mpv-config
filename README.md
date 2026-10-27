@@ -12,13 +12,55 @@
 
 ---
 
+## 📑 Table of Contents
+
+- [📊 Project status](#project-status)
+- [✨ Features](#features)
+  - [🎬 Playback quality](#playback-quality)
+  - [🖥️ Interface](#interface)
+  - [📺 YouTube & streaming](#youtube--streaming)
+  - [🧰 Player utilities](#player-utilities)
+  - [⬇️ Downloading](#downloading)
+  - [🛡️ Deployment safety](#deployment-safety)
+  - [🌍 Arabic layout support](#arabic-layout-support)
+- [⌨️ Keybindings](#keybindings)
+  - [Anime4K shader chains (`Ctrl` + number)](#anime4k-shader-chains-ctrl--number)
+  - [Screenshots & audio/video controls (`F1`–`F10`)](#screenshots--audiovideo-controls-f1f10)
+  - [Everyday script keys](#everyday-script-keys)
+  - [SmartSkip — skipping & chapters](#smartskip--skipping--chapters)
+  - [SponsorBlock (YouTube segments)](#sponsorblock-youtube-segments)
+  - [Mouse & window](#mouse--window)
+  - [Arabic keyboard twins (same physical key)](#arabic-keyboard-twins-same-physical-key)
+- [📦 Installation](#installation)
+  - [Quick Bootstrap](#quick-bootstrap)
+    - [Windows (PowerShell)](#windows-powershell)
+    - [Linux / macOS](#linux--macos)
+- [🚀 Usage](#usage)
+  - [1. Install & Deploy Configuration](#1-install--deploy-configuration)
+  - [2. Verify Installation](#2-verify-installation)
+  - [3. Manage the Deployment](#3-manage-the-deployment)
+  - [4. Download Media](#4-download-media)
+  - [5. Background Clipboard Watcher](#5-background-clipboard-watcher)
+- [🧩 What gets deployed](#what-gets-deployed)
+  - [Managed third-party components (pinned upstream sources)](#managed-third-party-components-pinned-upstream-sources)
+  - [Custom scripts shipped in this repository](#custom-scripts-shipped-in-this-repository)
+  - [System dependencies managed by the installer](#system-dependencies-managed-by-the-installer)
+  - [Repository tooling](#repository-tooling)
+- [🛠️ Development](#development)
+  - [Setup Development Environment](#setup-development-environment)
+  - [Running Tests & Quality Checks](#running-tests--quality-checks)
+- [📄 License](#license)
+
+---
+
+<a id="project-status"></a>
 ## 📊 Project status
 
 | | |
 | --- | --- |
 | Release | **v1.0.0** (2026-10-07) — see [CHANGELOG.md](CHANGELOG.md) |
 | CLI | `mpv-config` with `install` / `verify` / `update` / `rollback` / `status` / `sync-deps` / `download` / `uninstall` |
-| Tests | Python + Lua suite (~370 cases) on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
+| Tests | Python + Lua suite (~450 cases) on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
 | Platforms | Windows 10/11, Linux (X11 & KDE Wayland), macOS |
 | Requires | mpv ≥ 0.40 (auto-upgraded by the installer), Python 3.10+ |
 
@@ -34,8 +76,10 @@ Recent work now on `main` (unreleased in the changelog):
 
 ---
 
+<a id="features"></a>
 ## ✨ Features
 
+<a id="playback-quality"></a>
 ### 🎬 Playback quality
 - **Automatic anime detection & default A+A preset** — `scripts/profile_picker.lua` automatically identifies anime releases offline (release groups, Japanese audio track, episode markers, multi-language tags, or titles in `script-opts/anime_series.conf`). When detected, it activates Anime4K on the **"A+A (Ultra Sharp)"** preset by default and presents an on-screen verification badge (`Anime Detected: Anime4K [A+A] Active`). Japanese live action and Hollywood movies remain unscaled on the clean `[live-action]` profile.
 - **Select your default preset during installation** — the interactive installer prompts you to select your preferred Anime4K chain, where **A+A** is the #1 recommended default alongside `A`, `B`, `B+B`, `C`, `C+A`, `fast`, and `off`. Non-interactive installs accept `--anime-preset <MODE>`.
@@ -55,12 +99,15 @@ Recent work now on `main` (unreleased in the changelog):
 - **Source-aware profiles** — `[anime]` (Anime4K + 2-pass deband), `[live-action]` (clean native playback), `[protocol.https]` streaming (800 MiB buffer / 60 s readahead, same vblank alignment).
 - **Full 10-bit pipeline** — explicit `dither-depth=10` (mpv's `auto` silently drops to 8-bit on gpu-next), temporal dithering, calibrated deband thresholds.
 
+<a id="interface"></a>
 ### 🖥️ Interface
 - **Mouse-first uosc toolbar** — `Menu · Paste | CC · Dubs · Quality · Download | Stable Volume … Fullscreen`; no keyboard required (see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
 - **thumbfast** seekbar hover previews (with local race-condition hardening patches).
 - **Watch history & recent files** (memo) on `h`, subtitle backdrop "Netflix look" toggle on `b` with clear OSD feedback.
 - Playlists, editions and quality selectors appear contextually; window close always exits instantly.
 
+<a id="youtube--streaming"></a>
+<a id="youtube-streaming"></a>
 ### 📺 YouTube & streaming
 - **Modern codec prioritization & 144Hz fluidity** — `ytdl-raw-options-append = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr` prioritizing AV1 > VP9 > H.264 for maximum 1080p clarity, timeline fluidity, and 144Hz UI responsiveness without buffer stalls (`cache-pause=no`).
 - **Custom hardened `yt-dlp` hook** — in-player streaming of YouTube/network URLs with a self-refreshing yt-dlp stub and mpv 0.41+ compatible subprocess handling.
@@ -69,6 +116,7 @@ Recent work now on `main` (unreleased in the changelog):
 - **SponsorBlock** integration with segment marking, submission and up/down-vote keybindings.
 - **Configurable default quality** — the streaming ceiling lives in one file (`script-opts/stream_quality.conf`, default 1080p): pick it in the installer (`--stream-quality`), or change it in two clicks from the player's Quality menu — *720p ▸ Set as default* persists it and switches the playing stream (*Just this video* stays session-only). No hardcoded caps anywhere.
 
+<a id="player-utilities"></a>
 ### 🧰 Player utilities
 - **Stable Volume / night mode** (`F8` or toolbar button) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.
 - **Subtitle sync menu** (`n`, autosubsync + optional `alass`), screenshots with/without subtitles (`F1`/`F2`, PNG → `Pictures/mpv-screenshots`).
@@ -76,26 +124,32 @@ Recent work now on `main` (unreleased in the changelog):
 - **evafast** hybrid fast-forward on `Right`; `autoload` fills the playlist from the folder; playback pauses when the window is minimized.
 - **Paste-to-open** inside the player (`Ctrl+V`) — normalizes `youtu.be`, `watch?v=`, `shorts/…` fragments and quoted paths; local files are never rewritten into URLs.
 
+<a id="downloading"></a>
 ### ⬇️ Downloading
 - **Plugin-based downloader** (`BaseDownloader` → `GenericDownloader`) powered by native in-process `yt-dlp` with FFmpeg remuxing.
 - **16-connection turbo worker** (`tools/download_worker.py`) — aria2c (`-x16 -s16 -j16`) or native concurrent fragments.
 - **Clipboard watcher** (`mpv-config download --watch`) that downloads every media link you copy, with per-URL exception recovery.
 
+<a id="deployment-safety"></a>
 ### 🛡️ Deployment safety
 - **Transactional deploys** with a recoverable same-filesystem engine, package-ownership audit log, and read-only verification (Lua syntax checks included).
 - **Backups & rollback** — every change snapshots the current config as `mpv.backup.*`; `update` preserves your personal `mpv.conf.user` overrides.
 - **Clean uninstall** — with optional `--purge-config`, `--remove-backups`, `--remove-deps`, `--remove-install-dir`.
 
+<a id="arabic-layout-support"></a>
 ### 🌍 Arabic layout support
 - **Windows physical key parity**: `tools/mpv_arabic_layout.ahk` maps physical scan codes directly when mpv is focused and Arabic is active (`h`, `b`, `g`, etc.), launched 100% silently via native Win32 subprocess with `CREATE_NO_WINDOW` and detached execution.
 - **Cross-platform layout twins**: generated at deploy time in `input.conf` for printable Latin keys (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`) and modified combos, with bare Shift (`Shift+H/M/S/B/U` → `أ/’/ٍ/آ/‘`) and `Ctrl+Shift` backup routes for the five lam-alef keys.
 
 ---
 
+<a id="keybindings"></a>
 ## ⌨️ Keybindings
 
 The quick-reference below ships inside `config/input.conf.template`; SmartSkip's own bindings live in `config/script-opts/SmartSkip.conf`.
 
+<a id="anime4k-shader-chains-ctrl--number"></a>
+<a id="anime4k-shader-chains"></a>
 ### Anime4K shader chains (`Ctrl` + number)
 
 > Any shortcut below immediately persists the chosen preset as default to `script-opts/anime4k.conf`.
@@ -112,6 +166,8 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | `Ctrl+g` | Cycle Anime4K mode |
 | `Ctrl+Shift+t` | Toggle profile mode (Auto / Anime / Live-Action) |
 
+<a id="screenshots--audiovideo-controls-f1f10"></a>
+<a id="screenshots-audiovideo-controls"></a>
 ### Screenshots & audio/video controls (`F1`–`F10`)
 
 | Key | Action |
@@ -129,6 +185,7 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | `?` / `F9` | Help Overlay cheat sheet (ASS formatted) |
 | `/` (bare) | Ignored (prevents accidental volume drops) |
 
+<a id="everyday-script-keys"></a>
 ### Everyday script keys
 
 | Key | Action |
@@ -143,6 +200,8 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | `Ctrl+V` | Open the link/file from the clipboard (auto-normalized) |
 | `Ctrl+Shift+V` | Append the clipboard link to the playlist |
 
+<a id="smartskip--skipping--chapters"></a>
+<a id="smartskip"></a>
 ### SmartSkip — skipping & chapters
 
 | Key | Action |
@@ -160,6 +219,7 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | `Alt+N` | Remove current chapter |
 | `Ctrl+N` | Save chapters to file |
 
+<a id="sponsorblock-youtube-segments"></a>
 ### SponsorBlock (YouTube segments)
 
 | Key | Action |
@@ -169,6 +229,8 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | `B` | Upvote segment |
 | `Ctrl+B` | Downvote segment |
 
+<a id="mouse--window"></a>
+<a id="mouse-window"></a>
 ### Mouse & window
 
 | Input | Action |
@@ -179,6 +241,8 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 
 > Everything above also has a mouse equivalent in the uosc toolbar — see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
 
+<a id="arabic-keyboard-twins-same-physical-key"></a>
+<a id="arabic-keyboard-twins"></a>
 ### Arabic keyboard twins (same physical key)
 
 mpv matches a binding against the **character** a key produces ("mpv uses input translated by the
@@ -229,6 +293,7 @@ menu carries those actions.
 
 ---
 
+<a id="installation"></a>
 ## 📦 Installation
 
 `mpv-config` deploys from a checkout of this repository (`deploy/`, `config/` and `scripts/` are not part of the installed package), so install it **editable** from a clone. The command can then find the checkout from any directory:
@@ -246,6 +311,7 @@ pip install --editable .
 
 A regular (non-editable) install only works while you run it from inside the clone, or with `MPV_CONFIG_REPO` pointing at the clone.
 
+<a id="quick-bootstrap"></a>
 ### Quick Bootstrap
 
 #### Windows (PowerShell)
@@ -253,6 +319,8 @@ A regular (non-editable) install only works while you run it from inside the clo
 irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 ```
 
+<a id="linux--macos"></a>
+<a id="linux-macos"></a>
 #### Linux / macOS
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.sh | bash
@@ -262,6 +330,7 @@ The script installs the CLI into its own virtual environment (`~/.local/share/mp
 
 ---
 
+<a id="usage"></a>
 ## 🚀 Usage
 
 `mpv-config` provides a unified command-line interface:
@@ -286,6 +355,7 @@ Deploy-time options (forwarded to the deployer; run `python -m deploy.deployer -
 | `--stream-quality` | `best` / `144` … `4320` (`1080`) | Default streaming ceiling seeded into `script-opts/stream_quality.conf` on **fresh** installs only — an existing file (player Quality-menu choice / hand edit) is always preserved |
 | `--mpv-version` | tag override | Pin the Windows mpv build tag (e.g. `2026-05-15-4498c0ff81`) |
 
+<a id="2-verify-installation"></a>
 ### 2. Verify Installation
 ```bash
 mpv-config verify
@@ -303,6 +373,7 @@ mpv-config uninstall          # remove what was deployed (a backup is taken firs
 
 The commands that change something accept `--dry-run`. `rollback` only restores one of the configuration's own backups (full path or bare folder name) and lists the available ones if you name anything else. `uninstall --purge-config` also removes the config directory itself, `--remove-backups` the backups, and `--remove-install-dir` the `~/.mpv-config-deploy` clone plus the private virtual environment that `install.sh` created.
 
+<a id="4-download-media"></a>
 ### 4. Download Media
 ```bash
 # Download a video (defaults to ~/Downloads at up to 1080p)
@@ -314,6 +385,7 @@ mpv-config download "https://example.com/video" -o ~/Videos -q 720
 
 On Windows, the repo-root launchers `Download-Video.cmd` and `Watch-Clipboard.cmd` wrap the same commands with a UTF-8 console.
 
+<a id="5-background-clipboard-watcher"></a>
 ### 5. Background Clipboard Watcher
 ```bash
 mpv-config download --watch
@@ -321,6 +393,7 @@ mpv-config download --watch
 
 ---
 
+<a id="what-gets-deployed"></a>
 ## 🧩 What gets deployed
 
 ### Managed third-party components (pinned upstream sources)
@@ -338,6 +411,7 @@ mpv-config download --watch
 | [pause-when-minimize](https://github.com/mpv-player/mpv) | Pause playback when the window is minimized |
 | [Anime4K](https://github.com/bloc97/Anime4K) v4.0.1 | Real-time anime upscaling shaders |
 
+<a id="custom-scripts-shipped-in-this-repository"></a>
 ### Custom scripts shipped in this repository
 
 | Script | Purpose |
@@ -349,10 +423,12 @@ mpv-config download --watch
 | `scripts/player-toolbar.lua` | Stable Volume toolbar button wiring |
 | `scripts/modules/stream_policy.lua` | Shared YouTube/stream policy module |
 
+<a id="system-dependencies-managed-by-the-installer"></a>
 ### System dependencies managed by the installer
 
 mpv ≥ 0.40 (zhongfly daily builds on Windows with shinchiro fallback, `ppa:ubuntuhandbook1/mpv` on Ubuntu/Mint, optimized x86-64-v3/v4 repos on CachyOS, brew/dnf/pacman elsewhere), [yt-dlp](https://github.com/yt-dlp/yt-dlp) (standalone, kept fresh), ffmpeg, ffsubsync, alass and uv.
 
+<a id="repository-tooling"></a>
 ### Repository tooling
 
 - **MPV Companion browser extension** (`tools/extension/`, Chrome MV3) + native messaging host — one-click playback and site-cookie sync to mpv/yt-dlp for Cloudflare-protected sites, with optional FlareSolverr support (`tools/core/flaresolverr.py`). Register it with `tools/register_extension.py`.
@@ -362,6 +438,7 @@ mpv ≥ 0.40 (zhongfly daily builds on Windows with shinchiro fallback, `ppa:ubu
 
 ---
 
+<a id="development"></a>
 ## 🛠️ Development
 
 ### Setup Development Environment
@@ -378,6 +455,8 @@ pip install -r requirements-dev.txt
 pre-commit install
 ```
 
+<a id="running-tests--quality-checks"></a>
+<a id="running-tests-quality-checks"></a>
 ### Running Tests & Quality Checks
 ```bash
 # Run unit test suite
@@ -393,6 +472,7 @@ ruff format .
 
 ---
 
+<a id="license"></a>
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
