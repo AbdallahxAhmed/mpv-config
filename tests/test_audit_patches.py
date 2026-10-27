@@ -348,12 +348,15 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 new_content = f.read()
 
-            # change-list needs the empty-string value ('clr ""'); a bare
-            # 'clr' fails with "required argument value not set".
+            # A bare 'clr' fails with "required argument value not set";
+            # since the profile_picker routing migration the whole legacy
+            # line is replaced by the set-mode call, which also clears.
             self.assertIn(
-                'change-list glsl-shaders clr ""; show-text "Shaders Cleared"',
+                "CTRL+0 no-osd script-message-to profile_picker set-mode off",
                 new_content,
             )
+            # Nothing legacy survives: no glsl-shaders change-list left.
+            self.assertNotIn("change-list glsl-shaders", new_content)
             # 'لا' is two codepoints (U+0644 U+0627); mpv rejects
             # multi-codepoint key names with "Unknown key 'لا'".
             self.assertIn(
@@ -363,8 +366,123 @@ class TestAuditPatches(unittest.TestCase):
             self.assertNotIn("لا", new_content)
             self.assertNotIn("cycle-values sub-back-color", new_content)
 
-            # Idempotent for these two fixes specifically.
+            # No bare 'clr' fragment survives anywhere.
             self.assertNotIn("clr;", new_content)
+
+    def test_migrate_input_conf_routes_legacy_anime4k_glsl_to_set_mode(self):
+        """Direct-glsl Anime4K bindings become profile_picker set-mode calls."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                "# **----- Anime4K (CTRL + number) -----**\n"
+                "SPACE cycle pause\n"
+                'CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl;~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl"; show-text "Anime4K: Mode A (Sharp)"\n'
+                'CTRL+4 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl;~~/shaders/Anime4K_Restore_CNN_VL.glsl;~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl"; show-text "Anime4K: Mode A+A (Ultra Sharp)"\n'
+                'CTRL+0 no-osd change-list glsl-shaders clr ""; show-text "Shaders Cleared"\n'
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            # Converted lines match the shipped template bindings, which
+            # profile_picker persists (script-opts/anime4k.conf).
+            self.assertIn("CTRL+1 no-osd script-message-to profile_picker set-mode A\n", new_content)
+            self.assertIn("CTRL+4 no-osd script-message-to profile_picker set-mode A+A\n", new_content)
+            self.assertIn("CTRL+0 no-osd script-message-to profile_picker set-mode off\n", new_content)
+            self.assertIn("Ctrl+g no-osd script-message-to profile_picker cycle-mode\n", new_content)
+            # No raw shader routing survives: no direct glsl-shaders
+            # change-list and no old show-text labels.
+            self.assertNotIn("change-list glsl-shaders", new_content)
+            self.assertNotIn('show-text "Anime4K:', new_content)
+            self.assertNotIn('show-text "Shaders Cleared"', new_content)
+            # Custom lines around the block stay untouched.
+            self.assertIn("SPACE cycle pause", new_content)
+
+    def test_migrate_input_conf_anime_routing_is_idempotent(self):
+        """A second migration run finds nothing left to convert."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                'CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Clamp_Highlights.glsl"; show-text "Anime4K: Mode A (Sharp)"\n'
+                'CTRL+0 no-osd change-list glsl-shaders clr ""; show-text "Shaders Cleared"\n'
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            self.assertTrue(_migrate_input_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                once = f.read()
+
+            self.assertFalse(_migrate_input_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                twice = f.read()
+
+            self.assertEqual(once, twice)
+            self.assertIn("CTRL+1 no-osd script-message-to profile_picker set-mode A", twice)
+
+    def test_migrate_input_conf_keeps_custom_non_anime4k_glsl_chain(self):
+        """A hand-picked chain on CTRL+1 is personal; only Anime4K chains convert."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            custom_line = (
+                'CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/MyCustomSharpen.glsl"; show-text "My chain"\n'
+            )
+            old_content = (
+                custom_line
+                + 'CTRL+2 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl"; show-text "Anime4K: Mode B (Soft)"\n'
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertIn(custom_line.strip(), new_content)
+            self.assertIn("CTRL+2 no-osd script-message-to profile_picker set-mode B\n", new_content)
+            # CTRL+1 is already bound, so no canonical line is appended
+            # for it either.
+            self.assertNotIn("profile_picker set-mode A\n", new_content)
+
+    def test_migrate_input_conf_appends_missing_anime_set_mode_bindings(self):
+        """Files with no Anime4K bindings at all get the canonical set."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write("SPACE cycle pause\n")
+
+            migrated = _migrate_input_conf(conf_path)
+            self.assertTrue(migrated)
+
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            for expected in (
+                "CTRL+1 no-osd script-message-to profile_picker set-mode A\n",
+                "CTRL+2 no-osd script-message-to profile_picker set-mode B\n",
+                "CTRL+3 no-osd script-message-to profile_picker set-mode C\n",
+                "CTRL+4 no-osd script-message-to profile_picker set-mode A+A\n",
+                "CTRL+5 no-osd script-message-to profile_picker set-mode B+B\n",
+                "CTRL+6 no-osd script-message-to profile_picker set-mode C+A\n",
+                "CTRL+0 no-osd script-message-to profile_picker set-mode off\n",
+                "Ctrl+g no-osd script-message-to profile_picker cycle-mode\n",
+            ):
+                self.assertIn(expected, new_content)
 
     def test_migrate_input_conf_updates_f4_and_shift_f4(self):
         from deploy.deployer import _migrate_input_conf
@@ -1341,7 +1459,11 @@ class TestAuditPatches(unittest.TestCase):
                 mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
-        ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
+        ticks = [
+            line
+            for line in joined.splitlines()
+            if "... running " in line and "/ limit 60s" in line
+        ]
         self.assertTrue(ok)
         self.assertGreaterEqual(len(ticks), 2)
 
@@ -1355,7 +1477,11 @@ class TestAuditPatches(unittest.TestCase):
                 mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
-        ticks = [l for l in joined.splitlines() if "... running " in l and "/ limit 60s" in l]
+        ticks = [
+            line
+            for line in joined.splitlines()
+            if "... running " in line and "/ limit 60s" in line
+        ]
         self.assertTrue(ok)
         # Slices fire at 0.2s granularity (~5 over one second): interval
         # gating keeps ticks roughly at interval cadence, never per-slice.

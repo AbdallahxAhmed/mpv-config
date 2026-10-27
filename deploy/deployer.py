@@ -1539,6 +1539,64 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             + "Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual\n"
         )
 
+    #    Anime4K shader routing: deployed files predating profile_picker
+    #    bound CTRL+1..6/0 to raw "change-list glsl-shaders" lines. Those
+    #    bypass the picker - no persistence (script-opts/anime4k.conf), no
+    #    OSD mode names and no Ctrl+g cycle - so rebind them to the same
+    #    set-mode script messages the template ships (profile_picker
+    #    validates the tokens against CHAINS). Only lines carrying the
+    #    shipped Anime4K chains are converted; a custom non-Anime4K chain
+    #    on one of those keys stays exactly as written, and a key with no
+    #    binding at all gets the canonical line appended (same
+    #    ensure-missing rule as the other blocks above).
+    anime_set_mode = (
+        ("1", "A"),
+        ("2", "B"),
+        ("3", "C"),
+        ("4", "A+A"),
+        ("5", "B+B"),
+        ("6", "C+A"),
+    )
+    for anime_key, anime_mode in anime_set_mode:
+        anime_line = (
+            "CTRL+" + anime_key + " no-osd script-message-to profile_picker set-mode " + anime_mode
+        )
+        updated_content, _anime_n = re.subn(
+            r"^[ \t]*[cC][tT][rR][lL]\+"
+            + anime_key
+            + r"[ \t]+no-osd[ \t]+change-list[ \t]+glsl-shaders[ \t]+"
+            + r'set[ \t]+"(?=[^"]*Anime4K)[^\r\n]*$',
+            anime_line,
+            updated_content,
+            flags=re.MULTILINE,
+        )
+        if not re.search(
+            r"^[ \t]*[cC][tT][rR][lL]\+" + anime_key + r"[ \t]+", updated_content, re.MULTILINE
+        ):
+            updated_content = updated_content.rstrip() + "\n" + anime_line + "\n"
+    updated_content, _anime_off_n = re.subn(
+        r"^[ \t]*[cC][tT][rR][lL]\+0[ \t]+no-osd[ \t]+change-list[ \t]+"
+        + r'glsl-shaders[ \t]+clr(?:[ \t]+"")?(?=[ \t]*;)[^\r\n]*$',
+        "CTRL+0 no-osd script-message-to profile_picker set-mode off",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^[ \t]*[cC][tT][rR][lL]\+0[ \t]+", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\nCTRL+0 no-osd script-message-to profile_picker set-mode off\n"
+        )
+    if not re.search(
+        r"^[ \t]*Ctrl\+[gG][ \t]+[^\r\n]*profile_picker[ \t]+cycle-mode",
+        updated_content,
+        re.MULTILINE,
+    ):
+        updated_content = (
+            updated_content.rstrip()
+            + "\n# Anime4K mode cycle - Ctrl+g is the same key in every keyboard layout\n"
+            + "Ctrl+g no-osd script-message-to profile_picker cycle-mode\n"
+        )
+
     # 5. Fix bindings mpv rejects on every version:
     #    a) CTRL+0 shader clear: change-list needs the empty-string value
     #       ('clr ""'); a bare 'clr' fails with
