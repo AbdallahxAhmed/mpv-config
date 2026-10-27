@@ -24,6 +24,7 @@ from deploy.installer import install_deps
 from deploy.planner import build_install_plan, build_update_plan, confirm_plan, display_plan
 from deploy.registry import (
     ANIME4K_CHAINS,
+    ANIME4K_PRESETS,
     MPV_EXPERIENCE_PROFILES,
     MPV_PROFILE_DEFAULT,
     PLATFORM_NATIVE_MPV_DEFAULTS,
@@ -87,9 +88,11 @@ def _resolve_anime_chain(preset, shader_sep):
 def _write_anime4k_conf(path, preset):
     """Seed the runtime Anime4K mode the anime profile picks up."""
     mode = preset if preset in ANIME4K_CHAINS else "A+A"
+    known = [preset for preset, _label in ANIME4K_PRESETS]
+    order = known + [key for key in ANIME4K_CHAINS if key not in known]
     with open(path, "w", encoding="utf-8") as stream:
         stream.write("# Anime4K shader mode used by the anime profile.\n")
-        stream.write("# one of: " + " | ".join(ANIME4K_CHAINS.keys()) + "\n")
+        stream.write("# one of: " + " | ".join(order) + "\n")
         stream.write(f"mode={mode}\n")
 
 
@@ -2117,6 +2120,17 @@ def _require_complete_fetch(results):
         raise RuntimeError("Fetch was incomplete; no live configuration was replaced")
 
 
+def _anime_preset_menu_items():
+    """(preset, description) rows for the install-time menu, display order.
+
+    Registry presets drive the order and labels; a chain key missing from
+    them (registry drift) still shows so --anime-preset parity is preserved."""
+    items = [(preset, label) for preset, label in ANIME4K_PRESETS if preset in ANIME4K_CHAINS]
+    known = {preset for preset, _label in items}
+    items.extend((preset, "(custom)") for preset in ANIME4K_CHAINS if preset not in known)
+    return items
+
+
 def _resolve_anime_preset(args):
     """The Anime4K chain the anime profile should use.
 
@@ -2129,21 +2143,11 @@ def _resolve_anime_preset(args):
         return chosen
     if _is_interactive_session():
         ui.header("Anime4K shader mode")
-        ui.info("The anime profile uses this chain. Heavier modes cost GPU time")
         ui.info(
-            "at 144Hz: A+A is the ultra sharp sweet spot for 1080p, 'off' disables the shaders."
+            "The anime profile uses this chain. Heavier modes cost GPU time; "
+            "'off' disables the shaders."
         )
-        try:
-            order = ["A+A", "A", "B", "B+B", "C", "C+A", "fast", "off"]
-            choices = [m for m in order if m in ANIME4K_CHAINS] + [
-                m for m in ANIME4K_CHAINS if m not in order
-            ]
-            chosen = ui.ask_choice(
-                "Anime4K mode", choices, default=_DEPLOY_DEFAULTS["anime_preset"]
-            )
-        except (EOFError, KeyboardInterrupt):
-            ui.warn("No mode chosen; keeping the default.")
-            return _DEPLOY_DEFAULTS["anime_preset"]
+        chosen = ui.menu_select("Anime4K mode", _anime_preset_menu_items())
         ui.info(f"Anime4K mode: {chosen}")
         return chosen
     return _DEPLOY_DEFAULTS["anime_preset"]

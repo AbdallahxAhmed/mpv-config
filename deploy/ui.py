@@ -322,6 +322,246 @@ def ask_choice(text, choices, default=None):
         print(f"  {_C.RED}Invalid choice.{_C.RESET}")
 
 
+# ─── Numbered Menu (install-time preset pickers) ─────────────────────
+
+
+def _ensure_windows_vt():
+    """Best-effort enable of VT sequences on the Windows console (redraw needs them)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+    except Exception:
+        pass
+
+
+def _menu_legend(items, default_index):
+    """Footer hint line; ASCII arrow words when the terminal is not UTF-8."""
+    up, down = ("↑", "↓") if USE_UNICODE else ("Up", "Down")
+    default_value = items[default_index][0]
+    return (
+        f"  Use {up}/{down} arrows + Enter, or press 1-{len(items)} directly "
+        f"(Esc = default {default_value})"
+    )
+
+
+def _menu_rows(items, highlight_index):
+    """The numbered menu rows; highlight formatting is fixed-width per row so
+    an in-place repaint overwrites cleanly. Colors degrade to plain text."""
+    width = max(len(value) for value, _label in items)
+    rows = []
+    for index, (value, label) in enumerate(items):
+        cursor = f"{index + 1}) {value:<{width}}"
+        if index == highlight_index:
+            rows.append(f"  {_C.CYAN}{_C.BOLD}>{_C.RESET} {_C.CYAN}{cursor}{_C.RESET} {label}")
+        else:
+            rows.append(f"    {_C.WHITE}{cursor}{_C.RESET} {_C.DIM}{label}{_C.RESET}")
+    return rows
+
+
+def _menu_frame(items, highlight_index, default_index):
+    """One full menu body: rows + legend. The legend is joined without a
+    newline so the cursor position is identical before and after a repaint."""
+    clear = "\x1b[K" if USE_COLOR else ""
+    rows = "\n".join(row + clear for row in _menu_rows(items, highlight_index))
+    return f"{rows}\n{_C.DIM}{_menu_legend(items, default_index)}{clear}{_C.RESET}"
+
+
+def _repaint_menu(items, highlight_index, default_index):
+    """Redraw the menu body in place when the terminal supports it; a plain
+    scroll re-print keeps the fallback terminals readable."""
+    if USE_COLOR:
+        _print(f"\x1b[{len(items) + 1}F", end="")
+        _print(_menu_frame(items, highlight_index, default_index), end="")
+    else:
+        _print(_menu_frame(items, highlight_index, default_index))
+
+
+def _windows_key_reader():
+    """Single-keystroke reader for the Windows console (no state to restore)."""
+    import msvcrt
+
+    _ensure_windows_vt()
+
+    def read_key():
+        char = msvcrt.getwch()
+        if char in ("\x00", "\xe0"):
+            return {"H": "up", "P": "down"}.get(msvcrt.getwch())
+        if char in ("\r", "\n"):
+            return "enter"
+        if char == "\x1b":
+            return "esc"
+        if char == "\x03":
+            raise KeyboardInterrupt
+        return char  # digits "1".."N"; anything else is ignored by the menu loop
+
+    return read_key
+
+
+def _posix_key_reader():
+    """Single-keystroke reader in cbreak mode; arrow keys arrive as CSI sequences.
+
+    Returns the reader plus a state-restore callable so the terminal
+    re-enters cooked mode once the menu loop ends."""
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    original = termios.tcgetattr(fd)
+    tty.setcbreak(fd)
+
+    def read_key():
+        first = sys.stdin.read(1)
+        if first == "":
+            raise EOFError
+        if first in ("\r", "\n"):
+            return "enter"
+        if first == "\x1b":
+            # A bare Esc starts no CSI sequence: nothing follows within the
+            # window, so treat it as Esc rather than hanging on read().
+            if not select.select([sys.stdin], [], [], 0.05)[0]:
+                return "esc"
+            if sys.stdin.read(1) != "[":
+                return "esc"
+            return {"A": "up", "B": "down"}.get(sys.stdin.read(1))
+        return first
+
+    def restore():
+        try:
+            termios.tcsetattr(fd, termios.TCSADRAIN, original)
+        except Exception:
+            pass
+
+    return read_key, restore
+
+
+def _make_raw_key_reader():
+    """Single-keystroke reader for an interactive console plus its state restore.
+
+    Returns ``(None, None)`` unless BOTH stdin and stdout are a TTY — piped
+    stdin and unit tests fall through to the line fallback. Any failure
+    resolving a platform reader also degrades to the fallback."""
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return None, None
+        if sys.platform == "win32":
+            return _windows_key_reader(), None
+        return _posix_key_reader()
+    except Exception:
+        return None, None
+
+
+def _resolve_menu_reply(reply, items, default_index):
+    """Index selected by a typed fallback reply, or None when invalid.
+
+    Enter (an empty reply) accepts ``default_index``; a 1-based row number
+    picks that row directly; the preset name itself works too, case-insensitive."""
+    reply = (reply or "").strip()
+    if not reply:
+        return default_index
+    if reply.isdigit():
+        index = int(reply) - 1
+        return index if 0 <= index < len(items) else None
+    lower = reply.lower()
+    for index, (value, _label) in enumerate(items):
+        if value.lower() == lower:
+            return index
+    return None
+
+
+def _keep_default(default_value):
+    """Warn + release the default row per the shared cancel contract."""
+    _print()
+    warn(f"No selection made; keeping {default_value} (default).")
+    return default_value
+
+
+def _run_keystroke_menu(text, items, default_index, read_key):
+    """Repainting menu driven by single keystrokes from ``read_key``."""
+    highlight_index = default_index
+    _print(f"  {_C.YELLOW}?{_C.RESET} {_C.BOLD}{text}{_C.RESET}")
+    _print(_menu_frame(items, highlight_index, default_index), end="")
+    while True:
+        key = read_key()
+        if key in ("up", "down"):
+            direction = 1 if key == "down" else -1
+            highlight_index = (highlight_index + direction) % len(items)
+            _repaint_menu(items, highlight_index, default_index)
+        elif key == "enter":
+            _print()
+            return items[highlight_index][0]
+        elif key == "esc":
+            return _keep_default(items[default_index][0])
+        elif isinstance(key, str) and key.isdigit():
+            index = int(key) - 1
+            if 0 <= index < len(items):
+                _print()
+                return items[index][0]
+        # unknown keys are silently ignored — the menu stays open, no repaint
+
+
+def _run_line_menu(text, items, default_index):
+    """Typed line fallback for piped stdin, tests, and TTY-less hosts."""
+    _print()
+    _print(f"  {_C.YELLOW}?{_C.RESET} {_C.BOLD}{text}{_C.RESET}")
+    for row in _menu_rows(items, default_index):
+        _print(row)
+    _print(f"{_C.DIM}{_menu_legend(items, default_index)}{_C.RESET}")
+    default_value = items[default_index][0]
+    prompt = f"  {_C.YELLOW}?{_C.RESET} {text} [1-{len(items)} or name, Enter = {default_value}]: "
+    while True:
+        try:
+            reply = input(prompt)
+        except (EOFError, KeyboardInterrupt):
+            return _keep_default(default_value)
+        index = _resolve_menu_reply(reply, items, default_index)
+        if index is None:
+            _print(f"  {_C.RED}{S.CROSS}{_C.RESET} Choose 1-{len(items)} or a preset name.")
+            continue
+        return items[index][0]
+
+
+def menu_select(text, items, default_index=0, _read_key=None):
+    """Ask the user to pick one row of a numbered menu; returns the chosen value.
+
+    ``items`` is an ordered sequence of ``(value, description)`` pairs. In a
+    real interactive TTY the rows are highlighted by the Up/Down arrow keys,
+    Enter confirms the highlighted row, digits 1..N select instantly, and
+    Esc/Ctrl+C/EOF keep the pre-selected ``default_index`` row. Everything
+    else (piped stdin, unit tests, non-TTY hosts, reader failure) uses the
+    plain numbered fallback: Enter accepts the default, a number picks a row,
+    the preset name works too — and EOF/Ctrl+C keep the default instead of
+    looping forever. ``menu_select`` never raises KeyboardInterrupt and never
+    re-prompts on EOF.
+
+    ``_read_key`` (for tests and demos) replaces the platform key reader.
+    """
+    if not items:
+        raise ValueError("menu_select requires at least one item")
+    if not 0 <= default_index < len(items):
+        raise ValueError(f"default_index {default_index!r} is outside {len(items)} item(s)")
+
+    default_value = items[default_index][0]
+    restore = None
+    reader = _read_key
+    if reader is None:
+        reader, restore = _make_raw_key_reader()
+    if reader is None:
+        return _run_line_menu(text, items, default_index)
+    try:
+        try:
+            return _run_keystroke_menu(text, items, default_index, reader)
+        except (EOFError, KeyboardInterrupt):
+            return _keep_default(default_value)
+    finally:
+        if restore is not None:
+            restore()
+
+
 @contextmanager
 def spinner(text):
     """Show a spinner during an operation."""

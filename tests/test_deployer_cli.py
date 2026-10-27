@@ -106,44 +106,51 @@ class DeployerParserTests(unittest.TestCase):
         parser = deployer.build_arg_parser()
         args = parser.parse_args(["--install"])
         original_interactive = deployer._is_interactive_session
-        original_ask = deployer.ui.ask_choice
+        original_menu = deployer.ui.menu_select
         asked = []
 
-        def fake_ask(text, choices, default=None):
-            asked.append((text, list(choices), default))
-            return default
+        def fake_menu(text, items, default_index=0):
+            asked.append((text, list(items), default_index))
+            return items[default_index][0]
 
         deployer._is_interactive_session = lambda: True
-        deployer.ui.ask_choice = fake_ask
+        deployer.ui.menu_select = fake_menu
         try:
             chosen = deployer._resolve_anime_preset(args)
         finally:
             deployer._is_interactive_session = original_interactive
-            deployer.ui.ask_choice = original_ask
+            deployer.ui.menu_select = original_menu
         self.assertEqual(chosen, "A+A")
         self.assertEqual(len(asked), 1)
-        # The pre-selected answer the prompt shows for Enter is the shipped
-        # deploy() default, so pressing Enter keeps it.
-        self.assertEqual(asked[0][2], "A+A")
-        for mode in ("A", "A+A", "B", "B+B", "C+A", "fast", "off"):
-            self.assertIn(mode, asked[0][1])
+        self.assertEqual(asked[0][0], "Anime4K mode")
+        # The fresh menu highlights row #1 (A+A), so Enter keeps the shipped
+        # deploy() default and "1" selects it directly.
+        self.assertEqual(asked[0][2], 0)
+        # Menu order + coverage come from the registry, and every row has a
+        # human description.
+        self.assertEqual(
+            [preset for preset, _label in asked[0][1]],
+            [preset for preset, _label in deployer.ANIME4K_PRESETS],
+        )
+        self.assertEqual({preset for preset, _label in asked[0][1]}, set(deployer.ANIME4K_CHAINS))
+        self.assertTrue(all(label for _preset, label in asked[0][1]))
 
     def test_an_explicit_anime_preset_skips_the_prompt(self):
         parser = deployer.build_arg_parser()
         args = parser.parse_args(["--install", "--anime-preset", "B"])
         original_interactive = deployer._is_interactive_session
-        original_ask = deployer.ui.ask_choice
+        original_menu = deployer.ui.menu_select
 
         def boom(*a, **k):
             raise AssertionError("must not prompt when the mode was given")
 
         deployer._is_interactive_session = lambda: True
-        deployer.ui.ask_choice = boom
+        deployer.ui.menu_select = boom
         try:
             self.assertEqual(deployer._resolve_anime_preset(args), "B")
         finally:
             deployer._is_interactive_session = original_interactive
-            deployer.ui.ask_choice = original_ask
+            deployer.ui.menu_select = original_menu
 
     def test_ask_choice_fallback_accepts_enter_default_and_typed_choice(self):
         """Without rich, Enter returns the default and typed input must match a choice."""
@@ -495,6 +502,123 @@ class DeployerModuleTests(unittest.TestCase):
         proc = self.run_module("--install", "--verify")
         self.assertEqual(proc.returncode, 2)
         self.assertIn("not allowed", proc.stderr)
+
+
+class MenuSelectTests(unittest.TestCase):
+    """deploy.ui.menu_select — the numbered preset menu in both input modes.
+
+    Everything stays headless: the line fallback is driven with scripted
+    stdin replies; the interactive path runs with injected keystroke readers
+    (no console needed, no focus stealing, no raw-mode state left behind)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ITEMS = list(deployer.ANIME4K_PRESETS)
+
+    def select_via_lines(self, effects, default_index=0):
+        """Drive the line fallback with scripted builtins.input replies.
+
+        Each entry of ``effects`` is returned as a reply, or raised when it
+        is an exception instance. Returns ``(chosen value, input calls)``."""
+        import builtins
+
+        original_input = builtins.input
+        calls = []
+        deck = iter(effects)
+
+        def fake_input(_prompt=""):
+            calls.append(_prompt)
+            effect = next(deck)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+
+        builtins.input = fake_input
+        try:
+            with redirect_stdout(io.StringIO()):
+                value = deployer.ui.menu_select(
+                    "Anime4K mode", self.ITEMS, default_index, _read_key=None
+                )
+            return value, calls
+        finally:
+            builtins.input = original_input
+
+    def select_via_keys(self, reader):
+        """Drive the interactive path with an injected keystroke reader."""
+        with redirect_stdout(io.StringIO()):
+            return deployer.ui.menu_select("Anime4K mode", self.ITEMS, _read_key=reader)
+
+    @staticmethod
+    def keystrokes(keys):
+        """A read_key() callable feeding a scripted key sequence; an entry
+        that is an exception instance is raised, simulating EOF / Ctrl+C."""
+        deck = iter(keys)
+
+        def read_key():
+            effect = next(deck)
+            if isinstance(effect, BaseException):
+                raise effect
+            return effect
+
+        return read_key
+
+    def test_line_fallback_accepts_enter_numbers_and_preset_names(self):
+        for reply, expected in [
+            ("", "A+A"),  # Enter keeps the default row
+            ("3", "B+B"),
+            ("5", "C+A"),
+            ("7", "fast"),
+            ("8", "off"),
+            ("c+a", "C+A"),  # preset name, case-insensitive
+        ]:
+            with self.subTest(reply=reply):
+                value, _calls = self.select_via_lines([reply])
+                self.assertEqual(value, expected)
+
+    def test_line_fallback_invalid_replies_reprompt_then_accept(self):
+        value, calls = self.select_via_lines(["zzz", "9", "0", "B+B"])
+        self.assertEqual(value, "B+B")
+        self.assertEqual(len(calls), 4)
+
+    def test_line_fallback_respects_a_custom_default_row(self):
+        value, _calls = self.select_via_lines([""], default_index=3)
+        self.assertEqual(value, "B")
+
+    def test_line_fallback_eof_or_ctrl_c_keeps_default_without_looping(self):
+        value, calls = self.select_via_lines([EOFError()])
+        self.assertEqual(value, "A+A")
+        self.assertEqual(len(calls), 1)  # asked once, then the default — never loops
+        value, _calls = self.select_via_lines([KeyboardInterrupt()])
+        self.assertEqual(value, "A+A")
+
+    def test_keystroke_menu_moves_with_arrows_and_confirms_with_enter(self):
+        # Start on A+A; down, down, up lands on row #2 ("A"), Enter confirms.
+        reader = self.keystrokes(["down", "down", "up", "enter"])
+        self.assertEqual(self.select_via_keys(reader), "A")
+
+    def test_keystroke_menu_digits_select_instantly(self):
+        self.assertEqual(self.select_via_keys(self.keystrokes(["7"])), "fast")
+        self.assertEqual(self.select_via_keys(self.keystrokes(["2"])), "A")
+
+    def test_keystroke_menu_esc_keeps_the_default(self):
+        reader = self.keystrokes(["down", "esc"])
+        self.assertEqual(self.select_via_keys(reader), "A+A")
+
+    def test_keystroke_menu_ignores_unknown_and_out_of_range_keys(self):
+        reader = self.keystrokes(["x", "q", "0", "9", "enter"])
+        self.assertEqual(self.select_via_keys(reader), "A+A")
+
+    def test_keystroke_menu_reader_eof_or_ctrl_c_keeps_the_default(self):
+        reader = self.keystrokes([EOFError(), "enter"])
+        self.assertEqual(self.select_via_keys(reader), "A+A")
+        reader = self.keystrokes([KeyboardInterrupt()])
+        self.assertEqual(self.select_via_keys(reader), "A+A")
+
+    def test_menu_select_rejects_empty_items_and_a_bad_default_row(self):
+        with self.assertRaises(ValueError):
+            deployer.ui.menu_select("Anime4K mode", [])
+        with self.assertRaises(ValueError):
+            deployer.ui.menu_select("Anime4K mode", self.ITEMS, default_index=len(self.ITEMS))
 
 
 if __name__ == "__main__":

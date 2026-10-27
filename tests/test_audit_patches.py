@@ -566,6 +566,36 @@ class TestAuditPatches(unittest.TestCase):
 
             self.assertFalse(_migrate_anime4k_conf(conf_path))
 
+    def test_anime4k_conf_header_lists_presets_in_menu_order(self):
+        """The seeded conf advertises presets in the install-time menu order."""
+        from deploy.deployer import _write_anime4k_conf
+        from deploy.registry import ANIME4K_CHAINS, ANIME4K_PRESETS
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "anime4k.conf")
+            _write_anime4k_conf(conf_path, "C+A")
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        self.assertIn("mode=C+A", content)
+        one_of = next(line for line in content.splitlines() if line.startswith("# one of:"))
+        listed = one_of.split(":", 1)[1].strip().split(" | ")
+        self.assertEqual(sorted(listed), sorted(ANIME4K_CHAINS))
+        self.assertEqual(listed, [preset for preset, _label in ANIME4K_PRESETS])
+
+    def test_menu_items_match_the_registry_chains(self):
+        """Every installable chain appears in the menu, in menu order, all described."""
+        from deploy.deployer import _anime_preset_menu_items
+        from deploy.registry import ANIME4K_CHAINS, ANIME4K_PRESETS
+
+        items = _anime_preset_menu_items()
+        self.assertEqual(
+            [preset for preset, _label in items], [preset for preset, _label in ANIME4K_PRESETS]
+        )
+        self.assertEqual(
+            sorted(preset for preset, _label in items), sorted(ANIME4K_CHAINS)
+        )
+        self.assertTrue(all(label for _preset, label in items))
+
     def test_migrate_mpv_conf_user_prunes_legacy_audio_sync_override(self):
         from deploy.deployer import _migrate_mpv_conf_user
 

@@ -195,6 +195,21 @@ ANIME4K_CHAINS = {
     "C+A": "Anime4K_Clamp_Highlights;Anime4K_Upscale_Denoise_CNN_x2_VL;Anime4K_AutoDownscalePre_x2;Anime4K_AutoDownscalePre_x4;Anime4K_Restore_CNN_M;Anime4K_Upscale_CNN_x2_M",
 }
 
+# Install-time menu: display order + short description per mode (see
+# deploy/ui.py menu_select). Every key must exist in ANIME4K_CHAINS. A+A is
+# row 1, so pressing Enter on the fresh menu and pressing "1" agree on the
+# shipped default.
+ANIME4K_PRESETS = (
+    ("A+A", "Ultra Sharp (Recommended Default)"),
+    ("A", "Sharp"),
+    ("B+B", "Ultra Soft"),
+    ("B", "Soft"),
+    ("C+A", "Denoise + Sharp"),
+    ("C", "Denoise"),
+    ("fast", "Lightweight (for weaker GPUs)"),
+    ("off", "Disabled"),
+)
+
 SCALER_TIERS = {
     "light": {"scale": "spline36", "cscale": "spline36", "dscale": "mitchell"},
     "balanced": {"scale": "ewa_lanczos", "cscale": "spline36", "dscale": "mitchell"},
