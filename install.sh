@@ -120,4 +120,12 @@ case ":${PATH}:" in
     *) echo "note: ${BIN_DIR} is not on your PATH; add it to run 'mpv-config' directly." >&2 ;;
 esac
 
+# curl | bash feeds this script through a pipe, and the exec'd Python would
+# inherit that pipe as stdin: isatty() is False, so the Anime4K menu and the
+# plan confirmation silently take their defaults. When stdout is a terminal
+# but stdin is not, reattach stdin to the controlling terminal. CI, cron and
+# SSH-without-tty have no readable /dev/tty and keep the non-interactive path.
+if [ ! -t 0 ] && [ -t 1 ] && ( : < /dev/tty ) 2>/dev/null; then
+    exec "${VENV_PYTHON}" -m mpv_config install "$@" < /dev/tty
+fi
 exec "${VENV_PYTHON}" -m mpv_config install "$@"
