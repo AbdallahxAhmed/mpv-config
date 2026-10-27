@@ -68,7 +68,7 @@
 # These go through scripts/profile_picker.lua, so the choice is applied
 # AND remembered (script-opts/anime4k.conf). It also survives a restart:
 # the anime profile picks the saved mode up again on the next anime file.
-# Alt+a cycles the mode, Alt+Shift+a overrides the anime detection by hand.
+# Ctrl+g cycles the mode, Ctrl+Shift+t overrides the anime detection by hand.
 
 # الوضع A
 CTRL+1 no-osd script-message-to profile_picker set-mode A
