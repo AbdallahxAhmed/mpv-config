@@ -11,11 +11,8 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from deploy.installer import (
-    _create_tmp_file,
-    _download_asset,
-    _InlineDownloadProgress,
-)
+from deploy.installer import _create_tmp_file, _download_asset
+from deploy.ui import InlineDownloadProgress as _InlineDownloadProgress
 
 
 class _FakeClock:
