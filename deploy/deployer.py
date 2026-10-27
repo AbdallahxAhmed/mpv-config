@@ -2080,7 +2080,9 @@ def _resolve_anime_preset(args):
             choices = [m for m in order if m in ANIME4K_CHAINS] + [
                 m for m in ANIME4K_CHAINS if m not in order
             ]
-            chosen = ui.ask_choice("Anime4K mode", choices)
+            chosen = ui.ask_choice(
+                "Anime4K mode", choices, default=_DEPLOY_DEFAULTS["anime_preset"]
+            )
         except (EOFError, KeyboardInterrupt):
             ui.warn("No mode chosen; keeping the default.")
             return _DEPLOY_DEFAULTS["anime_preset"]

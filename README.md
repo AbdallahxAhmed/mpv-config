@@ -60,7 +60,7 @@
 | --- | --- |
 | Release | **v1.0.0** (2026-10-07) — see [CHANGELOG.md](CHANGELOG.md) |
 | CLI | `mpv-config` with `install` / `verify` / `update` / `rollback` / `status` / `sync-deps` / `download` / `uninstall` |
-| Tests | Python + Lua suite (~450 cases) on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
+| Tests | 450 Python tests + 11 Lua test suites on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
 | Platforms | Windows 10/11, Linux (X11 & KDE Wayland), macOS |
 | Requires | mpv ≥ 0.40 (auto-upgraded by the installer), Python 3.10+ |
 
@@ -93,7 +93,7 @@ Recent work now on `main` (unreleased in the changelog):
   - `F10`: Toggle native mpv sharpening (crisp `0.35` / `OFF`).
   - `F3`: Toggle grain-free debanding (`deband=no` default; 1-pass clean gradient smoothing with 0 synthetic grain).
 - **One-key ASS cheat sheet** (`?` or `F9`) — native vector ASS overlay listing keys and mouse actions; physical `/` bare is ignored to prevent accidental volume drops.
-- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), applied by the auto-detected `[anime]` profile (Anime4K + 2-pass deband) or by the light `[live-action]` one.
+- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`) — applied automatically by the auto-detected `[anime]` profile (Anime4K + 2-pass deband); `[live-action]` stays clean by default, while `Ctrl+1`–`6` remain a manual override on any video.
 - **gpu-next (libplacebo)** renderer with platform auto-detection: `d3d11` + `d3d11va` zero-copy on Windows (measured 1.4 ms/frame vs 5.3 ms for `nvdec-copy`), Vulkan + `auto-safe` on Linux, VideoToolbox on macOS.
 - **Fixed-refresh display sync** — calibrated for 1080p 144 Hz panels; linear temporal scaling absorbs non-integer VSync ratios without judder, with a dedicated KDE-Wayland stabilization profile.
 - **Source-aware profiles** — `[anime]` (Anime4K + 2-pass deband), `[live-action]` (clean native playback), `[protocol.https]` streaming (800 MiB buffer / 60 s readahead, same vblank alignment).
@@ -251,10 +251,12 @@ Latin letter bindings never fire. The fix is pure config: on every install/updat
 appends a generated twin block to the **deployed** `input.conf` — for each printable Latin binding,
 an extra binding on the character the **same physical key** produces on Arabic 101 (probed from the
 real layout with `ToUnicodeEx`, cross-checked against xkeyboard-config). Your template and your own
-lines stay Latin-only; the twins regenerate themselves, so nothing is maintained by hand, and no
-hook process runs (the previous keyboard hook guard still ships but is disabled by default in
-`script-opts/keyboard_layout.conf` — set `enabled=yes` to bring it back for layouts beyond Arabic
-101).
+lines stay Latin-only; the twins regenerate themselves, so nothing is maintained by hand. The
+old Python keyboard-hook guard was removed entirely: on Windows, `scripts/keyboard_layout.lua`
+silently starts the AutoHotkey helper (`tools/mpv_arabic_layout.ahk`) at mpv startup — a
+detached native subprocess with `CREATE_NO_WINDOW` — and the helper exits 2 seconds after mpv
+closes (opt out with `ahk=no` in `script-opts/keyboard_layout.conf`); on Linux/macOS nothing
+runs beyond the config itself.
 
 Five keys cannot have a bare twin: **h g b G B**. Measured on the real key stream (an
 `--input-test` capture): pressing `b` delivers **only `ا`** to mpv — the `ل` of the lam-alef pair
@@ -327,6 +329,8 @@ curl -fsSL https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/inst
 ```
 
 The script installs the CLI into its own virtual environment (`~/.local/share/mpv-config/venv`) and links `mpv-config` into `~/.local/bin`, so it also works on distributions that refuse `pip install --user` (PEP 668, e.g. Ubuntu 24.04). It needs Python 3.10+ (on Debian/Ubuntu also `python3-venv`). Pass options through with `... | bash -s -- --dry-run`.
+
+`mpv-config install` — which both bootstrap scripts run for you — is interactive in a real terminal: it asks which Anime4K chain the auto-detected `[anime]` profile should use, with **A+A (Ultra Sharp)** pre-selected as the #1 recommended default. Press `Enter` to keep A+A, or type one of `A`, `B`, `B+B`, `C`, `C+A`, `fast`, `off`. Piped or CI runs never see the prompt (the shipped A+A default applies), and an explicit `--anime-preset <MODE>` skips it.
 
 ---
 
@@ -420,7 +424,11 @@ mpv-config download --watch
 | `scripts/ytdl-sub-menu.lua` | On-demand YouTube captions menu (creator / auto / auto-translated) |
 | `scripts/smart-paste.lua` | Clipboard paste-open + drag & drop URL normalization |
 | `scripts/sub_backdrop.lua` | Subtitle backdrop toggle with bilingual OSD |
-| `scripts/player-toolbar.lua` | Stable Volume toolbar button wiring |
+| `scripts/profile_picker.lua` | Offline anime auto-detection, Anime4K A+A default activation, and preset persistence |
+| `scripts/smart_motion.lua` | 144Hz display-resample and interpolation management |
+| `scripts/keyboard_layout.lua` | Silent native async Win32 launcher for the Arabic AHK helper |
+| `scripts/help_overlay.lua` | ASS vector keybinding cheat sheet on `?` / `F9` |
+| `scripts/player-toolbar.lua` | Stable Volume toolbar button and codec-prioritized quality switching (AV1 > VP9 > H.264) |
 | `scripts/modules/stream_policy.lua` | Shared YouTube/stream policy module |
 
 <a id="system-dependencies-managed-by-the-installer"></a>
