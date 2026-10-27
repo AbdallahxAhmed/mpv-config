@@ -112,12 +112,30 @@ class TestAuditPatches(unittest.TestCase):
         cases = [
             ("windows", {"os": "windows", "platform_key": "windows", "gpu_vendor": "nvidia"}),
             # x11: Arch/Manjaro/CachyOS family (os-release check collapses to "arch")
-            ("arch-x11", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "nvidia"}),
+            (
+                "arch-x11",
+                {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "nvidia"},
+            ),
             # wayland on the same family (CachyOS default is a Wayland DE)
-            ("arch-wayland", {"os": "linux", "platform_key": "arch", "distro": "arch", "gpu_vendor": "amd", "display": "wayland"}),
+            (
+                "arch-wayland",
+                {
+                    "os": "linux",
+                    "platform_key": "arch",
+                    "distro": "arch",
+                    "gpu_vendor": "amd",
+                    "display": "wayland",
+                },
+            ),
             # the Mint friend's actual platform family
-            ("ubuntu", {"os": "linux", "platform_key": "ubuntu", "distro": "mint", "gpu_vendor": "intel"}),
-            ("fedora", {"os": "linux", "platform_key": "fedora", "distro": "fedora", "gpu_vendor": "amd"}),
+            (
+                "ubuntu",
+                {"os": "linux", "platform_key": "ubuntu", "distro": "mint", "gpu_vendor": "intel"},
+            ),
+            (
+                "fedora",
+                {"os": "linux", "platform_key": "fedora", "distro": "fedora", "gpu_vendor": "amd"},
+            ),
             ("macos", {"os": "macos", "platform_key": "macos", "gpu_vendor": "apple"}),
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -160,7 +178,11 @@ class TestAuditPatches(unittest.TestCase):
                     dest,
                     env,
                     selected_profile="native",
-                    resolved_defaults={"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto"},
+                    resolved_defaults={
+                        "gpu_api": "vulkan",
+                        "hwdec": "auto-safe",
+                        "gpu_context": "auto",
+                    },
                 )
                 with open(dest, "r", encoding="utf-8") as f:
                     out = f.read()
@@ -171,14 +193,23 @@ class TestAuditPatches(unittest.TestCase):
         # A non-legacy arch machine keeps the display-appropriate vk context.
         with tempfile.TemporaryDirectory() as tmpdir:
             env = Environment(
-                os="linux", platform_key="arch", distro="arch",
-                display="wayland", gpu_vendor="nvidia",
+                os="linux",
+                platform_key="arch",
+                distro="arch",
+                display="wayland",
+                gpu_vendor="nvidia",
             )
             dest = os.path.join(tmpdir, "mpv.conf")
             _patch_mpv_conf(
-                template_file, dest, env,
+                template_file,
+                dest,
+                env,
                 selected_profile="native",
-                resolved_defaults={"gpu_api": "vulkan", "hwdec": "auto-safe", "gpu_context": "auto"},
+                resolved_defaults={
+                    "gpu_api": "vulkan",
+                    "hwdec": "auto-safe",
+                    "gpu_context": "auto",
+                },
             )
             with open(dest, "r", encoding="utf-8") as f:
                 out = f.read()
@@ -191,8 +222,11 @@ class TestAuditPatches(unittest.TestCase):
         from deploy.detector import Environment
 
         env = Environment(
-            os="linux", platform_key="arch", distro="arch",
-            gpu_vendor="intel", legacy_vulkan_gpu=True,
+            os="linux",
+            platform_key="arch",
+            distro="arch",
+            gpu_vendor="intel",
+            legacy_vulkan_gpu=True,
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
@@ -360,7 +394,7 @@ class TestAuditPatches(unittest.TestCase):
             # 'لا' is two codepoints (U+0644 U+0627); mpv rejects
             # multi-codepoint key names with "Unknown key 'لا'".
             self.assertIn(
-                'ب       script-binding sub_backdrop/toggle',
+                "ب       script-binding sub_backdrop/toggle",
                 new_content,
             )
             self.assertNotIn("لا", new_content)
@@ -393,10 +427,18 @@ class TestAuditPatches(unittest.TestCase):
 
             # Converted lines match the shipped template bindings, which
             # profile_picker persists (script-opts/anime4k.conf).
-            self.assertIn("CTRL+1 no-osd script-message-to profile_picker set-mode A\n", new_content)
-            self.assertIn("CTRL+4 no-osd script-message-to profile_picker set-mode A+A\n", new_content)
-            self.assertIn("CTRL+0 no-osd script-message-to profile_picker set-mode off\n", new_content)
-            self.assertIn("Ctrl+g no-osd script-message-to profile_picker cycle-mode\n", new_content)
+            self.assertIn(
+                "CTRL+1 no-osd script-message-to profile_picker set-mode A\n", new_content
+            )
+            self.assertIn(
+                "CTRL+4 no-osd script-message-to profile_picker set-mode A+A\n", new_content
+            )
+            self.assertIn(
+                "CTRL+0 no-osd script-message-to profile_picker set-mode off\n", new_content
+            )
+            self.assertIn(
+                "Ctrl+g no-osd script-message-to profile_picker cycle-mode\n", new_content
+            )
             # No raw shader routing survives: no direct glsl-shaders
             # change-list and no old show-text labels.
             self.assertNotIn("change-list glsl-shaders", new_content)
@@ -435,9 +477,7 @@ class TestAuditPatches(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
-            custom_line = (
-                'CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/MyCustomSharpen.glsl"; show-text "My chain"\n'
-            )
+            custom_line = 'CTRL+1 no-osd change-list glsl-shaders set "~~/shaders/MyCustomSharpen.glsl"; show-text "My chain"\n'
             old_content = (
                 custom_line
                 + 'CTRL+2 no-osd change-list glsl-shaders set "~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl"; show-text "Anime4K: Mode B (Soft)"\n'
@@ -452,7 +492,9 @@ class TestAuditPatches(unittest.TestCase):
                 new_content = f.read()
 
             self.assertIn(custom_line.strip(), new_content)
-            self.assertIn("CTRL+2 no-osd script-message-to profile_picker set-mode B\n", new_content)
+            self.assertIn(
+                "CTRL+2 no-osd script-message-to profile_picker set-mode B\n", new_content
+            )
             # CTRL+1 is already bound, so no canonical line is appended
             # for it either.
             self.assertNotIn("profile_picker set-mode A\n", new_content)
@@ -530,10 +572,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             user_path = os.path.join(tmpdir, "mpv.conf.user")
             old_content = (
-                "tscale = oversample\n\n"
-                "[protocol.https]\n"
-                "video-sync = audio\n"
-                "interpolation = no\n"
+                "tscale = oversample\n\n[protocol.https]\nvideo-sync = audio\ninterpolation = no\n"
             )
             with open(user_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
@@ -589,8 +628,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
             old_content = (
-                "gpu-api                  = vulkan\n"
-                "vo                        = gpu-next\n"
+                "gpu-api                  = vulkan\nvo                        = gpu-next\n"
             )
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
@@ -645,11 +683,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
             with open(conf_path, "w", encoding="utf-8") as f:
-                f.write(
-                    "border                    = no\n"
-                    "# border = yes\n"
-                    "timeline-border = 1\n"
-                )
+                f.write("border                    = no\n# border = yes\ntimeline-border = 1\n")
             self.assertFalse(_migrate_mpv_conf(conf_path))
             with open(conf_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -679,7 +713,9 @@ class TestAuditPatches(unittest.TestCase):
             # Idempotent rewrite keeps a single default line.
             self.assertEqual(content.count("default_quality="), 1)
             # A missing file is not created — the deployer only patches fresh copies.
-            self.assertFalse(_patch_stream_quality_conf(os.path.join(tmpdir, "absent.conf"), "2160"))
+            self.assertFalse(
+                _patch_stream_quality_conf(os.path.join(tmpdir, "absent.conf"), "2160")
+            )
 
     def test_migrate_mpv_conf_neutralizes_legacy_stream_quality_pins(self):
         """The 1080p ytdl-format cap moved to script-opts/stream_quality.conf.
@@ -705,7 +741,10 @@ class TestAuditPatches(unittest.TestCase):
                 new_content = f.read()
 
             self.assertNotRegex(new_content, r"(?m)^\s*ytdl-format\s*=")
-            self.assertIn("streaming default quality now lives in script-opts/stream_quality.conf", new_content)
+            self.assertIn(
+                "streaming default quality now lives in script-opts/stream_quality.conf",
+                new_content,
+            )
             self.assertIn("ytdl-raw-options-append = format-sort=vbr,abr", new_content)
             self.assertIn("ytdl-raw-options-append   = format-sort=vbr,abr", new_content)
             self.assertNotIn("res:1080", new_content)
@@ -717,9 +756,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
             with open(conf_path, "w", encoding="utf-8") as f:
-                f.write(
-                    "ytdl-format = bestvideo[height<=?1080][vcodec!=vp9]+bestaudio/best\n"
-                )
+                f.write("ytdl-format = bestvideo[height<=?1080][vcodec!=vp9]+bestaudio/best\n")
             self.assertFalse(_migrate_mpv_conf(conf_path))
             with open(conf_path, "r", encoding="utf-8") as f:
                 self.assertIn("[vcodec!=vp9]", f.read())
@@ -751,8 +788,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
             old_content = (
-                "sub-ass-vsfilter-aspect-compat = 'no'\n"
-                "sub-ass-use-video-data = aspect-ratio\n"
+                "sub-ass-vsfilter-aspect-compat = 'no'\nsub-ass-use-video-data = aspect-ratio\n"
             )
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
@@ -809,9 +845,7 @@ class TestAuditPatches(unittest.TestCase):
             )
         )
         self.assertTrue(
-            _is_display_device(
-                "01:00.0 3D controller: NVIDIA Corporation GK107GLM [Quadro K1100M]"
-            )
+            _is_display_device("01:00.0 3D controller: NVIDIA Corporation GK107GLM [Quadro K1100M]")
         )
         self.assertEqual(
             _gpu_vendor_from_device(
@@ -849,9 +883,7 @@ class TestAuditPatches(unittest.TestCase):
             "01:00.0 VGA compatible controller: NVIDIA Corporation GP104 [GeForce GTX 1070]",
             "00:1f.6 Ethernet controller: Intel Corporation I219-V (Ethernet Only)",
         ]
-        with mock.patch.object(
-            detector, "_display_device_lines", return_value=[desktop_lines[0]]
-        ):
+        with mock.patch.object(detector, "_display_device_lines", return_value=[desktop_lines[0]]):
             primary, vendors, _ = _detect_gpus()
         self.assertEqual(vendors, ["nvidia"])
         self.assertFalse(detector._legacy_vulkan_intel_gpu())
@@ -888,9 +920,7 @@ class TestAuditPatches(unittest.TestCase):
             gpu_hybrid=True,
             has_libcuda=True,
         )
-        pure = Environment(
-            os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=True
-        )
+        pure = Environment(os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=True)
         pure_nocuda = Environment(
             os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=False
         )
@@ -915,6 +945,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(_parse_mpv_version("mpv v0.41.0-934-g9f9f8c4dd"), (0, 41, 0))
         self.assertEqual(_parse_mpv_version("mpv 0.40.0"), (0, 40, 0))
         self.assertEqual(_parse_mpv_version("mpv 0.39.0 (C) 2000-2025"), (0, 39, 0))
+
     def test_ffsubsync_module_import_diagnostics_use_real_error_line(self):
         """Import failure diagnostics surface the error, not 'Traceback (...': head noise."""
         from deploy import detector
@@ -966,10 +997,12 @@ class TestAuditPatches(unittest.TestCase):
                 )
             return mock.Mock(returncode=returncode, stderr=stderr, stdout="")
 
-        with mock.patch.object(detector, "_run_silent", return_value=(True, "ffsubsync 0.4.26")), \
-                mock.patch.object(detector.shutil, "which", return_value=launcher), \
-                mock.patch.object(detector.sys, "platform", "linux"), \
-                mock.patch.object(detector.subprocess, "run", side_effect=fake_subprocess_run):
+        with (
+            mock.patch.object(detector, "_run_silent", return_value=(True, "ffsubsync 0.4.26")),
+            mock.patch.object(detector.shutil, "which", return_value=launcher),
+            mock.patch.object(detector.sys, "platform", "linux"),
+            mock.patch.object(detector.subprocess, "run", side_effect=fake_subprocess_run),
+        ):
             with mock.patch.object(detector.ui, "info") as ui_info:
                 with mock.patch.object(detector.ui, "warn") as ui_warn:
                     ok = detector._check_ffsubsync_installed(launcher)
@@ -981,9 +1014,13 @@ class TestAuditPatches(unittest.TestCase):
 
             def fake_webrtcvad_broken(cmd, **kwargs):
                 returncode = 0 if cmd[-1] != "webrtcvad" else 1
-                stderr = "" if returncode == 0 else (
-                    "Traceback (most recent call last):\n"
-                    "ModuleNotFoundError: No module named 'webrtcvad'\n"
+                stderr = (
+                    ""
+                    if returncode == 0
+                    else (
+                        "Traceback (most recent call last):\n"
+                        "ModuleNotFoundError: No module named 'webrtcvad'\n"
+                    )
                 )
                 return mock.Mock(returncode=returncode, stderr=stderr, stdout="")
 
@@ -994,7 +1031,6 @@ class TestAuditPatches(unittest.TestCase):
             self.assertFalse(broken)
             self.assertTrue(ui_warn.called)
             self.assertIn("webrtcvad", ui_warn.call_args.args[0])
-
 
     def test_sanitize_mpv_conf_for_mpv_version(self):
         """Too-new options are commented; known/unknown-version callers keep control."""
@@ -1087,9 +1123,7 @@ class TestAuditPatches(unittest.TestCase):
             with open(conf_path, "r", encoding="utf-8") as f:
                 old_state = f.read()
             self.assertRegex(old_state, r"(?m)^sub-ass-vsfilter-blur-compat[ \t]*=")
-            self.assertIsNone(
-                re.search(r"(?m)^sub-ass-use-video-data[ \t]*=", old_state)
-            )
+            self.assertIsNone(re.search(r"(?m)^sub-ass-use-video-data[ \t]*=", old_state))
             # clipboard-monitor cannot exist on 0.37 → sanitizer comments it.
             self.assertIn("was: clipboard-monitor = yes", old_state)
             # idempotent
@@ -1120,11 +1154,15 @@ class TestAuditPatches(unittest.TestCase):
             return True
 
         env = Environment(os="linux", distro="ubuntu")
-        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
-                mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(
+                installer.shutil, "which", return_value="/usr/bin/add-apt-repository"
+            ),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)),
+            mock.patch.object(installer.ui, "step"),
+        ):
             installer._install_mpv_latest(env)
 
         commands = [c[0] for c in calls]
@@ -1159,25 +1197,37 @@ class TestAuditPatches(unittest.TestCase):
             return True  # every apt step "succeeds", but apt only has 0.37
 
         env = Environment(os="linux", distro="ubuntu")
-        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 37, 0)):
-            with mock.patch.object(installer.ui, "warn") as warn, \
-                    mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(
+                installer.shutil, "which", return_value="/usr/bin/add-apt-repository"
+            ),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "probe_mpv_version", return_value=(0, 37, 0)),
+        ):
+            with (
+                mock.patch.object(installer.ui, "warn") as warn,
+                mock.patch.object(installer.ui, "step"),
+            ):
                 ok = installer._install_mpv_latest(env)
 
         self.assertFalse(ok)  # routes into the tolerate-mpv + sanitizer flow
         warn.assert_called_once()  # exactly one explanation, not red herrings
 
         # Nothing installed at all is also honest failure.
-        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=None):
-            with mock.patch.object(installer.ui, "warn") as warn, \
-                    mock.patch.object(installer.ui, "error") as error, \
-                    mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(
+                installer.shutil, "which", return_value="/usr/bin/add-apt-repository"
+            ),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "probe_mpv_version", return_value=None),
+        ):
+            with (
+                mock.patch.object(installer.ui, "warn") as warn,
+                mock.patch.object(installer.ui, "error") as error,
+                mock.patch.object(installer.ui, "step"),
+            ):
                 ok = installer._install_mpv_latest(env)
         self.assertFalse(ok)
         self.assertTrue(warn.called)
@@ -1213,7 +1263,10 @@ class TestAuditPatches(unittest.TestCase):
             net_calls.append(tuple(cmd))
             joined = " ".join(cmd)
             if "api.launchpad.net" in joined:
-                return True, '{"signing_key_fingerprint": "5E52F0DFE436AFEC51F07B8D3ABE0C0EB9EC1B6C"}'
+                return (
+                    True,
+                    '{"signing_key_fingerprint": "5E52F0DFE436AFEC51F07B8D3ABE0C0EB9EC1B6C"}',
+                )
             if "keyserver.ubuntu.com/pks" in joined and "op=get" in joined:
                 return True, (
                     "-----BEGIN PGP PUBLIC KEY BLOCK-----\narmor\n"
@@ -1221,11 +1274,13 @@ class TestAuditPatches(unittest.TestCase):
                 )
             return False, ""
 
-        with mock.patch.object(installer, "_capture", side_effect=fake_capture), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
-                mock.patch.object(installer.ui, "step"), \
-                mock.patch.object(installer.ui, "success"):
+        with (
+            mock.patch.object(installer, "_capture", side_effect=fake_capture),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "_ubuntu_series", return_value="noble"),
+            mock.patch.object(installer.ui, "step"),
+            mock.patch.object(installer.ui, "success"),
+        ):
             self.assertTrue(installer._direct_ppa_register())
 
         # Every network fetch is IPv4-forced curl over 443 — no HKP, no tool,
@@ -1239,43 +1294,45 @@ class TestAuditPatches(unittest.TestCase):
             " ".join(net_calls[1]),
         )
         none_network = run_calls + net_calls
-        self.assertFalse(
-            any("add-apt-repository" in " ".join(c) for c in none_network)
-        )
+        self.assertFalse(any("add-apt-repository" in " ".join(c) for c in none_network))
         dearmor = [c for c in run_calls if "--dearmor" in c]
         self.assertEqual(len(dearmor), 1)
-        self.assertIn(
-            "/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", dearmor[0]
-        )
+        self.assertIn("/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", dearmor[0])
         joined = [" ".join(c) for c in run_calls]
         sources = [c for c in joined if "sources.list.d" in c]
         self.assertEqual(len(sources), 1)
         self.assertIn("/etc/apt/sources.list.d/ubuntuhandbook1-ubuntu-mpv-noble.list", sources[0])
-        self.assertIn("signed-by=/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", sources[0])
+        self.assertIn(
+            "signed-by=/usr/share/keyrings/ubuntuhandbook1-mpv-archive-keyring.gpg", sources[0]
+        )
         self.assertIn("noble main", sources[0])
 
     def test_direct_ppa_register_failure_contract(self):
         """Unparseable/missing metadata fails closed with an explanation."""
         from deploy import installer
 
-        with mock.patch.object(installer, "_ubuntu_series", return_value=""), \
-                mock.patch.object(installer.ui, "warn") as warn:
+        with (
+            mock.patch.object(installer, "_ubuntu_series", return_value=""),
+            mock.patch.object(installer.ui, "warn") as warn,
+        ):
             self.assertFalse(installer._direct_ppa_register())
         self.assertTrue(warn.called)
 
-        with mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
-                mock.patch.object(installer, "_capture", return_value=(True, "{}")), \
-                mock.patch.object(installer.ui, "warn") as warn, \
-                mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(installer, "_ubuntu_series", return_value="noble"),
+            mock.patch.object(installer, "_capture", return_value=(True, "{}")),
+            mock.patch.object(installer.ui, "warn") as warn,
+            mock.patch.object(installer.ui, "step"),
+        ):
             self.assertFalse(installer._direct_ppa_register())
         self.assertTrue(warn.called)
 
-        with mock.patch.object(installer, "_ubuntu_series", return_value="noble"), \
-                mock.patch.object(
-                    installer, "_capture", side_effect=[(False, ""), (False, "")]
-                ), \
-                mock.patch.object(installer.ui, "warn") as warn, \
-                mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(installer, "_ubuntu_series", return_value="noble"),
+            mock.patch.object(installer, "_capture", side_effect=[(False, ""), (False, "")]),
+            mock.patch.object(installer.ui, "warn") as warn,
+            mock.patch.object(installer.ui, "step"),
+        ):
             self.assertFalse(installer._direct_ppa_register())
         self.assertEqual(warn.call_count, 1)
 
@@ -1292,12 +1349,16 @@ class TestAuditPatches(unittest.TestCase):
             return True
 
         env = Environment(os="linux", distro="ubuntu")
-        with mock.patch.object(installer.shutil, "which", return_value="/usr/bin/add-apt-repository"), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "_direct_ppa_register", return_value=True), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
-                mock.patch.object(installer.ui, "step"):
+        with (
+            mock.patch.object(
+                installer.shutil, "which", return_value="/usr/bin/add-apt-repository"
+            ),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "_direct_ppa_register", return_value=True),
+            mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)),
+            mock.patch.object(installer.ui, "step"),
+        ):
             self.assertTrue(installer._install_mpv_latest(env))
 
         commands = [list(c) for c in calls]
@@ -1321,13 +1382,15 @@ class TestAuditPatches(unittest.TestCase):
             return True
 
         env = Environment(os="linux", distro="ubuntu")
-        with mock.patch.object(installer.shutil, "which", return_value=None), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "_direct_ppa_register", return_value=True), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
-                mock.patch.object(installer.ui, "step"), \
-                mock.patch.object(installer.ui, "success"):
+        with (
+            mock.patch.object(installer.shutil, "which", return_value=None),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "_direct_ppa_register", return_value=True),
+            mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)),
+            mock.patch.object(installer.ui, "step"),
+            mock.patch.object(installer.ui, "success"),
+        ):
             self.assertTrue(installer._install_mpv_latest(env))
 
         joined = [" ".join(c) for c in calls]
@@ -1351,15 +1414,17 @@ class TestAuditPatches(unittest.TestCase):
             return True
 
         env = Environment(os="linux", distro="ubuntu")
-        with mock.patch.object(
-                installer.shutil, "which",
-                side_effect=[None, None, "/usr/bin/add-apt-repository"]), \
-                mock.patch.object(installer, "_os_release_id", return_value="ubuntu"), \
-                mock.patch.object(installer, "_run", side_effect=fake_run), \
-                mock.patch.object(installer, "_direct_ppa_register", return_value=False), \
-                mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)), \
-                mock.patch.object(installer.ui, "step"), \
-                mock.patch.object(installer.ui, "warn"):
+        with (
+            mock.patch.object(
+                installer.shutil, "which", side_effect=[None, None, "/usr/bin/add-apt-repository"]
+            ),
+            mock.patch.object(installer, "_os_release_id", return_value="ubuntu"),
+            mock.patch.object(installer, "_run", side_effect=fake_run),
+            mock.patch.object(installer, "_direct_ppa_register", return_value=False),
+            mock.patch.object(installer, "probe_mpv_version", return_value=(0, 41, 0)),
+            mock.patch.object(installer.ui, "step"),
+            mock.patch.object(installer.ui, "warn"),
+        ):
             self.assertTrue(installer._install_mpv_latest(env))
 
         joined = [" ".join(c) for c in calls]
@@ -1395,7 +1460,10 @@ class TestAuditPatches(unittest.TestCase):
             with open(payload, "w", encoding="utf-8") as fh:
                 fh.write("streamed-line-1\nstreamed-line-2\n")
             child = f"import sys\n[print(l) for l in open({payload!r})]"
-            with mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+            with mock.patch(
+                "builtins.print",
+                side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a)),
+            ):
                 ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
         self.assertTrue(ok)
@@ -1421,7 +1489,9 @@ class TestAuditPatches(unittest.TestCase):
             "import sys; sys.exit(3)"
         )
         buf = []
-        with mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+        with mock.patch(
+            "builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))
+        ):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
         self.assertFalse(ok)
@@ -1437,8 +1507,13 @@ class TestAuditPatches(unittest.TestCase):
 
         child = "print('streamed-line-1'); print('streamed-line-2')"
         buf = []
-        with mock.patch.dict(os.environ, {"MPV_VERBOSE": "1"}), \
-                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+        with (
+            mock.patch.dict(os.environ, {"MPV_VERBOSE": "1"}),
+            mock.patch(
+                "builtins.print",
+                side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a)),
+            ),
+        ):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
         self.assertTrue(ok)
@@ -1455,14 +1530,17 @@ class TestAuditPatches(unittest.TestCase):
 
         child = "import time; time.sleep(0.6)"
         buf = []
-        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.05), \
-                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+        with (
+            mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.05),
+            mock.patch(
+                "builtins.print",
+                side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a)),
+            ),
+        ):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
         ticks = [
-            line
-            for line in joined.splitlines()
-            if "... running " in line and "/ limit 60s" in line
+            line for line in joined.splitlines() if "... running " in line and "/ limit 60s" in line
         ]
         self.assertTrue(ok)
         self.assertGreaterEqual(len(ticks), 2)
@@ -1473,14 +1551,17 @@ class TestAuditPatches(unittest.TestCase):
 
         child = "import time; time.sleep(1.0)"
         buf = []
-        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.5), \
-                mock.patch("builtins.print", side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a))):
+        with (
+            mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.5),
+            mock.patch(
+                "builtins.print",
+                side_effect=lambda *a, **k: buf.append(" ".join(str(x) for x in a)),
+            ),
+        ):
             ok = installer._run([sys.executable, "-c", child], check=False, timeout=60)
         joined = "\n".join(buf)
         ticks = [
-            line
-            for line in joined.splitlines()
-            if "... running " in line and "/ limit 60s" in line
+            line for line in joined.splitlines() if "... running " in line and "/ limit 60s" in line
         ]
         self.assertTrue(ok)
         # Slices fire at 0.2s granularity (~5 over one second): interval
@@ -1492,8 +1573,10 @@ class TestAuditPatches(unittest.TestCase):
         """Stuck children are killed at budget; the failure says why."""
         from deploy import installer
 
-        with mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.2), \
-                mock.patch.object(installer.ui, "error") as err:
+        with (
+            mock.patch.object(installer, "_HEARTBEAT_INTERVAL", 0.2),
+            mock.patch.object(installer.ui, "error") as err,
+        ):
             ok = installer._run(
                 [sys.executable, "-c", "import time; time.sleep(30)"], check=False, timeout=1
             )
@@ -1571,9 +1654,7 @@ class TestAuditPatches(unittest.TestCase):
         with mock.patch.object(verifier.subprocess, "run", side_effect=fake_run):
             self.assertEqual(verifier._mpv_repo_source(), "cachyos-extra-v3")
 
-        with mock.patch.object(
-            verifier.subprocess, "run", side_effect=OSError("no pacman")
-        ):
+        with mock.patch.object(verifier.subprocess, "run", side_effect=OSError("no pacman")):
             self.assertEqual(verifier._mpv_repo_source(), "")
 
     def test_mpv_optimization_row_variants(self):
@@ -1587,24 +1668,39 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIsNone(verifier._mpv_optimization_row(windows_env))
 
         # CachyOS + mpv from the v3 repo → positive, explicit confirmation.
-        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
-                mock.patch.object(verifier, "_read_os_release_text", return_value='ID=cachyos\nID_LIKE="arch"\n'), \
-                mock.patch.object(verifier, "_mpv_repo_source", return_value="cachyos-extra-v3"):
+        with (
+            mock.patch.object(verifier.shutil, "which", return_value="/bin/x"),
+            mock.patch.object(
+                verifier, "_read_os_release_text", return_value='ID=cachyos\nID_LIKE="arch"\n'
+            ),
+            mock.patch.object(verifier, "_mpv_repo_source", return_value="cachyos-extra-v3"),
+        ):
             row = verifier._mpv_optimization_row(arch_env)
-        self.assertEqual(row, {"name": "mpv optimized build (x86-64-v3/v4)", "status": "ok", "detail": "installed from cachyos-extra-v3"})
+        self.assertEqual(
+            row,
+            {
+                "name": "mpv optimized build (x86-64-v3/v4)",
+                "status": "ok",
+                "detail": "installed from cachyos-extra-v3",
+            },
+        )
 
         # mpv previously installed from plain `extra` → skipped + repair command.
-        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
-                mock.patch.object(verifier, "_read_os_release_text", return_value="ID=cachyos\n"), \
-                mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"):
+        with (
+            mock.patch.object(verifier.shutil, "which", return_value="/bin/x"),
+            mock.patch.object(verifier, "_read_os_release_text", return_value="ID=cachyos\n"),
+            mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"),
+        ):
             row = verifier._mpv_optimization_row(arch_env)
         self.assertEqual(row and row["status"], "skipped")
         self.assertIn("pacman -Syyu mpv", (row or {}).get("detail", ""))
 
         # Pure Arch (no cachyos in os-release) → no opinion.
-        with mock.patch.object(verifier.shutil, "which", return_value="/bin/x"), \
-                mock.patch.object(verifier, "_read_os_release_text", return_value="ID=arch\n"), \
-                mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"):
+        with (
+            mock.patch.object(verifier.shutil, "which", return_value="/bin/x"),
+            mock.patch.object(verifier, "_read_os_release_text", return_value="ID=arch\n"),
+            mock.patch.object(verifier, "_mpv_repo_source", return_value="extra"),
+        ):
             self.assertIsNone(verifier._mpv_optimization_row(arch_env))
 
     def test_migrate_uosc_conf_removes_volume_max(self):
@@ -1656,10 +1752,7 @@ class TestAuditPatches(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
             old_content = (
-                "# User keys\n"
-                "MBTN_RIGHT context-menu\n"
-                "MBTN_RIGHT_DBL context-menu\n"
-                "w cycle sub\n"
+                "# User keys\nMBTN_RIGHT context-menu\nMBTN_RIGHT_DBL context-menu\nw cycle sub\n"
             )
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
@@ -1909,7 +2002,8 @@ class TestAuditPatches(unittest.TestCase):
         ]
         non_latin = sorted(k for k in active_keys if any(ord(c) > 0x590 for c in k))
         self.assertEqual(
-            non_latin, sorted(["أ", "’", "ٍ", "آ", "‘"]),
+            non_latin,
+            sorted(["أ", "’", "ٍ", "آ", "‘"]),
             "only the documented bare shift-layer keys belong in the template",
         )
 
@@ -1929,11 +2023,18 @@ class TestAuditPatches(unittest.TestCase):
 
         # and the twins section with the layout-independent backups is wired up
         self.assertIn("Keyboard layout (Arabic 101 twins)", content)
-        for combo in ("Ctrl+Shift+h", "Ctrl+Shift+m", "Ctrl+Shift+s",
-                      "Ctrl+Shift+b", "Ctrl+Shift+u"):
+        for combo in (
+            "Ctrl+Shift+h",
+            "Ctrl+Shift+m",
+            "Ctrl+Shift+s",
+            "Ctrl+Shift+b",
+            "Ctrl+Shift+u",
+        ):
             self.assertRegex(
-                content, r"(?m)^%s\s" % re.escape(combo),
-                "layout-independent backup %s is missing" % combo)
+                content,
+                r"(?m)^%s\s" % re.escape(combo),
+                "layout-independent backup %s is missing" % combo,
+            )
 
     def test_migrate_input_conf_appends_arabic_twins(self):
         from deploy.deployer import _migrate_input_conf
@@ -1961,14 +2062,10 @@ class TestAuditPatches(unittest.TestCase):
             # same-physical-key twins for the safe letters. ا stays unbound:
             # the real key stream delivers it for BOTH b and h (measured
             # via --input-test), so binding it makes b misfire.
-            self.assertRegex(
-                new_content, r"(?m)^ؤ\s+script-binding uosc/subtitles$")
-            self.assertRegex(
-                new_content, r"(?m)^ش\s+script-binding uosc/audio$")
-            self.assertRegex(
-                new_content, r"(?m)^ى\s+script-binding autosubsync-menu$")
-            self.assertRegex(
-                new_content, r"(?m)^؟\s+no-osd script-message-to help_overlay help$")
+            self.assertRegex(new_content, r"(?m)^ؤ\s+script-binding uosc/subtitles$")
+            self.assertRegex(new_content, r"(?m)^ش\s+script-binding uosc/audio$")
+            self.assertRegex(new_content, r"(?m)^ى\s+script-binding autosubsync-menu$")
+            self.assertRegex(new_content, r"(?m)^؟\s+no-osd script-message-to help_overlay help$")
             # the Latin originals survive
             self.assertIn("c script-binding uosc/subtitles", new_content)
             self.assertIn("h script-binding memo-history", new_content)
@@ -1978,8 +2075,7 @@ class TestAuditPatches(unittest.TestCase):
             self.assertNotRegex(new_content, r"(?m)^إ\s+script-binding")
             self.assertNotIn("ﻻ", new_content)
             # ...the aliased keys get layout-independent backups
-            self.assertRegex(
-                new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
+            self.assertRegex(new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
             # and the old mnemonic twins (other physical keys) stay gone
             self.assertNotRegex(new_content, r"(?m)^ح\s+script-binding")
             self.assertNotRegex(new_content, r"(?m)^ت\s+script-binding")
@@ -2002,7 +2098,9 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("user-data/mpv/ytdl/json-subprocess-result", tf_content)
         # storyboard re-attempts are guarded per path so a video without usable
         # storyboard data cannot hot-loop the idle/property observers
-        self.assertIn('not using_storyboards and storyboard_fallback_done ~= properties["path"]', tf_content)
+        self.assertIn(
+            'not using_storyboards and storyboard_fallback_done ~= properties["path"]', tf_content
+        )
         self.assertIn('storyboard_fallback_done = properties["path"]', tf_content)
 
         with open(sp, "r", encoding="utf-8") as f:
@@ -2490,7 +2588,6 @@ class YtDlpFreshnessTests(unittest.TestCase):
         self.assertEqual(by_name["yt-dlp"]["status"], "ok")
         self.assertEqual(by_name["yt-dlp"]["detail"], "already installed")
 
-
     def test_deployer_refreshes_its_own_generated_stub(self):
         """A generated ytdl_path stub gets re-resolved; personal files never do."""
         import tempfile as tf_mod
@@ -2522,9 +2619,7 @@ class YtDlpFreshnessTests(unittest.TestCase):
 
             # Missing file is reported as never for a refresh.
             self.assertFalse(
-                deployer._ytdl_conf_is_refreshable(
-                    os.path.join(tmpdir, "absent.conf"), env
-                )
+                deployer._ytdl_conf_is_refreshable(os.path.join(tmpdir, "absent.conf"), env)
             )
 
     def test_resolver_prefers_local_bin_over_distro_package(self):
@@ -2539,9 +2634,7 @@ class YtDlpFreshnessTests(unittest.TestCase):
                     return os.path.join(home, *path[2:].replace("\\", "/").split("/"))
                 return path
 
-            with mock.patch.object(
-                deployer.os.path, "expanduser", side_effect=fake_expanduser
-            ):
+            with mock.patch.object(deployer.os.path, "expanduser", side_effect=fake_expanduser):
                 env = Environment(os="linux", platform_key="ubuntu")
                 fresh = os.path.join(home, ".local", "bin", "yt-dlp")
                 os.makedirs(os.path.dirname(fresh), exist_ok=True)
@@ -2620,12 +2713,18 @@ Include = /etc/pacman.d/cachyos-mirrorlist
             return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr=None)
 
         with mock.patch.object(
-            installer.subprocess, "run", return_value=completed("  x86-64-v3 (supported, searched)\n  x86-64-v4 (supported, searched)\n")
+            installer.subprocess,
+            "run",
+            return_value=completed(
+                "  x86-64-v3 (supported, searched)\n  x86-64-v4 (supported, searched)\n"
+            ),
         ):
             self.assertEqual(installer._x86_64_isa_level(), "v4")
 
         with mock.patch.object(
-            installer.subprocess, "run", return_value=completed("  x86-64-v3 (supported, searched)\n")
+            installer.subprocess,
+            "run",
+            return_value=completed("  x86-64-v3 (supported, searched)\n"),
         ):
             self.assertEqual(installer._x86_64_isa_level(), "v3")
 
