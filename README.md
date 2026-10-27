@@ -60,7 +60,7 @@
 | --- | --- |
 | Release | **v1.0.0** (2026-10-07) — see [CHANGELOG.md](CHANGELOG.md) |
 | CLI | `mpv-config` with `install` / `verify` / `update` / `rollback` / `status` / `sync-deps` / `download` / `uninstall` |
-| Tests | 465 Python tests + 11 Lua test suites on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
+| Tests | 470 Python tests + 11 Lua test suites on a CI matrix of 3 OS × Python 3.10–3.12, plus Ruff lint/format |
 | Platforms | Windows 10/11, Linux (X11 & KDE Wayland), macOS |
 | Requires | mpv ≥ 0.40 (auto-upgraded by the installer), Python 3.10+ |
 

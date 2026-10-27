@@ -2860,5 +2860,105 @@ Include = /etc/pacman.d/cachyos-mirrorlist
             self.assertTrue(SYSTEM_DEPS[name]["arch"].get("prefer_optimized_repo"))
 
 
+class DetectorAutoHotkeyGuardTests(unittest.TestCase):
+    """AutoHotkey64.exe is a GUI interpreter whose CLI flags are script
+    paths: spawning it with `/?` or `--version` opens a modal "Script file
+    not found." dialog that blocks the deployment. Detection must verify it
+    by file existence only, and the spawn bottleneck must refuse it even if
+    registry data drifts."""
+
+    @staticmethod
+    def _dep_info(ensure_dir):
+        return {
+            "windows": {
+                "ensure_in_dir": ensure_dir,
+                "bin_names": ["AutoHotkey64.exe"],
+            }
+        }
+
+    def test_registry_autohotkey_has_no_runtime_probe(self):
+        """The registry entry verifies by existence only — no `/?`, `--version`
+        or any other flag-style command line AutoHotkey would treat as a
+        script path."""
+        from deploy.registry import SYSTEM_DEPS
+
+        self.assertNotIn("verify", SYSTEM_DEPS["autohotkey"])
+        self.assertNotIn("verify_alt", SYSTEM_DEPS["autohotkey"])
+
+    @unittest.skipUnless(os.name == "nt", "the autohotkey existence check is Windows-only")
+    def test_managed_install_dir_hit_never_spawns_a_process(self):
+        from deploy import detector
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            binary = os.path.join(tmpdir, "AutoHotkey64.exe")
+            with open(binary, "w", encoding="utf-8"):
+                pass
+            with mock.patch.object(
+                detector, "_run_silent", side_effect=AssertionError("detector spawned a process")
+            ):
+                with mock.patch.object(
+                    detector.shutil, "which", side_effect=AssertionError("PATH probed twice")
+                ) as which:
+                    which.return_value = None
+                    self.assertTrue(
+                        detector._check_installed("autohotkey", self._dep_info(tmpdir))
+                    )
+
+    @unittest.skipUnless(os.name == "nt", "the autohotkey existence check is Windows-only")
+    def test_path_installed_hit_never_spawns_a_process(self):
+        """A global AutoHotkey outside the managed dir is valid: this is the
+        case that used to fall through to the `/?` probe and pop the dialog."""
+        from deploy import detector
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch.object(
+                detector, "_run_silent", side_effect=AssertionError("detector spawned a process")
+            ):
+                # No AutoHotkey anywhere (no PATH hit, empty managed dir).
+                with mock.patch.object(detector.shutil, "which", return_value=None):
+                    self.assertFalse(
+                        detector._check_installed("autohotkey", self._dep_info(tmpdir))
+                    )
+                # Global AutoHotkey on PATH (outside the managed dir): a
+                # valid hit, satisfied by existence only — never by spawning.
+                with mock.patch.object(
+                    detector.shutil,
+                    "which",
+                    return_value=r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
+                ):
+                    self.assertTrue(
+                        detector._check_installed("autohotkey", self._dep_info(tmpdir))
+                    )
+
+    def test_run_silent_refuses_every_autohotkey_interpreter_name(self):
+        from deploy import detector
+
+        with mock.patch.object(
+            detector.subprocess, "run", side_effect=AssertionError("spawned the interpreter")
+        ):
+            for binary in (
+                r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
+                "AutoHotkey64.exe",
+                "autohotkey.exe",
+                "AutoHotkey32.exe",
+            ):
+                for flag in ("/?", "--version", "-v"):
+                    self.assertEqual(
+                        detector._run_silent([binary, flag]),
+                        (False, ""),
+                        f"{binary} {flag} must not spawn",
+                    )
+
+    def test_run_silent_still_runs_non_autohotkey_probes(self):
+        from deploy import detector
+
+        with mock.patch.object(
+            detector.subprocess,
+            "run",
+            return_value=mock.Mock(returncode=0, stdout="ok\n"),
+        ):
+            self.assertEqual(detector._run_silent(["mpv", "--version"]), (True, "ok"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -104,8 +104,21 @@ def _legacy_vulkan_intel_gpu():
     return any(pattern in output for pattern in LEGACY_VULKAN_INTEL_PATTERNS)
 
 
+# AutoHotkey binaries are GUI interpreters (v2 name scheme: AutoHotkey[64]
+# .exe, AutoHotkey[32].exe). Spawning any of them with a flag-style probe
+# opens a modal dialog — detector verifies them by existence only.
+_AUTOHOTKEY_GUI_INTERPRETER = re.compile(r"(?i)^autohotkey[a-z0-9_]*\.exe$")
+
+
 def _run_silent(cmd):
-    """Run a command silently, return (success, stdout)."""
+    """Run a command silently, return (success, stdout).
+
+    Refuses to spawn the AutoHotkey GUI interpreter at all: its CLI flags
+    are script paths, so a version-style probe opens a modal "Script file
+    not found." dialog that blocks the deployment. Registry drift can
+    never reintroduce the popup through this bottleneck."""
+    if cmd and _AUTOHOTKEY_GUI_INTERPRETER.match(os.path.basename(str(cmd[0])) or ""):
+        return False, ""
     try:
         r = subprocess.run(
             cmd,
@@ -397,6 +410,21 @@ def _resolve_config_dir(os_name):
 
 def _check_installed(dep_name, dep_info):
     """Check if a system dependency is already installed."""
+    if dep_name == "autohotkey":
+        # Existence checks only — never spawn the GUI interpreter (see
+        # _run_silent). The managed install dir first, then any PATH hit:
+        # a globally installed AutoHotkey v2 satisfies the keyboard helper
+        # just as well, but the strict dir-only check used to fall through
+        # to the old `/?` probe and pop a blocking modal dialog.
+        if sys.platform != "win32":
+            return False
+        win_info = dep_info.get("windows", {})
+        bin_names = win_info.get("bin_names") or []
+        ensure_dir = win_info.get("ensure_in_dir")
+        if ensure_dir and bin_names and _check_windows_bin_locations(bin_names, ensure_dir):
+            return True
+        return any(shutil.which(name) for name in bin_names)
+
     if dep_name == "ffsubsync":
         if sys.platform == "win32":
             win_info = dep_info.get("windows", {})

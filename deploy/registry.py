@@ -448,7 +448,9 @@ SYSTEM_DEPS = {
             "ensure_in_dir": WINDOWS_AUTOHOTKEY_DIR,
             "bin_names": ["AutoHotkey64.exe"],
         },
-        "verify": ["AutoHotkey64.exe", "/?"],
+        # No "verify" runtime probe: AutoHotkey64.exe is a GUI interpreter —
+        # CLI flags are script paths to it, so probing opens a modal
+        # "Script file not found." dialog. detector verifies by existence.
     },
 }
 
