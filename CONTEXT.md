@@ -139,8 +139,8 @@ runs all three.
 ### The rest
 | Script | Role |
 | --- | --- |
-| `keyboard_layout.lua` (custom) | Spawns the layout guard after the first file-loaded; its conf carries the exact python command line (written by the installer). Disabled by default — the layout twins replaced it; flip `enabled=yes` for non-Arabic-101 layouts. |
-| `profile_picker.lua` (custom) | Anime detection (offline signals: release group 4, user series list 4, jpn-audio+episode 3, jpn+multi 2, weaker singles; threshold 3) → applies `[anime]`/`[live-action]`; reads and persists the Anime4K mode. |
+| `keyboard_layout.lua` (custom) | Hardware scan-code helper for Windows: silently launches `tools/mpv_arabic_layout.ahk` on startup via native Win32 subprocess with `CREATE_NO_WINDOW`, detached execution. Auto-terminates when mpv closes. On Linux/macOS, native layout twins in `input.conf` provide cross-platform parity. |
+| `profile_picker.lua` (custom) | Anime detection (offline signals: release group 4, user series list 4, jpn-audio+episode 3, jpn+multi 2, weaker singles; threshold 3) → applies `[anime]`/`[live-action]`; default preset is `A+A` (ultra sharp) with on-screen badge; reads and persists the Anime4K mode to `script-opts/anime4k.conf`. |
 | `smart_motion.lua` (custom) | Runtime motion controller: per-file cadence analysis picks presentation clock/interpolation/tscale; `stream_web_parity` for streams; ships `oversample` at runtime (see traps). Toggle `Ctrl+Alt+m`. |
 | `smart-paste.lua` (custom) | `Ctrl+V` paste-to-open / `Ctrl+Shift+V` to playlist, with URL normalization and local-file protection. |
 | `SmartSkip.lua` (vendored) | Intro/outro/silence/chapter skipping (`>` `<` `?` `Ctrl+.` …). |
@@ -166,12 +166,13 @@ overlays everything. Vendored patches always win.
   is baked into the `[anime]` profile's `glsl-shaders` line via the
   `{{ANIME_CHAIN}}` template placeholder.
 - **Install-time choice**: interactive installs ask which mode to ship (or pass
-  `--anime-preset`); the answer seeds `script-opts/anime4k.conf` (`mode=A`
-  default). An existing `anime4k.conf` is the user's own and is never rewritten.
+  `--anime-preset`); the answer seeds `script-opts/anime4k.conf` (`mode=A+A`
+  default, #1 recommended). An existing `anime4k.conf` is the user's own and is
+  never rewritten unless `--anime-preset` is explicitly passed to `update`.
 - **Runtime**: `profile_picker.lua` reads `anime4k.conf` whenever it applies the
   `[anime]` profile. `Ctrl+1..6` select modes, `Ctrl+0` = off, `Ctrl+g` cycles,
-  `Ctrl+Shift+g` forces manual override of the anime detection; every choice is
-  persisted and survives restarts.
+  `Ctrl+Shift+t` forces manual override of the anime detection; every choice is
+  persisted to `script-opts/anime4k.conf` and survives restarts.
 - `[anime]` also drops `scale` to `spline36` (Anime4K does the upscaling; ewa on
   top drops frames) and runs 2-pass deband; `[live-action]` ships no shaders.
 - Streams: `apply_anime_profile_to_streams=no` by default — the VL CNN chains
@@ -265,4 +266,4 @@ of the custom yt-dlp extractors), `release.yml` (PyPI trusted publishing).
   windows, no focus stealing, no audio.
 - NEVER kill processes the user started — only agent-spawned ones, matched by
   command line (`thumbfast.out`, `127.0.0.1:8731`, `mpv_probe_pipe`).
-- Replies to the user go in SHORT ARABIC; work/reasoning in English.
+- Replies to the user go in ENGLISH (user's request 2026-10-25: Arabic text renders reversed for him). Work/reasoning in English.

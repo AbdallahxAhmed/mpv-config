@@ -24,8 +24,10 @@
 
 Recent work now on `main` (unreleased in the changelog):
 
-- **Playback display-sync fixes** — `tscale=linear` + `video-timing-offset=0.01` for jitter-free `display-resample` at fixed 144 Hz, and a KDE-Wayland-only refresh-rate stabilization profile.
-- **Same-key Arabic layout twins** — the deployer regenerates input.conf twins for the same physical key on Arabic 101 (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`), and twins the `Ctrl+Shift+h/m/s/b/u` backup combos as their Arabic-delivery forms (`Ctrl+أ/’/ٍ/آ/‘` — measured on the real key stream); bare `h g b G B` alias other keys and stay combo-only; the keyboard hook guard is retired to an opt-in.
+- **Anime4K Auto-Detection & Default A+A (Ultra Sharp)** — `scripts/profile_picker.lua` automatically identifies anime releases offline, activates Anime4K shaders on the "A+A (Ultra Sharp)" preset by default, and presents an on-screen verification badge (`Anime Detected: Anime4K [A+A] Active`). Shipped default choice is customizable during installation (where A+A is #1 recommended alongside A, B, B+B, C, C+A, fast, off) and can be changed later via 3 permanent methods.
+- **Dynamic 144Hz Playback & Video Enhancement Controls** — `F4` toggles motion interpolation ON/OFF (144Hz Smooth vs Native Cadence); `Shift+F4` (or `Alt+t`) switches the temporal motion scaler (`oversample` crisp/zero blur vs `linear` smooth/blended); `F10` toggles native mpv sharpening (crisp 0.35 / OFF); `F3` toggles grain-free debanding (clean 1-pass filtering without artificial grain).
+- **Streaming Clarity & 144Hz Fluidity** — modern codec prioritization (`format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr`) prioritizing AV1 > VP9 > H.264 for maximum 1080p clarity, timeline fluidity, and 144Hz responsiveness without stutter (`cache-pause=no`).
+- **Silent Hardware-Level Arabic Layout Parity** — on Windows, `tools/mpv_arabic_layout.ahk` provides 1:1 physical scan-code parity for all letter keys (`h`, `b`, `g`, etc.) when mpv is focused and Arabic is active, launched 100% silently on startup via native Win32 subprocess with `CREATE_NO_WINDOW` and detached execution. On Linux/macOS, native layout twins in `input.conf` cover printable keys (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`) with bare Shift (`أ/’/ٍ/آ/‘`) and `Ctrl+Shift` backup routes for the five lam-alef keys.
 - **Hardened management commands** — `rollback` restores only this config's own `mpv.backup.*` folders; `uninstall` can cleanly purge the config, backups, managed dependencies and the install directory.
 - **Robust installers** — `install` / `verify` wired to the real deployer; the shell bootstrap works on PEP 668 systems (Ubuntu 24.04) via a private venv.
 - **Security hygiene** — no key material or personal paths tracked; enforced by `tests/test_repo_hygiene.py`.
@@ -35,22 +37,22 @@ Recent work now on `main` (unreleased in the changelog):
 ## ✨ Features
 
 ### 🎬 Playback quality
-- **Automatic anime detection** - `scripts/profile_picker.lua` decides per file whether the file is anime
-  (release group, Japanese audio track, episode marker, multi-language tag, or a title from your own
-  `script-opts/anime_series.conf` list) and applies the matching profile. Offline, explainable, and it
-  leaves Japanese live action and Hollywood movies on the light profile. The signals that keep working
-  describe the *release* (group, Japanese track, episode marker), not the series - so nothing has to be
-  maintained when you finish a season.
-- **The Anime4K mode is your choice** - the installer asks which chain to ship (`off`, `fast`, `A`, `A+A`,
-  `B`, `B+B`, `C`, `C+A`); `Ctrl+1`..`Ctrl+6` and `Ctrl+g` change it inside the player and the choice
-  is remembered in `script-opts/anime4k.conf`.
-- **A one-key cheat sheet** (`?` or `F9`) listing the keys and the mouse actions, including the Arabic
-  layout twins and every-layout combos.
-- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), applied by the auto-detected `[anime]` profile
-  (Anime4K + 2-pass deband) or by the light `[live-action]` one.
+- **Automatic anime detection & default A+A preset** — `scripts/profile_picker.lua` automatically identifies anime releases offline (release groups, Japanese audio track, episode markers, multi-language tags, or titles in `script-opts/anime_series.conf`). When detected, it activates Anime4K on the **"A+A (Ultra Sharp)"** preset by default and presents an on-screen verification badge (`Anime Detected: Anime4K [A+A] Active`). Japanese live action and Hollywood movies remain unscaled on the clean `[live-action]` profile.
+- **Select your default preset during installation** — the interactive installer prompts you to select your preferred Anime4K chain, where **A+A** is the #1 recommended default alongside `A`, `B`, `B+B`, `C`, `C+A`, `fast`, and `off`. Non-interactive installs accept `--anime-preset <MODE>`.
+- **Change and save your default preset anytime (3 methods)**:
+  1. *In-player shortcuts*: Press `Ctrl+1`..`Ctrl+6`, `Ctrl+0` (off), or `Ctrl+g` (cycle). The choice is instantly applied, displayed on-screen (`Anime4K: <MODE> - <LABEL> (Saved as Default)`), and persisted to `script-opts/anime4k.conf`.
+  2. *Configuration file*: Edit `script-opts/anime4k.conf` directly (e.g. `mode=A+A`).
+  3. *CLI update*: Run `mpv-config update --anime-preset <MODE>` or `python -m deploy.deployer --update --anime-preset <MODE>`.
+- **Dynamic 144Hz motion & video enhancement controls**:
+  - `F4`: Toggle motion interpolation ON/OFF (144Hz Smooth vs Native Cadence).
+  - `Shift+F4` (or `Alt+t`): Switch motion scaler (`oversample` crisp/zero blur vs `linear` smooth/blended).
+  - `F10`: Toggle native mpv sharpening (crisp `0.35` / `OFF`).
+  - `F3`: Toggle grain-free debanding (`deband=no` default; 1-pass clean gradient smoothing with 0 synthetic grain).
+- **One-key ASS cheat sheet** (`?` or `F9`) — native vector ASS overlay listing keys and mouse actions; physical `/` bare is ignored to prevent accidental volume drops.
+- **Anime4K v4.0.1** shader chains (`Ctrl+1`…`6`), applied by the auto-detected `[anime]` profile (Anime4K + 2-pass deband) or by the light `[live-action]` one.
 - **gpu-next (libplacebo)** renderer with platform auto-detection: `d3d11` + `d3d11va` zero-copy on Windows (measured 1.4 ms/frame vs 5.3 ms for `nvdec-copy`), Vulkan + `auto-safe` on Linux, VideoToolbox on macOS.
 - **Fixed-refresh display sync** — calibrated for 1080p 144 Hz panels; linear temporal scaling absorbs non-integer VSync ratios without judder, with a dedicated KDE-Wayland stabilization profile.
-- **Source-aware profiles** — `[anime]` (Anime4K + 2-pass deband), `[live-action]` (mild 1-pass deband + grain), `[protocol.https]` streaming (800 MiB buffer / 60 s readahead, same vblank alignment).
+- **Source-aware profiles** — `[anime]` (Anime4K + 2-pass deband), `[live-action]` (clean native playback), `[protocol.https]` streaming (800 MiB buffer / 60 s readahead, same vblank alignment).
 - **Full 10-bit pipeline** — explicit `dither-depth=10` (mpv's `auto` silently drops to 8-bit on gpu-next), temporal dithering, calibrated deband thresholds.
 
 ### 🖥️ Interface
@@ -60,6 +62,7 @@ Recent work now on `main` (unreleased in the changelog):
 - Playlists, editions and quality selectors appear contextually; window close always exits instantly.
 
 ### 📺 YouTube & streaming
+- **Modern codec prioritization & 144Hz fluidity** — `ytdl-raw-options-append = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr` prioritizing AV1 > VP9 > H.264 for maximum 1080p clarity, timeline fluidity, and 144Hz UI responsiveness without buffer stalls (`cache-pause=no`).
 - **Custom hardened `yt-dlp` hook** — in-player streaming of YouTube/network URLs with a self-refreshing yt-dlp stub and mpv 0.41+ compatible subprocess handling.
 - **On-demand caption menu** (`Ctrl+C` or CC button) with *Creator / Auto-generated / Auto-translated* groups, cancellable async loading, no reloads and per-session reuse.
 - **Smart dub filtering** — the playback hook keeps the best-bitrate rendition per language/role and defaults video selection to match the chosen dub.
@@ -84,7 +87,8 @@ Recent work now on `main` (unreleased in the changelog):
 - **Clean uninstall** — with optional `--purge-config`, `--remove-backups`, `--remove-deps`, `--remove-install-dir`.
 
 ### 🌍 Arabic layout support
-- Same-physical-key twin keybindings for the Arabic 101 layout, generated at deploy time from your own `input.conf` and audited so no twin can misfire from lam-alef sequences (see the keybinding tables below).
+- **Windows physical key parity**: `tools/mpv_arabic_layout.ahk` maps physical scan codes directly when mpv is focused and Arabic is active (`h`, `b`, `g`, etc.), launched 100% silently via native Win32 subprocess with `CREATE_NO_WINDOW` and detached execution.
+- **Cross-platform layout twins**: generated at deploy time in `input.conf` for printable Latin keys (`c→ؤ`, `a→ش`, `n→ى`, `?→؟`) and modified combos, with bare Shift (`Shift+H/M/S/B/U` → `أ/’/ٍ/آ/‘`) and `Ctrl+Shift` backup routes for the five lam-alef keys.
 
 ---
 
@@ -94,28 +98,36 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 
 ### Anime4K shader chains (`Ctrl` + number)
 
+> Any shortcut below immediately persists the chosen preset as default to `script-opts/anime4k.conf`.
+
 | Key | Action |
 | --- | --- |
 | `Ctrl+1` | Mode A (Sharp) |
 | `Ctrl+2` | Mode B (Soft) |
 | `Ctrl+3` | Mode C (Denoise) |
-| `Ctrl+4` | Mode A+A (Ultra Sharp) |
+| `Ctrl+4` | Mode A+A (Ultra Sharp) — **Default** |
 | `Ctrl+5` | Mode B+B (Ultra Soft) |
 | `Ctrl+6` | Mode C+A (Denoise + Sharp) |
-| `Ctrl+0` | Clear all shaders |
+| `Ctrl+0` | Clear all shaders (Off) |
+| `Ctrl+g` | Cycle Anime4K mode |
+| `Ctrl+Shift+t` | Toggle profile mode (Auto / Anime / Live-Action) |
 
-### Screenshots & audio/video controls (`F1`–`F8`)
+### Screenshots & audio/video controls (`F1`–`F10`)
 
 | Key | Action |
 | --- | --- |
 | `F1` | Screenshot (video only, no subtitles) |
 | `F2` | Screenshot (with subtitles) |
-| `F3` | Toggle deband filter |
-| `F4` | Toggle interpolation (motion smoothing) |
+| `F3` | Toggle grain-free deband filter (1-pass, 0 synthetic grain) |
+| `F4` | Toggle motion interpolation (144Hz Smooth vs Native Cadence) |
+| `Shift+F4` / `Alt+t` | Switch motion scaler (`oversample` crisp/zero blur vs `linear` smooth/blended) |
 | `F5` | Cycle audio track |
 | `F6` | Cycle subtitle track |
 | `F7` | Show/hide subtitles |
 | `F8` | Stable Volume (night-mode loudness normalization) |
+| `F10` | Toggle native sharpening (crisp `0.35` / `OFF`) |
+| `?` / `F9` | Help Overlay cheat sheet (ASS formatted) |
+| `/` (bare) | Ignored (prevents accidental volume drops) |
 
 ### Everyday script keys
 
@@ -267,7 +279,7 @@ Deploy-time options (forwarded to the deployer; run `python -m deploy.deployer -
 | Option | Choices (default) | Meaning |
 | --- | --- | --- |
 | `--mpv-profile` | `windows-like` / `linux-like` / `native` (OS-dependent) | GPU API, hardware decoder and VO selection |
-| `--anime-preset` | `off` / `fast` / `A` / `A+A` / `B` / `C` (`A`) | Anime4K chain powering the auto `[anime]` profile |
+| `--anime-preset` | `off` / `fast` / `A` / `A+A` / `B` / `B+B` / `C` / `C+A` (`A+A`) | Anime4K preset powering the auto `[anime]` profile. Interactive install asks (`A+A` #1 recommended). |
 | `--scaler-tier` | `light` / `balanced` / `quality` (`balanced`) | `scale` / `cscale` / `dscale` quality tier |
 | `--display-mode` | `auto` / `fixed` / `vrr` (`fixed`) | Display-sync mode; `fixed` = display-resample, `vrr` opt-in for FreeSync/G-Sync |
 | `--dither-depth` | `auto` / `8` / `10` (`auto`, auto-resolved) | Output dither depth |
@@ -282,7 +294,7 @@ mpv-config verify
 ### 3. Manage the Deployment
 ```bash
 mpv-config status             # installed script/shader versions and the last installer session
-mpv-config update             # refresh scripts and shaders; your personal config is preserved
+mpv-config update             # refresh scripts and shaders; personal config preserved (or pass --anime-preset <MODE>)
 mpv-config rollback           # restore the newest backup (the current config is snapshotted first)
 mpv-config rollback <backup>  # restore a specific one of this config's mpv.backup.* folders
 mpv-config sync-deps          # update yt-dlp, ffmpeg, alass and ffsubsync

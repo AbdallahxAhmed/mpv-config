@@ -303,7 +303,9 @@ _MPV_OPTIONS_ADDED_IN = {
 
 # Marker comment left in place of a sanitized option line. Repair pass in
 # _migrate_mpv_conf un-comments lines starting with it once mpv is new enough.
-_SANITIZED_OPTION_MARKER = "# beyond installed mpv — commented out; re-run `mpv-config install` after upgrading"
+_SANITIZED_OPTION_MARKER = (
+    "# beyond installed mpv — commented out; re-run `mpv-config install` after upgrading"
+)
 
 
 def _sanitize_mpv_conf_for_mpv_version(content, mpv_version):
@@ -385,8 +387,7 @@ def _patch_mpv_conf(
         effective_gpu_api = "opengl"
         forced_opengl = True
         ui.warn(
-            "Legacy Intel iGPU detected — Vulkan renders magenta there; "
-            "forcing gpu-api=opengl."
+            "Legacy Intel iGPU detected — Vulkan renders magenta there; forcing gpu-api=opengl."
         )
         if audit_log:
             audit_log.record_note(
@@ -737,15 +738,17 @@ def _layout_twins_module():
 
     module_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "src", "mpv_config", "layout_twins.py",
+        "src",
+        "mpv_config",
+        "layout_twins.py",
     )
     if os.path.isfile(module_path):
-        spec = importlib.util.spec_from_file_location(
-            "mpv_config_layout_twins_local", module_path)
+        spec = importlib.util.spec_from_file_location("mpv_config_layout_twins_local", module_path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
     from mpv_config import layout_twins
+
     return layout_twins
 
 
@@ -1017,9 +1020,9 @@ def deploy(
         # generated stub (single standard-candidate line — e.g. after the
         # standalone yt-dlp self-refresh switches the binary location);
         # anything else is personal and never touched.
-        ytdl_should_localize = not os.path.exists(os.path.join(opts_old, "ytdl_hook.conf")) or _ytdl_conf_is_refreshable(
-            os.path.join(opts_old, "ytdl_hook.conf"), env
-        )
+        ytdl_should_localize = not os.path.exists(
+            os.path.join(opts_old, "ytdl_hook.conf")
+        ) or _ytdl_conf_is_refreshable(os.path.join(opts_old, "ytdl_hook.conf"), env)
         if ytdl_should_localize:
             with open(ytdl_dest, "w", encoding="utf-8") as stream:
                 stream.write(f"ytdl_path={_resolve_ytdl_path(env)}\n")
@@ -1192,9 +1195,7 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
                     {"name": migration_name, "status": "ok", "detail": "repaired stale config"}
                 )
         except Exception as exc:
-            results.append(
-                {"name": migration_name, "status": "warn", "detail": str(exc)}
-            )
+            results.append({"name": migration_name, "status": "warn", "detail": str(exc)})
     return results
 
 
@@ -1433,9 +1434,9 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         ("Ctrl+Shift+u", "script-binding sponsorblock_upvote"),
     )
     missing_backups = [
-        (key, cmd) for key, cmd in layout_backups
-        if not re.search(r"^[ \t]*" + re.escape(key) + r"[ \t]+",
-                         updated_content, re.MULTILINE)
+        (key, cmd)
+        for key, cmd in layout_backups
+        if not re.search(r"^[ \t]*" + re.escape(key) + r"[ \t]+", updated_content, re.MULTILINE)
     ]
     if missing_backups:
         block = (
@@ -1462,9 +1463,9 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         ("‘", "script-binding sponsorblock_upvote"),
     )
     missing_shift = [
-        (key, cmd) for key, cmd in shift_route
-        if not re.search(r"^[ \t]*%s[ \t]+" % re.escape(key),
-                         updated_content, re.MULTILINE)
+        (key, cmd)
+        for key, cmd in shift_route
+        if not re.search(r"^[ \t]*%s[ \t]+" % re.escape(key), updated_content, re.MULTILINE)
     ]
     if missing_shift:
         block = (
@@ -1491,8 +1492,11 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     #    (shift is encoded as the uppercase letter), so the legacy
     #    "Ctrl+B = downvote" duplicate would be silently shadowed by the
     #    Ctrl+Shift+b backdrop backup. Downvote stays on Ctrl+b.
-    if re.search(r"^[ \t]*Ctrl\+Shift\+b[ \t]+script-binding sub_backdrop/toggle",
-                 updated_content, re.MULTILINE):
+    if re.search(
+        r"^[ \t]*Ctrl\+Shift\+b[ \t]+script-binding sub_backdrop/toggle",
+        updated_content,
+        re.MULTILINE,
+    ):
         updated_content = re.sub(
             r"^[ \t]*Ctrl\+B[ \t]+script-binding sponsorblock_downvote[^\r\n]*\r?\n?",
             "",
@@ -1511,8 +1515,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         )
     if not re.search(r"^[ \t]*F9[ \t]+", updated_content, re.MULTILINE):
         updated_content = (
-            updated_content.rstrip()
-            + "\nF9 no-osd script-message-to help_overlay help\n"
+            updated_content.rstrip() + "\nF9 no-osd script-message-to help_overlay help\n"
         )
     if not re.search(r"^[ \t]*/[ \t]+ignore", updated_content, re.MULTILINE):
         updated_content = (
@@ -1525,8 +1528,10 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     #    predate the profile-picker bindings (moved here from Ctrl+Shift+g:
     #    under Arabic both combos arrive as Ctrl+أ and history owns that).
     if not re.search(
-            r"^[ \t]*Ctrl\+Shift\+[tT][ \t]+[^\r\n]*profile_picker toggle-manual",
-            updated_content, re.MULTILINE):
+        r"^[ \t]*Ctrl\+Shift\+[tT][ \t]+[^\r\n]*profile_picker toggle-manual",
+        updated_content,
+        re.MULTILINE,
+    ):
         updated_content = (
             updated_content.rstrip()
             + "\n# Manual anime-profile override - Ctrl+Shift+t (was Ctrl+Shift+g:\n"
@@ -1556,9 +1561,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         flags=re.MULTILINE,
     )
     if backdrop_n:
-        osd_note = (
-            "# OSD shows \"Subtitle backdrop: on/off\" via scripts/sub_backdrop.lua\n"
-        )
+        osd_note = '# OSD shows "Subtitle backdrop: on/off" via scripts/sub_backdrop.lua\n'
         marker_en = "# Subtitle background box toggle (Netflix / YouTube translucent box <-> transparent Cinema)\n"
         marker_ar = "# Subtitle background box toggle — ب = b\n"
         for marker in (marker_en, marker_ar):
@@ -1591,8 +1594,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     #    layout. Runs LAST so the hazard cleanup, legacy removal and the
     #    backup block above have settled; the generator replaces its own
     #    previous block, so this is idempotent per update.
-    updated_content, _twin_report = _layout_twins_module().generate(
-        updated_content)
+    updated_content, _twin_report = _layout_twins_module().generate(updated_content)
 
     if updated_content != content:
         with open(input_conf_path, "w", encoding="utf-8") as f:
@@ -1702,7 +1704,9 @@ def _migrate_keyboard_layout_conf(conf_path, audit_log=None):
             f.write(updated)
         if audit_log:
             audit_log.record_file(
-                conf_path, "modify", "ok",
+                conf_path,
+                "modify",
+                "ok",
                 "disabled the layout guard (superseded by the layout twins)",
             )
         return True
@@ -1726,9 +1730,7 @@ def _migrate_arabic_layout_ahk(config_dir, audit_log=None):
             pass
     shutil.copy2(source, target)
     if audit_log:
-        audit_log.record_file(
-            target, "copy", "ok", "deployed mpv_arabic_layout.ahk helper"
-        )
+        audit_log.record_file(target, "copy", "ok", "deployed mpv_arabic_layout.ahk helper")
     return True
 
 
@@ -1852,7 +1854,9 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             if version < added_in:
                 continue
             updated, counted = re.subn(
-                r"^" + re.escape(_SANITIZED_OPTION_MARKER) + r" was: ([ \t]*"
+                r"^"
+                + re.escape(_SANITIZED_OPTION_MARKER)
+                + r" was: ([ \t]*"
                 + option
                 + r"[ \t]*=[^\r\n]*)$",
                 r"\1",
@@ -2068,7 +2072,9 @@ def _resolve_anime_preset(args):
     if _is_interactive_session():
         ui.header("Anime4K shader mode")
         ui.info("The anime profile uses this chain. Heavier modes cost GPU time")
-        ui.info("at 144Hz: A+A is the ultra sharp sweet spot for 1080p, 'off' disables the shaders.")
+        ui.info(
+            "at 144Hz: A+A is the ultra sharp sweet spot for 1080p, 'off' disables the shaders."
+        )
         try:
             order = ["A+A", "A", "B", "B+B", "C", "C+A", "fast", "off"]
             choices = [m for m in order if m in ANIME4K_CHAINS] + [
@@ -2173,7 +2179,9 @@ def cmd_install(args):
                     display_mode=args.display_mode,
                     dither_depth=args.dither_depth,
                     stream_quality=(
-                        "0" if getattr(args, "stream_quality", None) == "best" else args.stream_quality
+                        "0"
+                        if getattr(args, "stream_quality", None) == "best"
+                        else args.stream_quality
                     ),
                     lockfile=lockfile,
                     verify_callback=check_install,
@@ -2245,6 +2253,17 @@ def cmd_update(args):
                 ui.warn("%s: %s" % (row["name"], row["detail"]))
             else:
                 ui.info("%s: %s" % (row["name"], row["detail"]))
+        if getattr(args, "anime_preset", None):
+            anime4k_dest = os.path.join(config_dir, "script-opts", "anime4k.conf")
+            _write_anime4k_conf(anime4k_dest, args.anime_preset)
+            if audit_log:
+                audit_log.record_file(
+                    anime4k_dest,
+                    "modify",
+                    "ok",
+                    f"updated Anime4K mode to {args.anime_preset}",
+                )
+            ui.info(f"Anime4K mode updated to: {args.anime_preset}")
         audit_log.complete_session("completed")
         ui.panel(
             "Update complete. Personal configuration was preserved.",

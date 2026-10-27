@@ -75,7 +75,14 @@ class DeployerParserTests(unittest.TestCase):
     def test_defaults_follow_the_deploy_signature(self):
         args = deployer.build_arg_parser().parse_args(["--install"])
         parameters = inspect.signature(deployer.deploy).parameters
-        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth", "stream_quality"):
+        for name in (
+            "mpv_profile",
+            "anime_preset",
+            "scaler_tier",
+            "display_mode",
+            "dither_depth",
+            "stream_quality",
+        ):
             with self.subTest(option=name):
                 if name == "anime_preset":
                     # None means "not chosen yet": an interactive install
@@ -269,7 +276,14 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertIs(kwargs["audit_log"], self.audit_log)
         self.assertEqual(kwargs["lockfile"], "lockfile-sentinel")
         self.assertTrue(callable(kwargs["verify_callback"]))
-        for name in ("mpv_profile", "anime_preset", "scaler_tier", "display_mode", "dither_depth", "stream_quality"):
+        for name in (
+            "mpv_profile",
+            "anime_preset",
+            "scaler_tier",
+            "display_mode",
+            "dither_depth",
+            "stream_quality",
+        ):
             self.assertEqual(kwargs[name], deployer._DEPLOY_DEFAULTS[name])
 
     def test_options_reach_deploy_and_install_deps(self):
@@ -392,6 +406,13 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.assertEqual(deployer.main(["--update", "--dry-run"]), 0)
         self.m.display_plan.assert_called_once()
         self.audit_log.start_session.assert_not_called()
+
+    def test_update_with_anime_preset_writes_anime4k_conf(self):
+        with mock.patch.object(deployer.tx, "update_assets", return_value="backup"):
+            self.assertEqual(deployer.main(["--update", "--anime-preset", "C+A"]), 0)
+        anime4k_conf = Path(self.config_dir) / "script-opts" / "anime4k.conf"
+        self.assertTrue(anime4k_conf.exists())
+        self.assertIn("mode=C+A", anime4k_conf.read_text(encoding="utf-8"))
 
     def test_rollback_dry_run_exits_zero(self):
         backup_dir = Path(f"{self.config_dir}.backup.20260101_000000")
