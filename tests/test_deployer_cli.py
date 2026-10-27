@@ -616,11 +616,12 @@ class MenuSelectTests(unittest.TestCase):
         self.assertEqual(self.select_via_keys(reader), "A+A")
 
     def test_repaint_climb_matches_initial_render_newline_count(self):
-        """The drift-proof cursor ledger. The row block from the initial paint
-        ends where the cursor rests; every repaint must climb by exactly the
-        number of \n characters inside that row block. Anything else makes the
-        menu crawl up the screen over adjacent lines or trail duplicate
-        legend lines below — the bug this pins shut."""
+        """The drift-proof cursor ledger. The frame (rows + the legend as its
+        final line) ends where the cursor rests, and emits exactly
+        ``len(items)`` newlines; every repaint must climb by exactly that
+        count so it lands back on row 1. Anything else makes the menu crawl
+        up the screen over adjacent lines or trail duplicate legend lines
+        below — the bug this pins shut."""
         blob = io.StringIO()
         reader = self.keystrokes(["down", "enter"])  # exactly one repaint
         with redirect_stdout(blob):
@@ -635,17 +636,21 @@ class MenuSelectTests(unittest.TestCase):
 
         initial_render = output[: climb_match.start()]
         head_lines = initial_render.split("\n")
-        legend_index = next(
-            index for index, line in enumerate(head_lines) if "press 1-" in line
-        )
-        row_lines = head_lines[legend_index + 1 :]
-        self.assertEqual(len(row_lines), len(self.ITEMS))
-        self.assertEqual(climb, len(row_lines) - 1)
+        # Frame = every line below the question line, rest position = its
+        # last line (the legend, no trailing newline).
+        frame_lines = head_lines[1:]
+        self.assertIn("press 1-", head_lines[-1])  # rest position = legend end
+        self.assertEqual(len(frame_lines), len(self.ITEMS) + 1)  # rows + legend
+        self.assertEqual(climb, len(frame_lines) - 1)  # exact newline ledger
+        self.assertEqual(climb, len(self.ITEMS))
 
-        # The legend renders exactly once (static head), and the repaint
-        # rewrote every row without growing or shrinking the block.
-        self.assertEqual(output.count("press 1-"), 1)
-        self.assertEqual(output.count("2) A"), 2)  # initial + one repaint
+        # The legend is part of the frame now: it is rewritten in place by
+        # every repaint, so its stream count is one per frame render — one
+        # more than the repaint climbs. A leftover trail would break this.
+        repaints = len(re.findall(r"\x1b\[\d+A\r", output))
+        self.assertEqual(output.count("press 1-"), repaints + 1)
+        self.assertEqual(repaints, 1)
+        self.assertEqual(output.count("2) A"), repaints + 1)  # one per render
 
     def test_menu_select_rejects_empty_items_and_a_bad_default_row(self):
         with self.assertRaises(ValueError):
