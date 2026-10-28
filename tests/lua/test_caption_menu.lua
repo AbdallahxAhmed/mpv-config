@@ -1,4 +1,6 @@
 -- Real Lua, mocked mpv boundary: no player, network, shell or filesystem writes.
+-- unpack: LuaJIT exposes the global, Lua 5.2+ moves it into table.
+local unpack = unpack or table.unpack
 local count = 0
 local function eq(a,b) assert(a == b, tostring(a)..' ~= '..tostring(b)) end
 local function test(name, fn) fn(); count=count+1; print('ok captions: '..name) end
@@ -35,7 +37,7 @@ local function harness(metadata)
     dofile('scripts/ytdl-sub-menu.lua')
     function h:load() self.events['start-file'](); self.events['file-loaded']() end
     function h:open() self.messages.open(); return self.menu end
-    function h:activate(item) local v=item.value; assert(type(v)=='table'); self.messages[v[3]](table.unpack(v,4)) end
+    function h:activate(item) local v=item.value; assert(type(v)=='table'); self.messages[v[3]](unpack(v,4)) end
     function h:caption(kind) local m=self:open(); for _,v in ipairs(m.items) do if v.title==kind then return v.items[1] end end; error('missing '..kind) end
     function h:quote_user_data_strings()
         mp.get_property=function(k,default)

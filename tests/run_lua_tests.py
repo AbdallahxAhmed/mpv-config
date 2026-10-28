@@ -1,10 +1,17 @@
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MPV = r"C:\Program Files\mpv\mpv.com"
+if sys.platform == "win32":
+    MPV = r"C:\Program Files\mpv\mpv.com"
+else:
+    # POSIX (and any machine with mpv elsewhere): PATH, then the MPV_BINARY
+    # override for exotic installs. Same suites run on both platforms.
+    MPV = os.environ.get("MPV_BINARY") or shutil.which("mpv") or "/usr/bin/mpv"
 
 suites = [
     "test_stream_policy.lua",
