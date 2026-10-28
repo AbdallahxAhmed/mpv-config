@@ -350,7 +350,21 @@ SYSTEM_DEPS = {
         "verify": ["aria2c", "--version"],
     },
     "ffsubsync": {
-        "arch": {"method": "aur", "pkg": "python-ffsubsync", "fallback_pkg": "ffsubsync"},
+        # No ffsubsync package exists in the official Arch repos (AUR only),
+        # so the AUR build is primary; without a helper (fresh CachyOS) the
+        # uv tool install takes over — uv is a core dependency installed
+        # just before ffsubsync in the same pass.
+        "arch": {
+            "method": "aur",
+            "pkg": "python-ffsubsync",
+            "fallback_pkg": "ffsubsync",
+            "fallback": {
+                "method": "uv_tool",
+                "pkg": "ffsubsync",
+                "uv_python": "3.11",
+                "uv_no_fallback": True,
+            },
+        },
         "ubuntu": {
             "method": "uv_tool",
             "pkg": "ffsubsync",

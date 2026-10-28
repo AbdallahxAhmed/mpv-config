@@ -2392,6 +2392,53 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(env.platform_key, "fedora")
 
 
+class FfsubsyncInstallerTests(unittest.TestCase):
+    """ffsubsync: AUR primary on Arch (no official package exists); the
+    uv tool install is the fallback when no AUR helper is present — uv is
+    a core dependency installed just before ffsubsync in the same pass."""
+
+    def test_arch_keeps_aur_primary_and_carries_a_uv_fallback(self):
+        from deploy.registry import SYSTEM_DEPS
+
+        arch = SYSTEM_DEPS["ffsubsync"]["arch"]
+        self.assertEqual(arch["method"], "aur")
+        fallback = arch["fallback"]
+        self.assertEqual(fallback["method"], "uv_tool")
+        self.assertEqual(fallback["pkg"], "ffsubsync")
+        # Mirror the ubuntu/fedora/macos/windows entries: pinned Python for
+        # prebuilt-wheel availability, no pipx source-build fallback.
+        self.assertEqual(fallback["uv_python"], "3.11")
+        self.assertTrue(fallback["uv_no_fallback"])
+
+    def test_no_aur_helper_falls_back_to_uv_tool(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch", aur_helper="")
+        with mock.patch.object(
+            installer, "_install_uv_tool", return_value=True
+        ) as m_uv:
+            ok = installer._install_one("ffsubsync", SYSTEM_DEPS["ffsubsync"], env)
+
+        self.assertTrue(ok)
+        m_uv.assert_called_once()
+        self.assertEqual(m_uv.call_args[0][0]["pkg"], "ffsubsync")
+
+    def test_aur_success_never_touches_the_uv_fallback(self):
+        from deploy import installer
+        from deploy.registry import SYSTEM_DEPS
+
+        env = Environment(os="linux", platform_key="arch", aur_helper="paru")
+        with (
+            mock.patch.object(installer, "_run", return_value=True),
+            mock.patch.object(installer, "_install_uv_tool", return_value=True) as m_uv,
+        ):
+            ok = installer._install_one("ffsubsync", SYSTEM_DEPS["ffsubsync"], env)
+
+        self.assertTrue(ok)
+        m_uv.assert_not_called()
+
+
 class AlassInstallerTests(unittest.TestCase):
     """alass: prebuilt GitHub release on Ubuntu/Fedora; AUR + binary fallback on Arch."""
 
