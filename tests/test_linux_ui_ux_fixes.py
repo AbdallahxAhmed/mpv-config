@@ -6,10 +6,15 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from deploy.deployer import (
+    PREFERRED_FONTS,
     REPO_ROOT,
+    _deploy_linux_fontconfig_conf,
     _migrate_input_conf,
     _migrate_mpv_conf,
     _migrate_uosc_topbar_patch,
+    _pick_preferred_font,
+    _probe_font_has_regular_face,
+    _resolve_preferred_font,
     _sync_linux_uosc_fonts,
 )
 from mpv_config.layout_twins import generate as generate_twins
@@ -88,9 +93,13 @@ class TestLinuxUiUxFixes(unittest.TestCase):
             (fonts_dir / "uosc_icons.otf").write_bytes(b"dummy font otf")
             (fonts_dir / "uosc_textures.ttf").write_bytes(b"dummy font ttf")
 
-            fake_xdg = Path(tmpdir) / "local_share"
+            fake_xdg_data = Path(tmpdir) / "local_share"
+            fake_xdg_config = Path(tmpdir) / "config_home"
 
-            with patch.dict(os.environ, {"XDG_DATA_HOME": str(fake_xdg)}), \
+            with patch.dict(os.environ, {
+                "XDG_DATA_HOME": str(fake_xdg_data),
+                "XDG_CONFIG_HOME": str(fake_xdg_config),
+            }), \
                  patch("shutil.which", return_value="/usr/bin/fc-cache"), \
                  patch("subprocess.run") as mock_run:
                 env = MagicMock()
@@ -98,11 +107,98 @@ class TestLinuxUiUxFixes(unittest.TestCase):
                 result = _sync_linux_uosc_fonts(str(config_dir), env=env)
                 self.assertTrue(result)
 
-                dest_dir = fake_xdg / "fonts" / "mpv-uosc"
+                dest_dir = fake_xdg_data / "fonts" / "mpv-uosc"
                 self.assertTrue((dest_dir / "uosc_icons.otf").is_file())
                 self.assertTrue((dest_dir / "uosc_textures.ttf").is_file())
+                self.assertTrue(mock_run.called)
+
+    def test_deploy_linux_fontconfig_conf(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_config = Path(tmpdir) / "config_home"
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(fake_config)}), \
+                 patch("shutil.which", return_value="/usr/bin/fc-cache"), \
+                 patch("subprocess.run") as mock_run:
+                env = MagicMock()
+                env.os = "linux"
+                deployed = _deploy_linux_fontconfig_conf(env=env)
+                self.assertTrue(deployed)
+
+                conf_file = fake_config / "fontconfig" / "conf.d" / "99-mpv-uosc.conf"
+                self.assertTrue(conf_file.is_file())
+                content = conf_file.read_text(encoding="utf-8")
+                self.assertIn("<string>uosc_icons</string>", content)
+                self.assertIn("<string>Material Icons Round</string>", content)
+                self.assertIn("<string>uosc_textures</string>", content)
+                self.assertIn("<string>Tahoma</string>", content)
                 mock_run.assert_called_once()
-                self.assertIn(str(dest_dir), mock_run.call_args[0][0])
+
+                # Idempotent
+                deployed_again = _deploy_linux_fontconfig_conf(env=env)
+                self.assertFalse(deployed_again)
+
+    def test_probe_font_has_regular_face_valid(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Tahoma|Regular,Normal|0|/path/to/tahoma.ttf",
+            )
+            self.assertTrue(_probe_font_has_regular_face("Tahoma"))
+
+    def test_probe_font_has_regular_face_rejects_italic(self):
+        with patch("subprocess.run") as mock_run:
+            # Slant = 100
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Segoe UI|Italic|100|/path/to/segoeuii.ttf",
+            )
+            self.assertFalse(_probe_font_has_regular_face("Segoe UI"))
+
+            # Style = Italic with slant 0
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Segoe UI|Italic|0|/path/to/segoeuii.ttf",
+            )
+            self.assertFalse(_probe_font_has_regular_face("Segoe UI"))
+
+    def test_probe_font_has_regular_face_rejects_black(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Segoe UI,Segoe UI Black|Black,Regular|0|/path/to/seguibl.ttf",
+            )
+            self.assertFalse(_probe_font_has_regular_face("Segoe UI"))
+
+    def test_probe_font_has_regular_face_rejects_family_mismatch(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="DejaVu Sans|Regular|0|/path/to/dejavu.ttf",
+            )
+            self.assertFalse(_probe_font_has_regular_face("NonExistentFont"))
+
+    def test_pick_preferred_font_with_validator(self):
+        installed = {"Segoe UI", "Noto Sans Arabic"}
+        # Segoe UI fails validator (e.g. only has italic)
+        validator = lambda f: f != "Segoe UI"
+        chosen = _pick_preferred_font(installed, validator=validator)
+        self.assertEqual(chosen, "Noto Sans Arabic")
+
+    def test_resolve_preferred_font_linux(self):
+        env = MagicMock()
+        env.os = "linux"
+        with patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Tahoma"}), \
+             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe:
+            # Both Tahoma and Segoe UI are probed; Tahoma has regular face
+            mock_probe.side_effect = lambda f: f == "Tahoma"
+            font = _resolve_preferred_font(env=env)
+            self.assertEqual(font, "Tahoma")
+
+        with patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Noto Sans"}), \
+             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe:
+            # Tahoma not installed, Segoe UI lacks regular face, Noto Sans has regular
+            mock_probe.side_effect = lambda f: f == "Noto Sans"
+            font = _resolve_preferred_font(env=env)
+            self.assertEqual(font, "Noto Sans")
 
     def test_migrate_uosc_topbar_patch(self):
         sample_topbar = (

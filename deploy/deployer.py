@@ -41,14 +41,67 @@ from deploy.verifier import verify
 PREFERRED_FONTS = ["Tahoma", "Segoe UI", "Noto Sans Arabic", "Noto Sans", "DejaVu Sans"]
 
 
-def _pick_preferred_font(installed_families, preferred=None):
-    """Pick the highest-ranked font that exists in installed_families."""
+def _probe_font_has_regular_face(font_name):
+    """Probe via fc-match that font_name resolves to a non-italic Regular face."""
+    try:
+        r = subprocess.run(
+            [
+                "fc-match",
+                "-f",
+                "%{family}|%{style}|%{slant}|%{file}",
+                f"{font_name}:style=Regular",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if r.returncode != 0 or not r.stdout:
+            return False
+        parts = r.stdout.strip().split("|")
+        if len(parts) < 4:
+            return False
+        family, style, slant, file_path = parts[0], parts[1], parts[2], parts[3]
+
+        # 1. Family check: candidate font must be in matched families
+        matched_families = [f.strip().lower() for f in family.split(",") if f.strip()]
+        if not any(font_name.lower() in mf or mf in font_name.lower() for mf in matched_families):
+            return False
+
+        # 2. Slant check: 0 is upright roman; non-zero is italic/oblique
+        if slant.strip() != "0":
+            return False
+
+        # 3. Style check: reject italic, oblique, and heavy/black styles
+        style_lower = style.lower()
+        if any(k in style_lower for k in ("italic", "oblique", "kursiv", "cursiva", "slanted")):
+            return False
+        if any(k in style_lower for k in ("black", "heavy", "fat", "ultra", "extra bold", "extrabold")):
+            return False
+
+        # 4. File name heuristic check for italic/bold variants
+        base = os.path.basename(file_path).lower()
+        if any(k in base for k in ("italic", "oblique")) or base.endswith("i.ttf") or base.endswith("z.ttf"):
+            return False
+
+        return True
+    except Exception:
+        return False
+
+
+def _pick_preferred_font(installed_families, preferred=None, validator=None):
+    """Pick the highest-ranked font that exists in installed_families and passes validator."""
     if preferred is None:
         preferred = PREFERRED_FONTS
     installed_lower = {fam.strip().lower() for fam in installed_families if fam and fam.strip()}
     for font in preferred:
         if font.lower() in installed_lower:
-            return font
+            if validator is None or validator(font):
+                return font
+    if validator is not None:
+        for font in preferred:
+            if validator(font):
+                return font
     return preferred[0]
 
 
@@ -76,12 +129,15 @@ def _probe_fc_list_families():
 
 
 def _resolve_preferred_font(env=None):
-    """Resolve preferred font for current machine, keeping Tahoma #1."""
+    """Resolve preferred font for current machine, keeping Tahoma #1 and verifying regular face."""
     if env is not None and getattr(env, "os", None) == "windows":
         return "Tahoma"
     installed = _probe_fc_list_families()
     if installed:
-        return _pick_preferred_font(installed)
+        return _pick_preferred_font(installed, validator=_probe_font_has_regular_face)
+    for font in PREFERRED_FONTS:
+        if _probe_font_has_regular_face(font):
+            return font
     return "Tahoma"
 
 
@@ -1411,6 +1467,16 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             lambda p: _sync_linux_uosc_fonts(config_dir, env=env, audit_log=audit_log),
         ),
         (
+            "migrate-fontconfig-uosc",
+            os.path.join(
+                os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                "fontconfig",
+                "conf.d",
+                "99-mpv-uosc.conf",
+            ),
+            lambda p: _deploy_linux_fontconfig_conf(env=env, audit_log=audit_log),
+        ),
+        (
             "migrate-uosc-topbar-patch",
             os.path.join(config_dir, "scripts", "uosc", "elements", "TopBar.lua"),
             lambda p: _migrate_uosc_topbar_patch(p, audit_log=audit_log),
@@ -2061,12 +2127,119 @@ def _migrate_arabic_layout_ahk(config_dir, audit_log=None):
     return True
 
 
+def _deploy_linux_fontconfig_conf(env=None, audit_log=None):
+    """Deploy fontconfig alias and isolation rules for uosc on Linux (~/.config/fontconfig/conf.d/99-mpv-uosc.conf)."""
+    is_linux = (env is not None and getattr(env, "os", None) == "linux") or (
+        env is None and sys.platform.startswith("linux")
+    )
+    if not is_linux:
+        return False
+
+    xdg_config = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    conf_dir = os.path.join(xdg_config, "fontconfig", "conf.d")
+    os.makedirs(conf_dir, exist_ok=True)
+    target = os.path.join(conf_dir, "99-mpv-uosc.conf")
+
+    source_path = os.path.join(str(REPO_ROOT), "config", "fontconfig", "99-mpv-uosc.conf")
+    content = None
+    if os.path.isfile(source_path):
+        try:
+            with open(source_path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except OSError:
+            content = None
+
+    if not content:
+        content = (
+            '<?xml version="1.0"?>\n'
+            '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
+            '<fontconfig>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>uosc_icons</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
+            '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
+            '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>MaterialIconsRound</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
+            '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
+            '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>MaterialIconsRound-Regular</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
+            '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
+            '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>Material Icons Round</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
+            '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
+            '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>uosc_textures</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>uosc_textures</string></edit>\n'
+            '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
+            '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>Tahoma</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Tahoma</string></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>Noto Sans Arabic</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Noto Sans Arabic</string></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>Noto Sans</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>Noto Sans</string></edit>\n'
+            '    </match>\n'
+            '    <match target="pattern">\n'
+            '        <test qual="any" name="family"><string>DejaVu Sans</string></test>\n'
+            '        <edit name="family" mode="assign_replace" binding="strong"><string>DejaVu Sans</string></edit>\n'
+            '    </match>\n'
+            '</fontconfig>\n'
+        )
+
+    if os.path.isfile(target):
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                if f.read() == content:
+                    return False
+        except OSError:
+            pass
+
+    with open(target, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    fc_cache = shutil.which("fc-cache")
+    if fc_cache:
+        try:
+            subprocess.run(
+                [fc_cache, "-f"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    if audit_log:
+        audit_log.record_file(
+            target, "write", "ok", "deployed 99-mpv-uosc.conf fontconfig alias and isolation rule"
+        )
+    return True
+
+
 def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
     """Sync deployed fonts from config_dir/fonts into fontconfig user directory on Linux.
 
     libass and fontconfig on Linux need the icon/texture fonts in a discovered
-    font path (~/.local/share/fonts/mpv-uosc) so uosc window control ligatures
-    ('minimize', 'crop_square', 'close') resolve to actual vector glyphs.
+    font path (~/.local/share/fonts/mpv-uosc) and fontconfig alias rules
+    (~/.config/fontconfig/conf.d/99-mpv-uosc.conf) so uosc window control
+    ligatures ('minimize', 'crop_square', 'close') resolve to actual vector glyphs.
     """
     is_linux = (env is not None and getattr(env, "os", None) == "linux") or (
         env is None and sys.platform.startswith("linux")
@@ -2074,9 +2247,11 @@ def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
     if not is_linux:
         return False
 
+    fc_conf_updated = _deploy_linux_fontconfig_conf(env=env, audit_log=audit_log)
+
     src_fonts = os.path.join(config_dir, "fonts")
     if not os.path.isdir(src_fonts):
-        return False
+        return fc_conf_updated
 
     xdg_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
     dest_dir = os.path.join(xdg_data, "fonts", "mpv-uosc")
@@ -2092,7 +2267,7 @@ def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
                 copied = True
 
     fc_cache = shutil.which("fc-cache")
-    if fc_cache:
+    if fc_cache and copied:
         try:
             subprocess.run(
                 [fc_cache, "-f", dest_dir],
@@ -2105,7 +2280,7 @@ def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
 
     if copied and audit_log:
         audit_log.record_file(dest_dir, "modify", "ok", "synced uosc fonts to ~/.local/share/fonts/mpv-uosc")
-    return copied
+    return copied or fc_conf_updated
 
 
 def _migrate_uosc_topbar_patch(topbar_lua_path, audit_log=None):
