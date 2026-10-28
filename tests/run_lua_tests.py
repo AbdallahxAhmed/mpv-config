@@ -23,6 +23,7 @@ suites = [
     "test_thumbfast.lua",
     "test_smart_motion.lua",
     "test_profile_picker.lua",
+    "test_sub_sanitizer.lua",
     "test_help_overlay.lua",
     "test_keyboard_layout.lua",
 ]
