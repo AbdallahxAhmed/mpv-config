@@ -312,6 +312,7 @@ def verify(config_dir, env):
         "smart_motion",
         "profile_picker",
         "sub_sanitizer",
+        "fast_close",
     ):
         check_file(name, f"scripts/{name}.lua")
     check_file("sponsorblock.py", "scripts/sponsorblock_shared/sponsorblock.py")
@@ -321,6 +322,13 @@ def verify(config_dir, env):
     check_directory_or_link("shaders directory", "shaders")
     check_dir("Anime4K shaders", "shaders", min_files=10)
     check_dir("uosc fonts", "fonts", min_files=1)
+    if env.os == "linux":
+        xdg_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        font_dir = os.path.join(xdg_data, "fonts", "mpv-uosc")
+        if os.path.isdir(font_dir) and any(os.scandir(font_dir)):
+            ui.ok("fontconfig uosc fonts (~/.local/share/fonts/mpv-uosc)")
+        else:
+            ui.warn("uosc fonts not synced to ~/.local/share/fonts/mpv-uosc")
 
     ui.step("Checking script-opts...")
     for name in ("uosc", "SmartSkip", "autosubsync", "evafast", "memo", "ytdl_hook", "thumbfast"):

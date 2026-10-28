@@ -26,6 +26,7 @@ suites = [
     "test_sub_sanitizer.lua",
     "test_help_overlay.lua",
     "test_keyboard_layout.lua",
+    "test_fast_close.lua",
 ]
 
 all_passed = True

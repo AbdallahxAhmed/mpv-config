@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -1270,17 +1271,19 @@ def deploy(
         # without these migrations an old broken install stays broken even
         # after the templates are fixed.
         results.extend(_migrate_deployed_configs(config_dir, env, audit_log))
-        # Apply uosc Timeline mouse-leave patch to ensure thumbnail cleanup on window exit
+        # Apply uosc Timeline mouse-leave and TopBar fast-close patches
         try:
             from pathlib import Path
 
             from tools.patch_uosc_timeline_thumb import get_default_uosc_dir, run_patcher
+            from tools.patch_uosc_topbar import run_patcher as run_topbar_patcher
 
             uosc_dir = Path(config_dir) / "scripts" / "uosc"
             if not uosc_dir.exists():
                 uosc_dir = get_default_uosc_dir()
             if uosc_dir.exists():
                 run_patcher(uosc_dir)
+                run_topbar_patcher(uosc_dir)
                 results.append(
                     {
                         "name": "uosc-timeline-thumb-patch",
@@ -1288,9 +1291,16 @@ def deploy(
                         "detail": "mouse-leave cleanup patched",
                     }
                 )
+                results.append(
+                    {
+                        "name": "uosc-topbar-fast-close-patch",
+                        "status": "ok",
+                        "detail": "instant window close on click patched",
+                    }
+                )
         except Exception as exc:
             results.append(
-                {"name": "uosc-timeline-thumb-patch", "status": "warn", "detail": str(exc)}
+                {"name": "uosc-patch", "status": "warn", "detail": str(exc)}
             )
         # Apply autosubsync stderr capture and diagnostics patch
         try:
@@ -1394,6 +1404,16 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             "migrate-sub-sanitizer-conf",
             os.path.join(config_dir, "script-opts", "sub_sanitizer.conf"),
             lambda p: _migrate_sub_sanitizer_conf(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-uosc-fonts",
+            os.path.join(config_dir, "fonts"),
+            lambda p: _sync_linux_uosc_fonts(config_dir, env=env, audit_log=audit_log),
+        ),
+        (
+            "migrate-uosc-topbar-patch",
+            os.path.join(config_dir, "scripts", "uosc", "elements", "TopBar.lua"),
+            lambda p: _migrate_uosc_topbar_patch(p, audit_log=audit_log),
         ),
     )
     results = []
@@ -1857,6 +1877,46 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     if dedupe_changed:
         updated_content = "\n".join(kept_lines) + "\n"
 
+    # 7b. Fast window close on Linux / Wayland (CLOSE_WIN, q, Q)
+    #     Minimize immediately before quitting so libplacebo / Wayland teardown
+    #     latency doesn't freeze a visible window on screen.
+    updated_content = re.sub(
+        r"^[ \t]*CLOSE_WIN[ \t]+quit[ \t]*$",
+        "CLOSE_WIN        set window-minimized yes ; quit",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^[ \t]*CLOSE_WIN\b", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\n# ── Window close ── minimize immediately to eliminate Wayland teardown freeze ──\n"
+            + "CLOSE_WIN        set window-minimized yes ; quit\n"
+        )
+
+    updated_content = re.sub(
+        r"^[ \t]*q[ \t]+quit[ \t]*$",
+        "q                set window-minimized yes ; quit",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^[ \t]*q[ \t]+", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\nq                set window-minimized yes ; quit\n"
+        )
+
+    updated_content = re.sub(
+        r"^[ \t]*Q[ \t]+quit-watch-later[ \t]*$",
+        "Q                set window-minimized yes ; quit-watch-later",
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^[ \t]*Q[ \t]+", updated_content, re.MULTILINE):
+        updated_content = (
+            updated_content.rstrip()
+            + "\nQ                set window-minimized yes ; quit-watch-later\n"
+        )
+
     # 8. Regenerate the Arabic layout twins: same physical key, Arabic 101
     #    layout. Runs LAST so the hazard cleanup, legacy removal and the
     #    backup block above have settled; the generator replaces its own
@@ -1999,6 +2059,82 @@ def _migrate_arabic_layout_ahk(config_dir, audit_log=None):
     if audit_log:
         audit_log.record_file(target, "copy", "ok", "deployed mpv_arabic_layout.ahk helper")
     return True
+
+
+def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
+    """Sync deployed fonts from config_dir/fonts into fontconfig user directory on Linux.
+
+    libass and fontconfig on Linux need the icon/texture fonts in a discovered
+    font path (~/.local/share/fonts/mpv-uosc) so uosc window control ligatures
+    ('minimize', 'crop_square', 'close') resolve to actual vector glyphs.
+    """
+    is_linux = (env is not None and getattr(env, "os", None) == "linux") or (
+        env is None and sys.platform.startswith("linux")
+    )
+    if not is_linux:
+        return False
+
+    src_fonts = os.path.join(config_dir, "fonts")
+    if not os.path.isdir(src_fonts):
+        return False
+
+    xdg_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    dest_dir = os.path.join(xdg_data, "fonts", "mpv-uosc")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    copied = False
+    for filename in os.listdir(src_fonts):
+        src_file = os.path.join(src_fonts, filename)
+        if os.path.isfile(src_file) and (filename.endswith(".otf") or filename.endswith(".ttf")):
+            dst_file = os.path.join(dest_dir, filename)
+            if not os.path.isfile(dst_file) or os.path.getsize(src_file) != os.path.getsize(dst_file):
+                shutil.copy2(src_file, dst_file)
+                copied = True
+
+    fc_cache = shutil.which("fc-cache")
+    if fc_cache:
+        try:
+            subprocess.run(
+                [fc_cache, "-f", dest_dir],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    if copied and audit_log:
+        audit_log.record_file(dest_dir, "modify", "ok", "synced uosc fonts to ~/.local/share/fonts/mpv-uosc")
+    return copied
+
+
+def _migrate_uosc_topbar_patch(topbar_lua_path, audit_log=None):
+    """Patch uosc TopBar.lua close button to minimize window before quitting."""
+    if not os.path.isfile(topbar_lua_path):
+        return False
+    try:
+        from tools.patch_uosc_topbar import patch_topbar_lua
+
+        with open(topbar_lua_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        patched = patch_topbar_lua(content)
+        if patched != content:
+            with open(topbar_lua_path, "w", encoding="utf-8") as f:
+                f.write(patched)
+            if audit_log:
+                audit_log.record_file(
+                    topbar_lua_path,
+                    "modify",
+                    "ok",
+                    "patched TopBar.lua for instant close",
+                )
+            return True
+    except Exception as exc:
+        if audit_log:
+            audit_log.record_file(
+                topbar_lua_path, "modify", "warn", f"TopBar.lua patch: {exc}"
+            )
+    return False
 
 
 def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
@@ -2175,6 +2311,36 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         if (n_osd or n_sub) and sub_sub != updated:
             font_fixed = True
             updated = sub_sub
+    # Ensure osd-fonts-dir and sub-fonts-dir are configured for uosc font resolution
+    fonts_dir_fixed = False
+    if "osd-border-color" in updated:
+        if not re.search(r"^[ \t]*osd-fonts-dir\b", updated, re.MULTILINE):
+            m = re.search(r"^([ \t]*osd-border-color[^\r\n]*\r?\n)", updated, re.MULTILINE)
+            if m:
+                updated = (
+                    updated[: m.end()]
+                    + "osd-fonts-dir             = ~~/fonts\n"
+                    + updated[m.end() :]
+                )
+                fonts_dir_fixed = True
+        if not re.search(r"^[ \t]*sub-fonts-dir\b", updated, re.MULTILINE):
+            m = re.search(r"^([ \t]*osd-fonts-dir[^\r\n]*\r?\n)", updated, re.MULTILINE)
+            if m:
+                updated = (
+                    updated[: m.end()]
+                    + "sub-fonts-dir             = ~~/fonts\n"
+                    + updated[m.end() :]
+                )
+            elif "osd-border-color" in updated:
+                m = re.search(r"^([ \t]*osd-border-color[^\r\n]*\r?\n)", updated, re.MULTILINE)
+                if m:
+                    updated = (
+                        updated[: m.end()]
+                        + "sub-fonts-dir             = ~~/fonts\n"
+                        + updated[m.end() :]
+                    )
+            fonts_dir_fixed = True
+
     if updated == content:
         return False
     with open(mpv_conf_path, "w", encoding="utf-8") as f:
@@ -2185,6 +2351,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             detail += f" — border → no ({border_fixed})"
         if font_fixed and preferred_font:
             detail += f" — font → {preferred_font}"
+        if fonts_dir_fixed:
+            detail += " — added osd/sub-fonts-dir"
         if removed_format or fixed_format_sort:
             detail += " — ytdl-format caps moved to stream_quality.conf"
         if restored_count:
@@ -2768,6 +2936,23 @@ def _remove_deployed_files(
     ]
 
     if purge_config:
+        if getattr(env, "os", None) == "linux":
+            xdg_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+            font_dir = os.path.join(xdg_data, "fonts", "mpv-uosc")
+            if os.path.isdir(font_dir):
+                if dry_run:
+                    ui.info(f"[DRY RUN] Would remove font dir: {font_dir}")
+                else:
+                    _remove_path(font_dir)
+                    fc_cache = shutil.which("fc-cache")
+                    if fc_cache:
+                        try:
+                            subprocess.run([fc_cache, "-f"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        except Exception:
+                            pass
+                    ui.success(f"Removed font dir: {font_dir}")
+                    if audit_log:
+                        audit_log.record_file(font_dir, "delete", "ok", "font dir removed")
         if os.path.lexists(config_dir):
             is_symlink = os.path.islink(config_dir)
             kind = "symlink" if is_symlink else "config dir"
