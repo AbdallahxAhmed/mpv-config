@@ -73,6 +73,12 @@ class DeployerParserTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("invalid choice", err)
 
+    def test_yes_flag_parses_long_and_short_and_defaults_off(self):
+        parser = deployer.build_arg_parser()
+        self.assertTrue(parser.parse_args(["--install", "--yes"]).yes)
+        self.assertTrue(parser.parse_args(["--install", "-y"]).yes)
+        self.assertFalse(parser.parse_args(["--install"]).yes)
+
     def test_defaults_follow_the_deploy_signature(self):
         args = deployer.build_arg_parser().parse_args(["--install"])
         parameters = inspect.signature(deployer.deploy).parameters
@@ -169,6 +175,18 @@ class DeployerParserTests(unittest.TestCase):
         self.assertEqual(deployer.REPO_ROOT, REPO_ROOT)
         module_file = Path(deployer.__file__).resolve()
         self.assertEqual((deployer.REPO_ROOT / "deploy" / "deployer.py").resolve(), module_file)
+
+
+    def test_yes_flag_skips_the_anime_mode_menu(self):
+        """--yes means scripted defaults even on a real TTY."""
+        args = deployer.build_arg_parser().parse_args(["--install", "--yes"])
+        original_interactive = deployer._is_interactive_session
+        deployer._is_interactive_session = lambda: True
+        try:
+            chosen = deployer._resolve_anime_preset(args)
+        finally:
+            deployer._is_interactive_session = original_interactive
+        self.assertEqual(chosen, deployer._DEPLOY_DEFAULTS["anime_preset"])
 
 
 class InstallOrchestrationTests(unittest.TestCase):
@@ -384,6 +402,13 @@ class InstallOrchestrationTests(unittest.TestCase):
         self.m.interactive.return_value = True
         self.assertEqual(deployer.main(["--install"]), 0)
         self.m.confirm_plan.assert_called_once()
+        self.assertEqual(self.calls, ["fetch_all", "install_deps", "deploy"])
+
+    def test_yes_flag_installs_without_confirmation_on_a_tty(self):
+        self.m.interactive.return_value = True
+        self.assertEqual(deployer.main(["--install", "--yes"]), 0)
+        self.m.confirm_plan.assert_not_called()
+        self.m.ui.menu_select.assert_not_called()
         self.assertEqual(self.calls, ["fetch_all", "install_deps", "deploy"])
 
     def test_interrupt_returns_130(self):

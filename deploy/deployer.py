@@ -2104,6 +2104,11 @@ def _is_interactive_session():
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def _prompts_enabled(args):
+    """Interactive prompts are wanted unless --yes chose non-interactive defaults."""
+    return _is_interactive_session() and not getattr(args, "yes", False)
+
+
 def _audit_log_for(env):
     """Return an AuditLog pointing at the config directory's log file."""
     return AuditLog(os.path.join(env.config_dir, ".audit-log.json"))
@@ -2142,7 +2147,7 @@ def _resolve_anime_preset(args):
     chosen = getattr(args, "anime_preset", None)
     if chosen:
         return chosen
-    if _is_interactive_session():
+    if _prompts_enabled(args):
         ui.header("Anime4K shader mode")
         ui.info(
             "The anime profile uses this chain. Heavier modes cost GPU time; "
@@ -2173,7 +2178,7 @@ def cmd_install(args):
         ui.info("[DRY RUN] No downloads, installs, audit writes, or replacements.")
         return 0
     args.anime_preset = _resolve_anime_preset(args)
-    if _is_interactive_session() and not confirm_plan(plan, "installation"):
+    if _prompts_enabled(args) and not confirm_plan(plan, "installation"):
         ui.warn("Installation cancelled by user.")
         return 0
 
@@ -2296,7 +2301,7 @@ def cmd_update(args):
     if args.dry_run:
         ui.info("[DRY RUN] No downloads, audit writes, staging, or replacements.")
         return 0
-    if _is_interactive_session() and not confirm_plan(plan, "update"):
+    if _prompts_enabled(args) and not confirm_plan(plan, "update"):
         ui.warn("Update cancelled by user.")
         return 0
     config_dir = tx.config_path(env.config_dir)
@@ -2388,7 +2393,7 @@ def cmd_rollback(args):
         result = rollback_config(config_dir, backup_path=requested, dry_run=True)
         ui.summary([result])
         return 0
-    if _is_interactive_session() and not ui.confirm("Restore backup and retain a safety snapshot?"):
+    if _prompts_enabled(args) and not ui.confirm("Restore backup and retain a safety snapshot?"):
         ui.warn("Rollback cancelled by user.")
         return 0
     with tx.operation_lock(config_dir):
@@ -2664,10 +2669,9 @@ def cmd_uninstall(args):
         ui.summary(remove_results + cleanup_results)
         return 0
 
-    if _is_interactive_session():
-        if not ui.confirm("Are you sure you want to uninstall MPV configuration?"):
-            ui.warn("Uninstall cancelled by user.")
-            return 0
+    if _prompts_enabled(args) and not ui.confirm("Are you sure you want to uninstall MPV configuration?"):
+        ui.warn("Uninstall cancelled by user.")
+        return 0
 
     with tx.operation_lock(config_dir):
         audit_log.start_session("uninstall", env)
@@ -2750,6 +2754,15 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="preview changes without modifying files"
+    )
+    parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help=(
+            "non-interactive: accept the defaults, skip the Anime4K menu and "
+            "all confirmations (scripted installs)"
+        ),
     )
     parser.add_argument(
         "--purge-config",
