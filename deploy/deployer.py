@@ -37,28 +37,79 @@ from deploy.registry import (
 )
 from deploy.verifier import verify
 
-LINUX_VISUAL_TUNING_BLOCK = (
-    "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
-    'osd-font="Tahoma"\n'
-    "osd-font-size=50\n"
-    "osd-scale-by-window=yes\n"
-    "\n"
-    "# 2. إعدادات الترجمة (SRT) الديناميكية (مريحة للعين)\n"
-    "sub-font-provider=fontconfig\n"
-    'sub-font="Tahoma"\n'
-    "sub-font-size=36\n"
-    "sub-scale-by-window=yes\n"
-    'sub-color="#FFFFFF"\n'
-    'sub-border-color="#000000"\n'
-    "sub-border-size=2\n"
-    "sub-shadow-offset=1\n"
-    "sub-margin-y=36\n"
-    "\n"
-    "# 3. Window Sizing Helpers (Convenience)\n"
-    "geometry=50%x50%\n"
-    "autofit-larger=90%x90%\n"
-    "autofit-smaller=30%x30%\n"
-)
+PREFERRED_FONTS = ["Tahoma", "Segoe UI", "Noto Sans Arabic", "Noto Sans", "DejaVu Sans"]
+
+
+def _pick_preferred_font(installed_families, preferred=None):
+    """Pick the highest-ranked font that exists in installed_families."""
+    if preferred is None:
+        preferred = PREFERRED_FONTS
+    installed_lower = {fam.strip().lower() for fam in installed_families if fam and fam.strip()}
+    for font in preferred:
+        if font.lower() in installed_lower:
+            return font
+    return preferred[0]
+
+
+def _probe_fc_list_families():
+    """Probe fontconfig on Linux for installed font family names."""
+    try:
+        r = subprocess.run(
+            ["fc-list", ":", "family"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+        if r.returncode == 0 and r.stdout:
+            families = set()
+            for line in r.stdout.splitlines():
+                for fam in line.split(","):
+                    cleaned = fam.strip()
+                    if cleaned:
+                        families.add(cleaned)
+            return families
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_preferred_font(env=None):
+    """Resolve preferred font for current machine, keeping Tahoma #1."""
+    if env is not None and getattr(env, "os", None) == "windows":
+        return "Tahoma"
+    installed = _probe_fc_list_families()
+    if installed:
+        return _pick_preferred_font(installed)
+    return "Tahoma"
+
+
+def _get_linux_visual_tuning_block(font="Tahoma"):
+    return (
+        "# 1. إعدادات الواجهة (OSD) لرسائل النظام الديناميكية\n"
+        f'osd-font="{font}"\n'
+        "osd-font-size=50\n"
+        "osd-scale-by-window=yes\n"
+        "\n"
+        "# 2. إعدادات الترجمة (SRT) الديناميكية (مريحة للعين)\n"
+        "sub-font-provider=fontconfig\n"
+        f'sub-font="{font}"\n'
+        "sub-font-size=36\n"
+        "sub-scale-by-window=yes\n"
+        'sub-color="#FFFFFF"\n'
+        'sub-border-color="#000000"\n'
+        "sub-border-size=2\n"
+        "sub-shadow-offset=1\n"
+        "sub-margin-y=36\n"
+        "\n"
+        "# 3. Window Sizing Helpers (Convenience)\n"
+        "geometry=50%x50%\n"
+        "autofit-larger=90%x90%\n"
+        "autofit-smaller=30%x30%\n"
+    )
+
+
+LINUX_VISUAL_TUNING_BLOCK = _get_linux_visual_tuning_block("Tahoma")
 
 
 CONDITIONAL_BLOCK_PATTERN = re.compile(r"\{\{#if (\w+)\}\}(.*?)\{\{/if\}\}\n*", flags=re.DOTALL)
@@ -351,7 +402,10 @@ def _patch_mpv_conf(
     audit_log=None,
 ):
     """Patch mpv.conf.template with profile-aware + platform-required values."""
-    linux_visual_tuning = LINUX_VISUAL_TUNING_BLOCK if env.os == "linux" else ""
+    preferred_font = _resolve_preferred_font(env)
+    linux_visual_tuning = (
+        _get_linux_visual_tuning_block(preferred_font) if env.os == "linux" else ""
+    )
     native_fs_value = "no" if env.os == "linux" else ""
     # Borderless on every OS so uosc's top bar (title + window controls) is
     # the one chrome everywhere. With border=yes the WM draws decorations and
@@ -653,11 +707,9 @@ def _patch_stream_quality_conf(path, quality):
     return True
 
 
-def _patch_autosubsync_conf(template_path, dest_path, env):
-    """Patch autosubsync.conf.template with platform-specific paths."""
+def _resolve_autosubsync_paths(env):
+    """Resolve full paths for ffmpeg, ffsubsync, and alass for the current platform."""
     defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
-    with open(template_path, "r", encoding="utf-8") as f:
-        content = f.read()
 
     def _pick_first_existing(candidates):
         for path in candidates:
@@ -723,11 +775,108 @@ def _patch_autosubsync_conf(template_path, dest_path, env):
         ffmpeg_path = _normalize_windows_path(ffmpeg_path)
         ffsubsync_path = _normalize_windows_path(ffsubsync_path)
         alass_path = _normalize_windows_path(alass_path)
+    return ffmpeg_path, ffsubsync_path, alass_path
+
+
+def _patch_autosubsync_conf(template_path, dest_path, env):
+    """Patch autosubsync.conf.template with platform-specific paths."""
+    with open(template_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    ffmpeg_path, ffsubsync_path, alass_path = _resolve_autosubsync_paths(env)
     content = content.replace("{{FFMPEG_PATH}}", ffmpeg_path)
     content = content.replace("{{FFSUBSYNC_PATH}}", ffsubsync_path)
     content = content.replace("{{ALASS_PATH}}", alass_path)
     with open(dest_path, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def _migrate_autosubsync_conf(conf_path, env=None, audit_log=None):
+    """Surgically re-resolve and rewrite only the binary path lines in autosubsync.conf.
+
+    Preserves all user lines (settings, comments, spacing) verbatim.
+    """
+    if not os.path.isfile(conf_path) or env is None:
+        return False
+    try:
+        with open(conf_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return False
+
+    ffmpeg_path, ffsubsync_path, alass_path = _resolve_autosubsync_paths(env)
+
+    updated = content
+    updated = re.sub(
+        r"^([ \t]*ffmpeg_path[ \t]*=[ \t]*)[^\r\n]*",
+        rf"\g<1>{ffmpeg_path}",
+        updated,
+        flags=re.MULTILINE,
+    )
+    updated = re.sub(
+        r"^([ \t]*ffsubsync_path[ \t]*=[ \t]*)[^\r\n]*",
+        rf"\g<1>{ffsubsync_path}",
+        updated,
+        flags=re.MULTILINE,
+    )
+    updated = re.sub(
+        r"^([ \t]*alass_path[ \t]*=[ \t]*)[^\r\n]*",
+        rf"\g<1>{alass_path}",
+        updated,
+        flags=re.MULTILINE,
+    )
+
+    if updated == content:
+        return False
+
+    with open(conf_path, "w", encoding="utf-8") as f:
+        f.write(updated)
+
+    if audit_log:
+        detail = (
+            f"healed autosubsync binary paths (ffmpeg={ffmpeg_path}, "
+            f"ffsubsync={ffsubsync_path}, alass={alass_path})"
+        )
+        if hasattr(audit_log, "record_file"):
+            audit_log.record_file(conf_path, "modify", "ok", detail)
+        elif isinstance(audit_log, list):
+            audit_log.append(
+                {
+                    "name": "migrate-autosubsync-conf",
+                    "status": "applied",
+                    "detail": detail,
+                }
+            )
+    return True
+
+
+def _migrate_autosubsync_patch(lua_path, audit_log=None):
+    """Patch deployed autosubsync.lua to capture stderr and surface diagnostics."""
+    if not os.path.isfile(lua_path):
+        return False
+    try:
+        from tools.patch_autosubsync import patch_autosubsync_file
+
+        if patch_autosubsync_file(lua_path):
+            if audit_log:
+                if hasattr(audit_log, "record_file"):
+                    audit_log.record_file(
+                        lua_path,
+                        "modify",
+                        "ok",
+                        "autosubsync stderr capture and diagnostics patched",
+                    )
+                elif isinstance(audit_log, list):
+                    audit_log.append(
+                        {
+                            "name": "migrate-autosubsync-patch",
+                            "status": "applied",
+                            "detail": "autosubsync stderr capture and diagnostics patched",
+                        }
+                    )
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _layout_twins_module():
@@ -777,6 +926,11 @@ def _find_binary(name, env):
         if env.os == "windows":
             return path.replace("\\", "/")
         return path
+    if env.os != "windows":
+        for folder in [os.path.expanduser("~/.local/bin"), "/usr/local/bin", "/usr/bin"]:
+            candidate = os.path.join(folder, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
     return None
 
 
@@ -1037,6 +1191,9 @@ def deploy(
         if os.path.isfile(ass_template) and not os.path.exists(ass_dest):
             _patch_autosubsync_conf(ass_template, ass_dest, env)
             newly_managed.append("script-opts/autosubsync.conf")
+        elif os.path.isfile(ass_dest):
+            if _migrate_autosubsync_conf(ass_dest, env=env, audit_log=audit_log):
+                newly_managed.append("script-opts/autosubsync.conf")
         # --stream-quality seeds only FRESH stream_quality.conf files. A file
         # that already existed (installed by a previous run, later chosen in
         # the player's Quality menu or edited by hand) is personal and is
@@ -1135,6 +1292,39 @@ def deploy(
             results.append(
                 {"name": "uosc-timeline-thumb-patch", "status": "warn", "detail": str(exc)}
             )
+        # Apply autosubsync stderr capture and diagnostics patch
+        try:
+            from tools.patch_autosubsync import find_and_patch_autosubsync
+
+            if find_and_patch_autosubsync(config_dir):
+                results.append(
+                    {
+                        "name": "autosubsync-stderr-patch",
+                        "status": "ok",
+                        "detail": "autosubsync stderr capture and diagnostics patched",
+                    }
+                )
+                if audit_log:
+                    auto_lua = os.path.join(config_dir, "scripts", "autosubsync", "autosubsync.lua")
+                    if hasattr(audit_log, "record_file"):
+                        audit_log.record_file(
+                            auto_lua,
+                            "modify",
+                            "ok",
+                            "autosubsync stderr capture and diagnostics patched",
+                        )
+                    elif isinstance(audit_log, list):
+                        audit_log.append(
+                            {
+                                "name": "autosubsync-stderr-patch",
+                                "status": "applied",
+                                "detail": "autosubsync stderr capture and diagnostics patched",
+                            }
+                        )
+        except Exception as exc:
+            results.append(
+                {"name": "autosubsync-stderr-patch", "status": "warn", "detail": str(exc)}
+            )
     if env.os == "windows":
         ensure_windows_shortcuts(env, audit_log=audit_log)
         _deploy_ytdlp_plugins_and_config(env, repo_dir)
@@ -1189,6 +1379,16 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             "migrate-mpv-conf-user",
             os.path.join(config_dir, "mpv.conf.user"),
             lambda p: _migrate_mpv_conf_user(p, audit_log=audit_log),
+        ),
+        (
+            "migrate-autosubsync-conf",
+            os.path.join(config_dir, "script-opts", "autosubsync.conf"),
+            lambda p: _migrate_autosubsync_conf(p, env=env, audit_log=audit_log),
+        ),
+        (
+            "migrate-autosubsync-patch",
+            os.path.join(config_dir, "scripts", "autosubsync", "autosubsync.lua"),
+            lambda p: _migrate_autosubsync_patch(p, audit_log=audit_log),
         ),
     )
     results = []
@@ -1949,6 +2149,27 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         'profile-desc              = "Anime: Anime4K Mode A+A"',
         updated,
     )
+    # Dynamic font migration on Linux: resolve preferred font dynamically
+    font_fixed = False
+    preferred_font = None
+    if env is not None and getattr(env, "os", None) == "linux":
+        preferred_font = _resolve_preferred_font(env)
+        pattern_fonts = "|".join(re.escape(f) for f in PREFERRED_FONTS)
+        osd_sub, n_osd = re.subn(
+            rf'^([ \t]*osd-font[ \t]*=[ \t]*)"?(?:{pattern_fonts})"?[ \t]*$',
+            rf'\1"{preferred_font}"',
+            updated,
+            flags=re.MULTILINE,
+        )
+        sub_sub, n_sub = re.subn(
+            rf'^([ \t]*sub-font[ \t]*=[ \t]*)"?(?:{pattern_fonts})"?[ \t]*$',
+            rf'\1"{preferred_font}"',
+            osd_sub,
+            flags=re.MULTILINE,
+        )
+        if (n_osd or n_sub) and sub_sub != updated:
+            font_fixed = True
+            updated = sub_sub
     if updated == content:
         return False
     with open(mpv_conf_path, "w", encoding="utf-8") as f:
@@ -1957,6 +2178,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         detail = "repaired mpv.conf options (renames / GPU-API safety)"
         if border_fixed:
             detail += f" — border → no ({border_fixed})"
+        if font_fixed and preferred_font:
+            detail += f" — font → {preferred_font}"
         if removed_format or fixed_format_sort:
             detail += " — ytdl-format caps moved to stream_quality.conf"
         if restored_count:

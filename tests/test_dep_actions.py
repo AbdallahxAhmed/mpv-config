@@ -300,6 +300,7 @@ class InstallerConsumptionTests(unittest.TestCase):
 
         with mock.patch.object(dep_actions, "dep_is_fresh", return_value=False), \
                 mock.patch.object(dep_actions, "dir_is_writable", lambda _path: True), \
+                mock.patch.object(installer, "_run", return_value=(0, "", "")), \
                 mock.patch.object(installer, "_install_one", side_effect=install_mock):
             results = installer.install_deps(env, dry_run=False)
 

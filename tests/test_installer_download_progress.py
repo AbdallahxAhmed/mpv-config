@@ -161,6 +161,14 @@ class InlineProgressWidthClampTests(unittest.TestCase):
     speed, then the label) while pct and byte counts always stay.
     """
 
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        import deploy.ui as ui
+        patcher = mock.patch.object(ui, "USE_COLOR", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _render_at(self, budget, total=1000, done=500, label="yt-dlp.exe"):
         """Render the frame under test at a fixed terminal width.
 

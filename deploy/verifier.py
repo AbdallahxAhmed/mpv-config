@@ -310,6 +310,8 @@ def verify(config_dir, env):
         "evafast",
         "pause-when-minimize",
         "smart_motion",
+        "profile_picker",
+        "sub_sanitizer",
     ):
         check_file(name, f"scripts/{name}.lua")
     check_file("sponsorblock.py", "scripts/sponsorblock_shared/sponsorblock.py")

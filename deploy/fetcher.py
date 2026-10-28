@@ -402,4 +402,14 @@ def fetch_all(scripts, shaders, staging_dir):
         ui.error(f"{shaders['name']}: {e}")
         results.append({"name": shaders["name"], "status": "failed", "detail": str(e)})
 
+    # Post-fetch patch: autosubsync stderr capture and error diagnostics
+    auto_lua = os.path.join(staging_dir, "scripts", "autosubsync", "autosubsync.lua")
+    if os.path.isfile(auto_lua):
+        try:
+            from tools.patch_autosubsync import patch_autosubsync_file
+
+            patch_autosubsync_file(auto_lua)
+        except Exception as e:
+            ui.warn(f"autosubsync post-fetch patch notice: {e}")
+
     return results, lockfile

@@ -117,7 +117,8 @@ def _run_silent(cmd):
     are script paths, so a version-style probe opens a modal "Script file
     not found." dialog that blocks the deployment. Registry drift can
     never reintroduce the popup through this bottleneck."""
-    if cmd and _AUTOHOTKEY_GUI_INTERPRETER.match(os.path.basename(str(cmd[0])) or ""):
+    base = os.path.basename(str(cmd[0]).replace("\\", "/")) if cmd else ""
+    if cmd and _AUTOHOTKEY_GUI_INTERPRETER.match(base or ""):
         return False, ""
     try:
         r = subprocess.run(
