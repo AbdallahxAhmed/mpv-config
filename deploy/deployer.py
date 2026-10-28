@@ -1390,6 +1390,11 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             os.path.join(config_dir, "scripts", "autosubsync", "autosubsync.lua"),
             lambda p: _migrate_autosubsync_patch(p, audit_log=audit_log),
         ),
+        (
+            "migrate-sub-sanitizer-conf",
+            os.path.join(config_dir, "script-opts", "sub_sanitizer.conf"),
+            lambda p: _migrate_sub_sanitizer_conf(p, audit_log=audit_log),
+        ),
     )
     results = []
     for migration_name, migration_path, migrate_fn in migration_targets:
@@ -2233,6 +2238,30 @@ def _migrate_anime4k_conf(anime4k_conf_path, audit_log=None):
                 "ok",
                 "seeded anime4k.conf with A+A default",
             )
+        return True
+    return False
+
+
+def _migrate_sub_sanitizer_conf(conf_path, audit_log=None):
+    """Seed script-opts/sub_sanitizer.conf if absent."""
+    if not os.path.exists(conf_path):
+        os.makedirs(os.path.dirname(conf_path), exist_ok=True)
+        content = (
+            "# Subtitle HTML entity and tag sanitizer configuration\n"
+            "enabled=yes\n"
+            "save_next_to_video=no\n"
+            "remove_original=no\n"
+        )
+        with open(conf_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        if audit_log:
+            if hasattr(audit_log, "record_file"):
+                audit_log.record_file(
+                    conf_path,
+                    "create",
+                    "ok",
+                    "seeded sub_sanitizer.conf defaults",
+                )
         return True
     return False
 
