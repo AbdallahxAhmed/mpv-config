@@ -7,6 +7,7 @@ Handles Windows cp1252 gracefully.
 """
 
 import os
+import shutil
 import sys
 import threading
 import time
@@ -215,12 +216,20 @@ class InlineDownloadProgress:
 
     Whole-transfer average speed keeps the readout stable; updates are
     throttled so a hot chunk cadence does not redraw faster than the eye.
+
+    No-wrap contract: the rendered line is clamped to the terminal width
+    (budget = columns - 1) so an 80-column terminal can never auto-wrap the
+    row and let the carriage-return overwrite smear wrapped leftovers down
+    the screen. The shrink ladder keeps the line informative longest: the
+    bar collapses to zero first, then ETA, then speed, then the label —
+    pct and byte counts always stay.
     """
 
     BAR_WIDTH = 24
 
     def __init__(self, label, total=None, stdout=None, clock=time.monotonic,
-                 update_interval=0.1, tick_interval=1.0, theme=None):
+                 update_interval=0.1, tick_interval=1.0, theme=None,
+                 width_fn=None):
         self.label = (label or "download")
         if len(self.label) > 40:
             self.label = self.label[:37] + "..."
@@ -230,6 +239,7 @@ class InlineDownloadProgress:
             self.total = None
         self._stdout = stdout if stdout is not None else sys.stdout
         self._clock = clock
+        self._width_fn = width_fn or self._default_width
         self._interval = max(0.0, update_interval)
         self._tick_interval = max(0.0, tick_interval)
         if theme == "unicode" or (theme is None and USE_UNICODE):
@@ -289,7 +299,13 @@ class InlineDownloadProgress:
 
     def _connect_line(self):
         elapsed = self._clock() - self._started
-        return f"> {self.label}  connecting" + (f" {int(elapsed)}s" if elapsed >= 1 else "")
+        line = f"> {self.label}  connecting" + (f" {int(elapsed)}s" if elapsed >= 1 else "")
+        budget = self._budget()
+        if len(line) > budget:
+            # Narrow terminal: chop the tail (elapsed digits) rather than
+            # let the tick frame wrap and smear like a mid-transfer row.
+            line = line[:budget]
+        return line
 
     def _stop_ticks_and_join(self):
         event = self._stop_ticks
@@ -333,21 +349,56 @@ class InlineDownloadProgress:
         elapsed = now - self._started if self._started is not None else 0.0
         speed = self._done / elapsed if elapsed > 0 else 0.0
         speed_text = f"{_human_bytes(speed)}/s"
+        if self.total and self._done <= self.total and speed > 0:
+            eta = max(0, int((self.total - self._done) / speed))
+            full_extra = f"{speed_text}  ETA {eta}s"
+        else:
+            full_extra = speed_text
+        plain_line, shown_line = self._compose(
+            budget=self._budget(), full_extra=full_extra, speed_text=speed_text
+        )
+        self._write_line(plain_line, shown_line)
 
-        # (plain, decorated) pairs: the plain text drives the overwrite-pad
-        # math so ANSI escape bytes never distort visible-length accounting.
-        # Only the arrow and the bar take color — numbers stay greppable.
+    @staticmethod
+    def _default_width():
+        try:
+            return shutil.get_terminal_size((80, 20)).columns
+        except Exception:
+            return 80
+
+    def _budget(self):
+        """Visible columns one render row may occupy (one short of wrap).
+
+        Floor of one column: a zero/negative report still renders a stub
+        rather than an empty line.
+        """
+        try:
+            columns = int(self._width_fn())
+        except Exception:
+            columns = 80
+        return max(1, columns - 1)
+
+    def _pairs(self, bar_width, extra_text, label=None):
+        """(plain, decorated) pairs for one render state.
+
+        The plain text drives the overwrite-pad math so ANSI escape bytes
+        never distort visible-length accounting. Only the arrow and the bar
+        take color — numbers stay greppable. ``extra_text`` carries the
+        speed readout (with or without ETA) so the width ladder can drop
+        pieces without rebuilding the structure.
+        """
+        label = self.label if label is None else label
         cyan, dim, reset = _C.CYAN, _C.DIM, _C.RESET
         if USE_COLOR:
             pairs = [(f"> ", f"{cyan}>{reset} ")]
         else:
             pairs = [("> ", None)]
-        pairs.append((self.label, None))
+        pairs.append((label, None))
 
         if self.total and self._done <= self.total:
             pct = min(100, int(self._done * 100 / self.total))
-            filled = int(self.BAR_WIDTH * self._done / self.total)
-            rest = self.BAR_WIDTH - filled
+            filled = int(bar_width * self._done / self.total)
+            rest = bar_width - filled
             bar_plain = self._bar_full * filled + self._bar_empty * rest
             if USE_COLOR:
                 bar_rich = (
@@ -361,18 +412,47 @@ class InlineDownloadProgress:
             pairs.append(
                 (f"  {_human_bytes(self._done)}/{_human_bytes(self.total)}", None)
             )
-            if speed > 0:
-                eta = max(0, int((self.total - self._done) / speed))
-                pairs.append((f"  {speed_text}  ETA {eta}s", None))
-            else:
-                pairs.append((f"  {speed_text}", None))
+            if extra_text:
+                pairs.append(("  " + extra_text, None))
         else:
             pairs.append((f"  {_human_bytes(self._done)}", None))
-            pairs.append((f"  {speed_text}", None))
+            if extra_text:
+                pairs.append(("  " + extra_text, None))
+        return pairs
 
-        plain_line = "".join(p[0] for p in pairs)
-        shown_line = "".join(p[1] if p[1] is not None else p[0] for p in pairs)
-        self._write_line(plain_line, shown_line)
+    def _compose(self, budget, full_extra, speed_text):
+        """Pick the widest render state that fits inside ``budget``.
+
+        Shrink ladder, per the no-wrap contract: the bar collapses to zero
+        first, then ETA is dropped, then speed; the label is cut last and
+        pct + byte counts always stay. Same ladder for the unknown-total
+        shape, where the bar/pct simply never exist.
+        """
+        label = self.label
+        attempts = [(width, full_extra) for width in range(self.BAR_WIDTH, -1, -1)]
+        attempts += [(0, speed_text), (0, "")]
+        plain = ""
+        pairs = []
+        for bar_width, extra in attempts:
+            pairs = self._pairs(bar_width, extra, label)
+            plain = "".join(p[0] for p in pairs)
+            if len(plain) <= budget:
+                break
+        if len(plain) > budget:
+            # Even the bare skeleton overflows: truncate the label so pct
+            # and the byte counts survive, then slice as the absolute
+            # guarantee on absurdly tiny budgets.
+            overflow = len(plain) - budget
+            keep = max(1, len(label) - overflow - 3)
+            if keep < len(label):
+                label = label[:keep] + "..."
+            pairs = self._pairs(0, "", label)
+            plain = "".join(p[0] for p in pairs)
+            if len(plain) > budget:
+                plain = plain[:budget]
+                pairs = [(plain, None)]  # decoration would corrupt the slice
+        shown = "".join(p[1] if p[1] is not None else p[0] for p in pairs)
+        return plain, shown
 
     def _write_line(self, line, shown=None):
         """Overwrite the current console line in place (carriage return)."""
@@ -381,8 +461,15 @@ class InlineDownloadProgress:
         self._rendered = True
         if not self._tty:
             return
+        text = shown if shown is not None else line
         try:
-            self._stdout.write("\r" + (shown if shown is not None else line) + " " * pad)
+            if USE_COLOR:
+                # \x1b[2K erases the whole row: a line that shrank between
+                # renders cannot leave stale characters behind, and no pad
+                # math is needed. The line itself is already width-clamped.
+                self._stdout.write("\r\x1b[2K" + text)
+            else:
+                self._stdout.write("\r" + text + " " * pad)
             self._stdout.flush()
         except Exception:
             # Closed/odd console → stop rendering, keep counting bytes.

@@ -33,14 +33,14 @@ class _TtySink(io.StringIO):
         return True
 
 
-def _progress(total=None, **kwargs):
+def _progress(total=None, label="yt-dlp.exe", **kwargs):
     out = _TtySink()
     clock = _FakeClock()
     # ASCII glyphs by default so assertions are hermetic across terminals;
     # individual tests may override with theme="unicode".
     kwargs.setdefault("theme", "ascii")
     progress = _InlineDownloadProgress(
-        "yt-dlp.exe", total=total, stdout=out, clock=clock, **kwargs
+        label, total=total, stdout=out, clock=clock, **kwargs
     )
     return progress, out, clock
 
@@ -149,6 +149,96 @@ class InlineProgressTests(unittest.TestCase):
         progress.update(500)
         progress.finish()
         self.assertEqual(out.getvalue(), "")
+
+
+class InlineProgressWidthClampTests(unittest.TestCase):
+    """The rendered line must never exceed the terminal width.
+
+    Reported from a real CachyOS install: on an 80-column terminal the full
+    readout exceeded the row, auto-wrapped, and the carriage-return overwrite
+    left a trail of wrapped lines down the screen. The no-wrap contract:
+    budget = columns - 1, shrunk bar-first (bar to zero, then ETA, then
+    speed, then the label) while pct and byte counts always stay.
+    """
+
+    def _render_at(self, budget, total=1000, done=500, label="yt-dlp.exe"):
+        """Render the frame under test at a fixed terminal width.
+
+        A throwaway first update anchors the elapsed clock (speed would
+        otherwise read 0.0 and omit the ETA); the returned text is the
+        last frame only, so ladder assertions see exactly one render.
+        """
+        progress, out, clock = _progress(
+            total=total, label=label, width_fn=lambda: budget
+        )
+        clock.advance(0.5)
+        progress.update(0)
+        clock.advance(1.0)
+        progress.update(done)
+        return out.getvalue().split("\r")[-1]
+
+    @staticmethod
+    def _frames(out):
+        return [frame.rstrip("\n") for frame in out.getvalue().split("\r") if frame.strip()]
+
+    def test_full_readout_fits_the_linux_80_column_default(self):
+        self.assertLessEqual(len(self._render_at(80)), 79)
+
+    def test_bar_shrinks_before_eta_is_dropped(self):
+        # full readout at bar 24 is 80 chars; budget 69 shrinks the bar to 13
+        frame = self._render_at(70)
+        self.assertLessEqual(len(frame), 69)
+        self.assertIn("ETA", frame)
+        self.assertLess(frame.count("#"), 12)
+
+    def test_eta_dropped_when_the_bar_is_exhausted(self):
+        # bar-0 skeleton with ETA is 56 chars — still over budget 51, so
+        # ETA goes; the speed readout (48 chars with it) stays.
+        frame = self._render_at(52)
+        self.assertLessEqual(len(frame), 51)
+        self.assertNotIn("ETA", frame)
+        self.assertIn("B/s", frame)
+
+    def test_label_truncated_last_pct_and_bytes_kept(self):
+        frame = self._render_at(40, label="uosc-stable-volume-menu.zip")
+        self.assertLessEqual(len(frame), 39)
+        self.assertNotIn("uosc-stable-volume-menu.zip", frame)
+        self.assertIn("uosc", frame)  # truncated, not vanished
+        self.assertIn("50%", frame)
+        self.assertIn("500.0 B/1000.0 B", frame)
+
+    def test_unknown_total_line_clamped_too(self):
+        frame = self._render_at(50, total=None)
+        self.assertLessEqual(len(frame), 49)
+        self.assertIn("500.0 B", frame)
+
+    def test_ansi_output_is_erased_and_clamped_by_visible_length(self):
+        import re
+        from unittest import mock
+
+        import deploy.ui as ui
+
+        ansi = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+        with mock.patch.object(ui, "USE_COLOR", True):
+            frame = self._render_at(60)
+        visible = len(ansi.sub("", frame))
+        self.assertLessEqual(visible, 59)
+        self.assertIn("\x1b[2K", frame)  # whole-row erase, no pad
+
+    def test_connect_line_never_exceeds_the_budget(self):
+        import time as _time
+
+        progress, out, clock = _progress(
+            total=1000,
+            label="a-quite-long-download-label-exceeding-rows.zip",
+            width_fn=lambda: 30,
+            tick_interval=0.1,
+        )
+        progress.start_connect_ticks()
+        _time.sleep(0.25)
+        self.assertTrue(self._frames(out))
+        self.assertTrue(all(len(frame) <= 29 for frame in self._frames(out)))
+        progress.abort()
 
 
 _BODY = b"x" * 262144  # one full 256 KiB chunk
