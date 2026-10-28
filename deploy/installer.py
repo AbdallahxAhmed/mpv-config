@@ -69,10 +69,23 @@ _TAIL_SHOW = 6         # lines shown after a failed command
 _CMD_ECHO_LIMIT = 120  # command echo truncation width
 
 # Output that matters for interaction (password prompts, confirm prompts)
-# is forwarded immediately even in quiet mode — never swallowed.
-_PROMPT_RE = re.compile(
-    r"\[sudo\]\s*password|\[[ynYN]/[npNP]\]|Overwrite\?|\(y/n\)"
-)
+# is forwarded immediately even in quiet mode — never swallowed. EXCEPT the
+# confirm-class prompts when the command itself auto-answers them: pacman
+# prints ':: Proceed with installation? [Y/n]' under --noconfirm while
+# nobody is reading, and the operator's reflexive 'y' lands in the shell
+# after the installer exits (real CachyOS run, 2026-10-28). Suppressed
+# lines still reach the failure tail.
+_PASSWORD_PROMPT_RE = re.compile(r"\[sudo\]\s*password")
+_CONFIRM_PROMPT_RE = re.compile(r"\[[ynYN]/[npNP]\]|Overwrite\?|\(y/n\)")
+
+# Exact tokens only: '-y' must not match '-y...' style values, and pacman's
+# combined short flags ('-Sy') carry no auto-answer semantics.
+_AUTO_ANSWER_FLAGS = ("--noconfirm", "--yes", "--assumeyes", "-y")
+
+
+def _auto_answered(cmd):
+    """True when the command already answers its own confirm prompts."""
+    return any(flag in cmd[1:] for flag in _AUTO_ANSWER_FLAGS)
 
 # The PPA used to bring the latest stable mpv to Ubuntu/Mint (installer
 # branch in the registry). Direct HTTPS registration below reads its
@@ -124,6 +137,7 @@ def _run(cmd, check=True, env=None, timeout=300):
     captured, and failure reveals a short tail of what went wrong.
     """
     verbose = _verbose()
+    auto = _auto_answered(cmd)
     start = time.monotonic()
     _echo_command(cmd)
     try:
@@ -159,9 +173,12 @@ def _run(cmd, check=True, env=None, timeout=300):
         nonlocal seen_lines
         seen_lines += 1
         tail.append(item)
-        # Interaction-critical prompts are always forwarded; everything
-        # else streams only in verbose mode.
-        if verbose or _PROMPT_RE.search(item):
+        # Password prompts are always forwarded (sudo cannot be
+        # pre-answered); confirm prompts forward only when the command
+        # does not auto-answer them. Everything else streams in verbose.
+        if verbose or _PASSWORD_PROMPT_RE.search(item):
+            print(f"      {item}", flush=True)
+        elif not auto and _CONFIRM_PROMPT_RE.search(item):
             print(f"      {item}", flush=True)
 
     try:
