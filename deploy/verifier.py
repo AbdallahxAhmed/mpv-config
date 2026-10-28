@@ -325,10 +325,8 @@ def verify(config_dir, env):
     if env.os == "linux":
         xdg_data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
         font_dir = os.path.join(xdg_data, "fonts", "mpv-uosc")
-        if os.path.isdir(font_dir) and any(os.scandir(font_dir)):
-            ui.ok("fontconfig uosc fonts (~/.local/share/fonts/mpv-uosc)")
-        else:
-            ui.warn("uosc fonts not synced to ~/.local/share/fonts/mpv-uosc")
+        has_fonts = os.path.isdir(font_dir) and any(os.scandir(font_dir))
+        check("uosc fontconfig cache", has_fonts, "~/.local/share/fonts/mpv-uosc")
 
     ui.step("Checking script-opts...")
     for name in ("uosc", "SmartSkip", "autosubsync", "evafast", "memo", "ytdl_hook", "thumbfast"):
