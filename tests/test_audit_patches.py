@@ -254,7 +254,7 @@ class TestAuditPatches(unittest.TestCase):
             content = f.read()
 
         self.assertIn(
-            "profile-cond              = (p.path or \"\"):lower():match('anime') ~= nil or (p.path or \"\"):lower():match('cartoon') ~= nil",
+            "profile-cond              = (p.path or \"\"):lower():match('anime') ~= nil or (p.path or \"\"):lower():match('donghua') ~= nil or (p.path or \"\"):lower():match('cartoon') ~= nil",
             content,
         )
         self.assertIn(

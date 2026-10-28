@@ -231,7 +231,7 @@ profile-restore           = copy
 # protocol, not folder name, so streamed anime still needs CTRL+1..6 manually.
 [protocol.file]
 profile-desc              = "Auto-pick anime by path"
-profile-cond              = (p.path or ""):lower():match('anime') ~= nil or (p.path or ""):lower():match('cartoon') ~= nil
+profile-cond              = (p.path or ""):lower():match('anime') ~= nil or (p.path or ""):lower():match('donghua') ~= nil or (p.path or ""):lower():match('cartoon') ~= nil
 profile                   = anime
 
 [default]

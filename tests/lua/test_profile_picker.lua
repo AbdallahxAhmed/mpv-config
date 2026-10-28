@@ -86,10 +86,28 @@ test('a Japanese live-action film is not anime', function()
     eq(false, v.anime)
 end)
 
-test('a live-action film in a folder named Anime is not anime', function()
+-- 2026-10-28 CachyOS report: files under /mnt/Data/Entertainment/Anime/
+-- scored only +1 for the folder (threshold 3) and fell through to
+-- live-action, overriding mpv's own [protocol.file] anime profile. The
+-- directory names the medium, so the folder signal now decides on its own.
+test('a film in a folder named Anime is anime (folder decides)', function()
     local _, pp = load_script()
     local v = pp.classify('D:\\Anime\\Some Hollywood Movie 2019 [1080p].mkv', ENG)
-    eq(false, v.anime)
+    eq(true, v.anime)
+end)
+
+test('a donghua episode is detected by its folder alone', function()
+    local _, pp = load_script()
+    local v = pp.classify(
+        '/mnt/Data/Entertainment/Donghua/Thousand Autumns - 05 [1080p].mkv', ENG)
+    eq(true, v.anime)
+end)
+
+test('the folder signal survives a strict threshold', function()
+    local _, pp = load_script()
+    local v = pp.classify('/mnt/Data/Entertainment/Anime Series/Show - 01.mkv',
+        ENG, { groups = {}, series = {}, threshold = 5 })
+    eq(true, v.anime)
 end)
 
 test('a Hollywood movie with a MultiSub tag is not anime', function()
@@ -195,10 +213,12 @@ test('the Anime4K mode is applied with the anime profile', function()
     h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
     h.props['track-list'] = JPN
     h.events['file-loaded']()
-    local shaders = h.props['glsl-shaders']
-    assert(shaders:find('Anime4K_Restore_CNN_VL', 1, true), tostring(shaders))
-    assert(shaders:find('Anime4K_Restore_CNN_M', 1, true), tostring(shaders))
-    assert(shaders:find('~~/shaders/', 1, true), tostring(shaders))
+    local chain = h.props['glsl-shaders']
+    eq('table', type(chain))
+    local joined = table.concat(chain, '\1')
+    assert(joined:find('Anime4K_Restore_CNN_VL', 1, true), joined)
+    assert(joined:find('Anime4K_Restore_CNN_M', 1, true), joined)
+    assert(joined:find('~~/shaders/', 1, true), joined)
 end)
 
 test('a manual chain change is recognised and persisted', function()
@@ -297,6 +317,80 @@ test('mode_file_path resolves correctly on Windows via expand-path', function()
     local h, pp = load_script()
     h.expanded_paths['~~/script-opts/anime4k.conf'] = 'C:/Users/User/AppData/Roaming/mpv/script-opts/anime4k.conf'
     eq('C:/Users/User/AppData/Roaming/mpv/script-opts/anime4k.conf', pp.mode_file_path())
+end)
+
+test('chain_for returns the shader list as a table', function()
+    local _, pp = load_script()
+    local chain = pp.chain_for('A')
+    eq('table', type(chain))
+    eq(6, #chain)
+    eq('~~/shaders/Anime4K_Clamp_Highlights.glsl', chain[1])
+    eq('table', type(pp.chain_for('off')))
+    eq(0, #pp.chain_for('off'))
+    eq(nil, pp.chain_for('nonsense'))
+end)
+
+test('a manual colon-joined chain change is recognised (POSIX serialization)', function()
+    local h, pp = load_script()
+    h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
+    h.props['track-list'] = JPN
+    h.events['file-loaded']()
+    eq('A+A', pp.state.mode)
+    -- the same Ctrl+2 chain, serialized the way mpv lists render on Linux
+    h.observers['glsl-shaders']('glsl-shaders',
+        '~~/shaders/Anime4K_Clamp_Highlights.glsl:'
+        .. '~~/shaders/Anime4K_Restore_CNN_Soft_VL.glsl:'
+        .. '~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl:'
+        .. '~~/shaders/Anime4K_AutoDownscalePre_x2.glsl:'
+        .. '~~/shaders/Anime4K_AutoDownscalePre_x4.glsl:'
+        .. '~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl')
+    eq('B', pp.state.mode)
+end)
+
+test('the profile own colon-joined chain is not mistaken for a user choice', function()
+    local h, pp = load_script()
+    h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
+    h.props['track-list'] = JPN
+    h.events['file-loaded']()
+    eq('A+A', pp.state.mode)
+    -- POSIX serialization of the [anime] profile's list, observed right
+    -- after apply-profile: the expect guard must absorb it too
+    h.observers['glsl-shaders']('glsl-shaders',
+        '~~/shaders/Anime4K_Clamp_Highlights.glsl:'
+        .. '~~/shaders/Anime4K_Restore_CNN_VL.glsl:'
+        .. '~~/shaders/Anime4K_Upscale_CNN_x2_VL.glsl:'
+        .. '~~/shaders/Anime4K_Restore_CNN_M.glsl:'
+        .. '~~/shaders/Anime4K_AutoDownscalePre_x2.glsl:'
+        .. '~~/shaders/Anime4K_AutoDownscalePre_x4.glsl:'
+        .. '~~/shaders/Anime4K_Upscale_CNN_x2_M.glsl')
+    eq('A+A', pp.state.mode)
+end)
+
+test('set_mode on a live-action file flips the profile and applies natively', function()
+    local h, pp = load_script()
+    h.props['path'] = 'D:\\Films\\Movie 2019 [1080p].mkv'
+    h.props['track-list'] = ENG
+    h.events['file-loaded']()
+    eq('live-action', pp.state.applied)
+    eq(true, pp.set_mode('A'))
+    -- the profile flips so the live-action scaler never stacks on Anime4K
+    local flipped = false
+    for _, cmd in ipairs(h.commands) do
+        if cmd[1] == 'apply-profile' and cmd[2] == 'anime' then flipped = true end
+    end
+    assert(flipped, 'live-action profile was not flipped to anime')
+    local chain = h.props['glsl-shaders']
+    eq('table', type(chain))
+    eq('~~/shaders/Anime4K_Clamp_Highlights.glsl', chain[1])
+    eq('A', pp.state.mode)
+end)
+
+test('set_mode off clears the shader list', function()
+    local h, pp = load_script()
+    eq(true, pp.set_mode('off'))
+    local chain = h.props['glsl-shaders']
+    eq('table', type(chain))
+    eq(0, #chain)
 end)
 
 print('Profile picker tests passed: ' .. total)

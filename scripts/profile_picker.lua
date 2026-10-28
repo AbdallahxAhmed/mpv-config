@@ -14,7 +14,7 @@
 --   jpn     - a Japanese audio track (anime keeps the original track)
 --   ep      - an episode marker in the title ("- 05", "E05", "S01E02")
 --   multi   - a multi-language release tag (MultiSub / Multi Audio)
---   folder  - a path SEGMENT named anime/cartoon (tie breaker only)
+--   folder  - a path SEGMENT starting with anime/donghua/cartoon (decisive)
 --
 -- The jpn signal never decides on its own: Japanese live action has Japanese
 -- tracks too. It needs an episode marker or a multi-language tag as well.
@@ -239,6 +239,22 @@ end
 
 -- Pure function: given a path and the audio track list, decide anime or not.
 -- Returns the verdict, the score and the reasons (for the log and the tests).
+-- A directory that names the medium decides on its own. The library lives
+-- under /Anime/ (donghua under /Donghua/), mpv's own [protocol.file]
+-- profile-cond already reads the same folders, and the picker must AGREE
+-- with it — not outvote it (2026-10-28 CachyOS report: donghua episodes
+-- and plain /Anime/ paths fell through to live-action).
+local FOLDER_SIGNALS = { "anime", "donghua", "cartoon" }
+
+local function folder_signal(segments)
+    for _, seg in ipairs(segments) do
+        for _, signal in ipairs(FOLDER_SIGNALS) do
+            if seg:sub(1, #signal) == signal then return seg end
+        end
+    end
+    return nil
+end
+
 local function classify(path, tracks, cfg)
     cfg = cfg or {}
     local groups = cfg.groups or split_list(o.groups)
@@ -287,12 +303,11 @@ local function classify(path, tracks, cfg)
         if multi then score = score + 1 end
     end
 
-    for _, seg in ipairs(segments) do
-        if seg == "anime" or seg == "cartoon" then
-            score = score + 1
-            reasons[#reasons + 1] = "folder:" .. seg
-            break
-        end
+    local folder = folder_signal(segments)
+    if folder then
+        -- decisive: a folder hit alone clears the threshold
+        score = score + threshold
+        reasons[#reasons + 1] = "folder:" .. folder
     end
 
     return { anime = score >= threshold, score = score, reasons = reasons }
@@ -303,12 +318,23 @@ end
 local function chain_for(mode)
     local chain = CHAINS[mode]
     if chain == nil then return nil end
-    if chain == "" then return "" end
     local out = {}
-    for shader in (chain .. ";"):gmatch("([^;]*);") do
-        if shader ~= "" then out[#out + 1] = "~~/shaders/" .. shader .. ".glsl" end
+    if chain ~= "" then
+        for shader in (chain .. ";"):gmatch("([^;]*);") do
+            if shader ~= "" then out[#out + 1] = "~~/shaders/" .. shader .. ".glsl" end
+        end
     end
-    return table.concat(out, ";")
+    return out
+end
+
+-- mpv serializes a glsl-shaders LIST with ';' on Windows and ':' on POSIX,
+-- so a string chain built with one separator parses as ONE bogus file on
+-- the other OS. Setting the list natively avoids separators entirely, and
+-- comparing on the split parts makes expect/mode detection OS-agnostic.
+local function chain_key(value)
+    if type(value) == "table" then return table.concat(value, "\1") end
+    if type(value) ~= "string" then return nil end
+    return (value:gsub("%s", ""):gsub("[;:]", "\1"))
 end
 
 local function mode_file_path()
@@ -364,11 +390,10 @@ local function write_mode(mode)
 end
 
 local function mode_of_chain(chain)
-    if type(chain) ~= "string" then return nil end
-    local normalized = chain:gsub("%s", "")
-    for mode, defined in pairs(CHAINS) do
-        local candidate = chain_for(mode) or ""
-        if candidate:gsub("%s", "") == normalized then return mode end
+    local key = chain_key(chain)
+    if key == nil then return nil end
+    for mode in pairs(CHAINS) do
+        if chain_key(chain_for(mode)) == key then return mode end
     end
     return nil
 end
@@ -377,8 +402,8 @@ local function apply_mode(mode, announce)
     local chain = chain_for(mode)
     if chain == nil then return false end
     state.mode = mode
-    state.expect[chain] = true
-    mp.set_property("glsl-shaders", chain)
+    state.expect[chain_key(chain)] = true
+    mp.set_property_native("glsl-shaders", chain)
     if announce then
         mp.osd_message("Anime4K: " .. mode .. " - " .. (MODE_LABELS[mode] or mode) .. " (Saved as Default)", 2.5)
     end
@@ -395,8 +420,9 @@ local function apply_profile(anime)
     -- apply-profile sets the profile's own chain synchronously; remember it
     -- so the observer below does not mistake it for a user choice.
     local profile_chain = mp.get_property_native("glsl-shaders")
-    if type(profile_chain) == "string" and profile_chain ~= "" then
-        state.expect[profile_chain] = true
+    local profile_key = chain_key(profile_chain)
+    if profile_key then
+        state.expect[profile_key] = true
     end
     -- the profile may carry its own chain; the user's mode wins
     if anime then
@@ -438,6 +464,7 @@ M.has_jpn_audio = has_jpn_audio
 M.split_list = split_list
 M.state = state
 M.CHAINS = CHAINS
+M.chain_for = chain_for
 M.mode_file_path = mode_file_path
 
 function M.set_mode(mode)
@@ -445,7 +472,19 @@ function M.set_mode(mode)
         mp.osd_message("Unknown Anime4K mode: " .. tostring(mode), 3)
         return false
     end
-    apply_mode(mode, true)
+    state.mode = mode
+    -- Manual chains always land on a playing video (2026-10-28 report:
+    -- Ctrl+1..6 on a live-action-classified file changed nothing). The
+    -- profile flips too so the live-action scaler (ewa_lanczos) never
+    -- stacks on Anime4K — that combo is the documented frame-drop source.
+    -- Detection still governs the NEXT file; Ctrl+Shift+t remains the pin.
+    if state.applied == "live-action" then
+        apply_profile(true)
+        mp.osd_message(
+            "Anime4K: " .. mode .. " - " .. (MODE_LABELS[mode] or mode) .. " (Saved as Default)", 2.5)
+    else
+        apply_mode(mode, true)
+    end
     write_mode(mode)
     return true
 end
@@ -480,8 +519,9 @@ end
 -- and an empty base value would look like user choices.
 local function on_shaders_changed(_, value)
     if type(value) ~= "string" or value == "" then return end
-    if state.expect[value] then
-        state.expect[value] = nil
+    local key = chain_key(value)
+    if state.expect[key] then
+        state.expect[key] = nil
         return
     end
     local mode = mode_of_chain(value)
