@@ -171,6 +171,24 @@ Ctrl+Shift+V     script-binding smart_paste/paste-to-playlist
 #                                   نهاية الإعدادات                                   #
 #######################################################################################
 
+# ── Standard mpv shortcuts (explicit for Arabic layout twin generation) ──
+f        cycle fullscreen
+m        cycle mute
+p        cycle pause
+i        script-binding stats/display-stats
+I        script-binding stats/display-stats-toggle
+o        show-progress
+O        no-osd cycle-values osd-level 3 1
+v        cycle sub-visibility
+j        cycle sub
+J        cycle sub down
+z        add sub-delay -0.1
+x        add sub-delay +0.1
+[        multiply speed 1/1.1
+]        multiply speed 1.1
+s        screenshot
+S        screenshot video
+
 # ─── Script Keybindings (conflict-free) ──────────────────────────
 
 # Subtitles menu (uosc) — c = Subtitles
@@ -222,14 +240,11 @@ Ctrl+Shift+b   script-binding sub_backdrop/toggle
 Ctrl+Shift+u   script-binding sponsorblock_upvote
 
 # Under Arabic, SHIFT+<letter> (no Ctrl!) delivers the shift-layer Arabic
-# character - and those are distinct for our five keys. These lines give
-# h m s b u a BARE-ish route (just hold Shift) in the Arabic layout; in
-# the English layout the same presses produce plain uppercase letters, so
-# nothing changes there. (Shift+G delivers the same أ as Shift+H - the
-# mark action lives on Shift+M / Ctrl+Shift+M.)
+# character. These lines give h m b u a bare-ish shift route in the Windows
+# Arabic layout; on Linux XKB (and with AHK on Windows) all bare keys (h, g, b)
+# and shifted keys (G -> ﻷ, B -> ﻵ, S -> ٍ for screenshot video) have direct twins.
 أ   script-binding memo-history
 ’   script-binding sponsorblock_set_segment
-ٍ   script-binding sponsorblock_submit_segment
 آ   script-binding sub_backdrop/toggle
 ‘   script-binding sponsorblock_upvote
 

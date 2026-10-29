@@ -59,6 +59,8 @@ def _pid_alive_posix(pid):
     an mpv-config run, the pid has been RECYCLED and our holder is gone —
     treat the lock as stale.
     """
+    if pid == os.getpid():
+        return True
     if os.path.isdir("/proc"):
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as stream:

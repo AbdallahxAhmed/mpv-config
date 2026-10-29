@@ -143,7 +143,7 @@ class TestInputConfConflictAudit(unittest.TestCase):
         twins = sorted(k for k in active if any(ord(c) > 0x590 for c in k))
         self.assertEqual(
             twins,
-            sorted(["أ", "’", "ٍ", "آ", "‘"]),
+            sorted(["أ", "’", "آ", "‘"]),
             "only the documented bare shift-layer keys belong in the template")
 
     def test_modified_arabic_combos_are_not_declared(self):

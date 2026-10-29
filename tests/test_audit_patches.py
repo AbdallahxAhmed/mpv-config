@@ -684,6 +684,41 @@ class TestAuditPatches(unittest.TestCase):
                 f.write("gpu-api                  = vulkan\n")
             self.assertFalse(_migrate_mpv_conf(conf_path, env=healthy))
 
+    def test_migrate_mpv_conf_migrates_hwdec_to_nvdec_on_linux_nvidia(self):
+        """Linux + Nvidia with CUDA migrates generic hwdec (auto-safe/auto) to nvdec."""
+        from deploy.deployer import _migrate_mpv_conf
+
+        env_nvdec = Environment(
+            os="linux",
+            platform_key="arch",
+            gpu_vendor="nvidia",
+            has_libcuda=True,
+            gpu_hybrid=False,
+        )
+        env_no_cuda = Environment(
+            os="linux",
+            platform_key="arch",
+            gpu_vendor="nvidia",
+            has_libcuda=False,
+            gpu_hybrid=False,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "mpv.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write("hwdec                     = auto-safe\n")
+
+            # Without CUDA, no migration to nvdec
+            self.assertFalse(_migrate_mpv_conf(conf_path, env=env_no_cuda))
+
+            # With CUDA, auto-safe migrates to nvdec
+            self.assertTrue(_migrate_mpv_conf(conf_path, env=env_nvdec))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("hwdec                     = nvdec", content)
+
+            # Second run is a no-op
+            self.assertFalse(_migrate_mpv_conf(conf_path, env=env_nvdec))
+
     def test_migrate_mpv_conf_forces_borderless_for_uosc_chrome(self):
         """Deployer-owned border rule: a deployed border=yes predating the
         borderless policy keeps WM decorations forever (deploy() preserves
@@ -955,17 +990,20 @@ class TestAuditPatches(unittest.TestCase):
             os="linux", platform_key="arch", gpu_vendor="nvidia", has_libcuda=False
         )
 
-        # Pure NVIDIA + CUDA → nvidia-grade in-VRAM decode on both profiles.
+        # Pure NVIDIA + CUDA → nvidia-grade in-VRAM decode on all profiles.
         self.assertEqual(hwdec_for(pure, "native"), "nvdec")
         self.assertEqual(hwdec_for(pure, "windows-like"), "nvdec")
+        self.assertEqual(hwdec_for(pure, "linux-like"), "nvdec")
 
         # Optimus laptop → decode on the iGPU it renders on (no cross-PCIe copy).
         self.assertEqual(hwdec_for(optimus, "native"), "auto-safe")
         self.assertEqual(hwdec_for(optimus, "windows-like"), "auto-safe")
+        self.assertEqual(hwdec_for(optimus, "linux-like"), "auto-safe")
 
         # CUDA runtime missing → never write a decoder that cannot initialize.
         self.assertEqual(hwdec_for(pure_nocuda, "native"), "auto-safe")
         self.assertEqual(hwdec_for(pure_nocuda, "windows-like"), "auto-safe")
+        self.assertEqual(hwdec_for(pure_nocuda, "linux-like"), "auto-safe")
 
     def test_parse_mpv_version(self):
         """Distro and dev-build version strings both parse."""
@@ -2048,7 +2086,7 @@ class TestAuditPatches(unittest.TestCase):
         non_latin = sorted(k for k in active_keys if any(ord(c) > 0x590 for c in k))
         self.assertEqual(
             non_latin,
-            sorted(["أ", "’", "ٍ", "آ", "‘"]),
+            sorted(["أ", "’", "آ", "‘"]),
             "only the documented bare shift-layer keys belong in the template",
         )
 
@@ -2114,15 +2152,32 @@ class TestAuditPatches(unittest.TestCase):
             # the Latin originals survive
             self.assertIn("c script-binding uosc/subtitles", new_content)
             self.assertIn("h script-binding memo-history", new_content)
-            # no lam-alef glyph is ever bound, and no presentation forms
-            self.assertNotRegex(new_content, r"(?m)^ا\s+script-binding")
-            self.assertNotRegex(new_content, r"(?m)^ل\s+script-binding")
-            self.assertNotRegex(new_content, r"(?m)^إ\s+script-binding")
-            self.assertNotIn("ﻻ", new_content)
+            # physical key twins for h (ا) are generated
+            self.assertRegex(new_content, r"(?m)^ا\s+script-binding memo-history$")
             # ...the aliased keys get layout-independent backups
             self.assertRegex(new_content, r"(?m)^Ctrl\+Shift\+h\s+script-binding memo-history$")
             # and the old mnemonic twins (other physical keys) stay gone
             self.assertNotRegex(new_content, r"(?m)^ح\s+script-binding")
+
+    def test_migrate_input_conf_cleans_legacy_sponsorblock_submit_route(self):
+        """Legacy ٍ script-binding sponsorblock_submit_segment is pruned so S twins to ٍ."""
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            old_content = (
+                "S screenshot video\n"
+                "ٍ script-binding sponsorblock_submit_segment\n"
+            )
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(old_content)
+
+            self.assertTrue(_migrate_input_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                new_content = f.read()
+
+            self.assertNotRegex(new_content, r"(?m)^ٍ\s+script-binding sponsorblock_submit_segment$")
+            self.assertRegex(new_content, r"(?m)^ٍ\s+screenshot video$")
             self.assertNotRegex(new_content, r"(?m)^ت\s+script-binding")
             self.assertNotIn("Ctrl+ر", new_content)
 

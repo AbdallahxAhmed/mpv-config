@@ -20,24 +20,37 @@ _spec.loader.exec_module(layout_twins)
 
 class TwinLookupTests(unittest.TestCase):
     def test_known_letter_twins(self):
-        """The bindings the shipped config relies on (probed on the target
-        machine's Arabic 101 layout)."""
+        """The bindings the shipped config relies on (probed on Arabic 101 & XKB ara)."""
         self.assertEqual(layout_twins._twin_for("c"), ("ؤ", ""))
         self.assertEqual(layout_twins._twin_for("a"), ("ش", ""))
         self.assertEqual(layout_twins._twin_for("n"), ("ى", ""))
         self.assertEqual(layout_twins._twin_for("?"), ("؟", ""))
+        # Standard mpv keys
+        self.assertEqual(layout_twins._twin_for("f"), ("ب", ""))
+        self.assertEqual(layout_twins._twin_for("m"), ("ة", ""))
+        self.assertEqual(layout_twins._twin_for("p"), ("ح", ""))
+        self.assertEqual(layout_twins._twin_for("i"), ("ه", ""))
+        self.assertEqual(layout_twins._twin_for("I"), ("÷", ""))
+        self.assertEqual(layout_twins._twin_for("o"), ("خ", ""))
+        self.assertEqual(layout_twins._twin_for("O"), ("×", ""))
+        self.assertEqual(layout_twins._twin_for("v"), ("ر", ""))
+        self.assertEqual(layout_twins._twin_for("j"), ("ت", ""))
+        self.assertEqual(layout_twins._twin_for("J"), ("ـ", ""))
+        self.assertEqual(layout_twins._twin_for("z"), ("ئ", ""))
+        self.assertEqual(layout_twins._twin_for("x"), ("ء", ""))
+        self.assertEqual(layout_twins._twin_for("["), ("ج", ""))
+        self.assertEqual(layout_twins._twin_for("]"), ("د", ""))
+        self.assertEqual(layout_twins._twin_for("s"), ("س", ""))
+        self.assertEqual(layout_twins._twin_for("S"), ("ٍ", ""))
 
-    def test_lam_alef_keys_are_refused(self):
-        """h g b G B: the REAL key stream aliases them (user's --input-test
-        capture, 2026-10-25: b delivers ONLY ا, so b and h are the same
-        event to mpv; G/H alias on أ, B/N on آ). No bare twin can exist -
-        the actions carry Ctrl+Shift+ backups instead. NOTE: the `keypress`
-        command DOES deliver both characters, so this cannot be observed
-        from headless tests - only from the real Windows stream."""
-        for key in ("h", "g", "b", "G", "B"):
-            twin, reason = layout_twins._twin_for(key)
-            self.assertIsNone(twin, key)
-            self.assertIn("lam-alef", reason)
+    def test_hardware_parity_twins(self):
+        """h, g, b, G, B: on Linux XKB (and with AHK on Windows), each has a distinct
+        single-character twin (h->ا, g->ل, b->ﻻ, B->ﻵ, G->ﻷ)."""
+        self.assertEqual(layout_twins._twin_for("h"), ("ا", ""))
+        self.assertEqual(layout_twins._twin_for("g"), ("ل", ""))
+        self.assertEqual(layout_twins._twin_for("b"), ("ﻻ", ""))
+        self.assertEqual(layout_twins._twin_for("B"), ("ﻵ", ""))
+        self.assertEqual(layout_twins._twin_for("G"), ("ﻷ", ""))
 
     def test_modified_combo_twins(self):
         """Ctrl+Shift+<letter> under Arabic arrives as Ctrl+<the shift-layer
@@ -47,8 +60,10 @@ class TwinLookupTests(unittest.TestCase):
         self.assertEqual(layout_twins._twin_for("Ctrl+Shift+H"), ("Ctrl+أ", ""))
         self.assertEqual(layout_twins._twin_for("Ctrl+Shift+m"), ("Ctrl+’", ""))
         self.assertEqual(layout_twins._twin_for("Ctrl+Shift+s"), ("Ctrl+ٍ", ""))
-        # lam-alef pair: only the LAST character arrives -> Ctrl+آ
-        self.assertEqual(layout_twins._twin_for("Ctrl+Shift+b"), ("Ctrl+آ", ""))
+        # Ctrl+Shift+b emits both Windows (Ctrl+آ) and Linux XKB (Ctrl+ﻵ)
+        twins, _ = layout_twins._twins_for("Ctrl+Shift+b")
+        self.assertIn("Ctrl+آ", twins)
+        self.assertIn("Ctrl+ﻵ", twins)
         self.assertEqual(layout_twins._twin_for("Ctrl+Shift+u"), ("Ctrl+‘", ""))
 
     def test_modified_twins_refuse_ascii(self):
@@ -92,17 +107,6 @@ class TwinLookupTests(unittest.TestCase):
                     self.assertIsNone(emitted, key)
                     self.assertIn("US", reason)
 
-    def test_refused_singles_are_never_emitted(self):
-        """The lam-alef glyphs ل ا أ إ آ must never be bound: the real key
-        stream delivers ا alone for BOTH b and h (aliasing), so any such
-        binding misfires on the other physical key."""
-        for table in (layout_twins.ARABIC_PLAIN, layout_twins.ARABIC_SHIFT):
-            for key, twin in table.items():
-                if len(twin) == 1 and twin in layout_twins.LAM_ALEF_REFUSED:
-                    emitted, _reason = layout_twins._twin_for(key)
-                    self.assertIsNone(emitted, key)
-
-
 class GenerateTests(unittest.TestCase):
     MINI = """# comment line
 c    script-binding uosc/subtitles
@@ -118,12 +122,11 @@ F9   ignored
         self.assertIn("ؤ script-binding uosc/subtitles", text)
         self.assertIn("# twin of c", text)
         self.assertIn("c    script-binding uosc/subtitles", text)
-        # the lam-alef keys h/g/b are refused on the real key stream
-        self.assertNotRegex(text, r"(?m)^ا\s+script-binding")
-        self.assertNotIn("ل-ا", text)
-        reported = dict(report)
-        for key in ("h", "g", "b"):
-            self.assertIn("lam-alef", reported[key])
+        # On Linux XKB (and with AHK on Windows), h/g/b have direct twins:
+        self.assertIn("ا script-binding memo-history", text)
+        self.assertIn("ل script-binding sponsorblock_set_segment", text)
+        self.assertIn("ﻻ script-binding sub_backdrop/toggle", text)
+        self.assertEqual(report, [])
         self.assertTrue(text.endswith("\n"))
 
     def test_idempotent(self):
@@ -149,11 +152,8 @@ F9   ignored
         self.assertIn("ؤ script-binding user/own", text)
 
     def test_shipped_template_gets_the_expected_twins(self):
-        """Pin the actual deployed bindings: the safe single-key twins, the
-        Arabic question mark, and the modified-combo twins (Ctrl+Shift+X
-        arrives as Ctrl+<Arabic char> under Arabic); h/g/b/B/G bare are
-        reported as impossible (real-stream aliasing). The template's own
-        bare shift-layer lines (أ آ ’ ‘ ٍ) are skipped by the generator."""
+        """Pin the actual deployed bindings: standard mpv keys, scripts,
+        and modified-combo twins across Windows 101 and Linux XKB ara."""
         path = os.path.join(REPO, "config", "input.conf.template")
         with open(path, "r", encoding="utf-8") as handle:
             base_text = handle.read()
@@ -167,7 +167,29 @@ F9   ignored
             ("Ctrl+’", "script-binding sponsorblock_set_segment"),
             ("Ctrl+ٍ", "script-binding sponsorblock_submit_segment"),
             ("Ctrl+آ", "script-binding sub_backdrop/toggle"),
+            ("Ctrl+ﻵ", "script-binding sub_backdrop/toggle"),
             ("Ctrl+‘", "script-binding sponsorblock_upvote"),
+            ("ا", "script-binding memo-history"),
+            ("ل", "script-binding sponsorblock_set_segment"),
+            ("ﻷ", "script-binding sponsorblock_submit_segment"),
+            ("ﻻ", "script-binding sub_backdrop/toggle"),
+            ("ﻵ", "script-binding sponsorblock_upvote"),
+            ("ب", "cycle fullscreen"),
+            ("ة", "cycle mute"),
+            ("ح", "cycle pause"),
+            ("ه", "script-binding stats/display-stats"),
+            ("÷", "script-binding stats/display-stats-toggle"),
+            ("خ", "show-progress"),
+            ("×", "no-osd cycle-values osd-level 3 1"),
+            ("ر", "cycle sub-visibility"),
+            ("ت", "cycle sub"),
+            ("ـ", "cycle sub down"),
+            ("ئ", "add sub-delay -0.1"),
+            ("ء", "add sub-delay +0.1"),
+            ("ج", "multiply speed 1/1.1"),
+            ("د", "multiply speed 1.1"),
+            ("س", "screenshot"),
+            ("ٍ", "screenshot video"),
         ]:
             self.assertIn("%s %s" % (twin, command), text)
         # the template's own bare shift-layer route is present and survives
@@ -175,7 +197,6 @@ F9   ignored
         for glyph, command in [
             ("أ", "script-binding memo-history"),
             ("’", "script-binding sponsorblock_set_segment"),
-            ("ٍ", "script-binding sponsorblock_submit_segment"),
             ("آ", "script-binding sub_backdrop/toggle"),
             ("‘", "script-binding sponsorblock_upvote"),
         ]:
@@ -184,19 +205,10 @@ F9   ignored
             self.assertEqual(
                 len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)),
                                text, re.MULTILINE)), 1)
-        # the GENERATED block never binds a lam-alef glyph plain
-        block = text[text.index(layout_twins.BEGIN_MARK):]
-        for line in block.splitlines():
-            if line and not line.startswith("#"):
-                self.assertNotIn(line.split(None, 1)[0],
-                                 layout_twins.LAM_ALEF_REFUSED,
-                                 "generated a plain lam-alef twin: %r" % line)
         reported = {key for key, _ in report}
-        # the five bare lam-alef keys, plus the paste-to-playlist combos
-        # whose Arabic half is plain ASCII "{" (refused: US behaviour)
         self.assertEqual(
             reported,
-            {"h", "g", "b", "B", "G", "Ctrl+Shift+v", "Ctrl+Shift+V"})
+            {"Ctrl+Shift+v", "Ctrl+Shift+V"})
 
     def test_block_is_utf8_round_trip(self):
         text, _ = layout_twins.generate(self.MINI)
@@ -281,13 +293,10 @@ class MigrationTests(unittest.TestCase):
             self.assertEqual(
                 len(re.findall(r"^%s[ \t]+%s$" % (re.escape(glyph), re.escape(command)),
                                text, re.MULTILINE)), 1)
-        # the genuinely hazardous glyphs stay unbound: ا (b/h alias) and
-        # the dead ل/إ; أ آ ’ ‘ ٍ are legitimate (Shift+letter route)
-        for line in text.splitlines():
-            if line and not line.startswith("#"):
-                self.assertNotIn(line.split(None, 1)[0],
-                                 ("ا", "ل", "إ"),
-                                 repr(line))
+        # the hardware parity twins for h/g/b are generated
+        self.assertIn("ا script-binding memo-history", text)
+        self.assertIn("ل script-binding sponsorblock_set_segment", text)
+        self.assertIn("ﻻ script-binding sub_backdrop/toggle", text)
         # the Latin bindings survive untouched
         for latin in ("c", "a", "h", "n", "g", "G", "b"):
             self.assertTrue(

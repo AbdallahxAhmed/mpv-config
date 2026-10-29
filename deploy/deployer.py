@@ -554,23 +554,17 @@ def _patch_mpv_conf(
         and getattr(env, "has_libcuda", False)
         and not getattr(env, "gpu_hybrid", False)
     )
-    if selected_profile == "native":
-        if env.os == "windows" and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
-            hwdec = "d3d11va"
-        if env.gpu_vendor == "nvidia" and env.os == "linux":
-            hwdec = "nvdec" if use_dgpu_nvdec else base_hwdec
-        elif env.gpu_vendor == "amd" and env.os == "linux":
-            hwdec = "vaapi"
-        elif env.gpu_vendor == "intel" and env.os == "linux":
-            hwdec = "vaapi"
-    elif selected_profile == "windows-like":
-        if (
-            env.gpu_vendor == "nvidia"
-            and env.os == "linux"
-            and use_dgpu_nvdec
-            and base_hwdec in {"auto", "auto-copy", "auto-safe"}
-        ):
-            hwdec = "nvdec"
+    if env.os == "windows" and selected_profile in {"native", "windows-like"} and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+        hwdec = "d3d11va"
+    elif env.os == "linux":
+        if env.gpu_vendor == "nvidia":
+            if use_dgpu_nvdec and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+                hwdec = "nvdec"
+            elif selected_profile == "native":
+                hwdec = "nvdec" if use_dgpu_nvdec else base_hwdec
+        elif env.gpu_vendor in {"amd", "intel"} and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+            if selected_profile in {"native", "linux-like"}:
+                hwdec = "vaapi"
     replacements["{{HWDEC}}"] = hwdec
     replacements["{{GPU_CONTEXT}}"] = gpu_context
     for placeholder, value in replacements.items():
@@ -1676,6 +1670,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         r"^[ \t]*Ctrl\+ﻻ[ \t]+[^\r\n]*\r?\n?",
         r"^[ \t]*Shift\+ﻻ[ \t]+[^\r\n]*\r?\n?",
         r"^[ \t]*ﻵ[ \t]+[^\r\n]*\r?\n?",
+        r"^[ \t]*ٍ[ \t]+script-binding sponsorblock_submit_segment[^\r\n]*\r?\n?",
     )
     for pattern in legacy_junk:
         updated_content = re.sub(pattern, "", updated_content, flags=re.MULTILINE)
@@ -1753,7 +1748,6 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     shift_route = (
         ("أ", "script-binding memo-history"),
         ("’", "script-binding sponsorblock_set_segment"),
-        ("ٍ", "script-binding sponsorblock_submit_segment"),
         ("آ", "script-binding sub_backdrop/toggle"),
         ("‘", "script-binding sponsorblock_upvote"),
     )
@@ -1982,6 +1976,37 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
             updated_content.rstrip()
             + "\nQ                set window-minimized yes ; quit-watch-later\n"
         )
+
+    # 7c. Ensure standard mpv shortcuts are explicitly present so Arabic twins
+    #     can be generated for them on layouts where bare Latin keys don't pass through.
+    standard_mpv_shortcuts = (
+        ("f", "cycle fullscreen"),
+        ("m", "cycle mute"),
+        ("p", "cycle pause"),
+        ("i", "script-binding stats/display-stats"),
+        ("I", "script-binding stats/display-stats-toggle"),
+        ("o", "show-progress"),
+        ("O", "no-osd cycle-values osd-level 3 1"),
+        ("v", "cycle sub-visibility"),
+        ("j", "cycle sub"),
+        ("J", "cycle sub down"),
+        ("z", "add sub-delay -0.1"),
+        ("x", "add sub-delay +0.1"),
+        ("[", "multiply speed 1/1.1"),
+        ("]", "multiply speed 1.1"),
+        ("s", "screenshot"),
+        ("S", "screenshot video"),
+    )
+    missing_standard = [
+        (k, cmd)
+        for k, cmd in standard_mpv_shortcuts
+        if not re.search(r"^[ \t]*" + re.escape(k) + r"[ \t]+", updated_content, re.MULTILINE)
+    ]
+    if missing_standard:
+        block = "\n# ── Standard mpv shortcuts (explicit for Arabic layout twin generation) ──\n"
+        for k, cmd in missing_standard:
+            block += "%-8s %s\n" % (k, cmd)
+        updated_content = updated_content.rstrip() + "\n" + block
 
     # 8. Regenerate the Arabic layout twins: same physical key, Arabic 101
     #    layout. Runs LAST so the hazard cleanup, legacy removal and the
@@ -2486,6 +2511,23 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         if (n_osd or n_sub) and sub_sub != updated:
             font_fixed = True
             updated = sub_sub
+
+    # Hardware decoding migration on Linux + Nvidia: prioritize nvdec when CUDA runtime is present
+    hwdec_fixed = False
+    if env is not None and getattr(env, "os", None) == "linux" and getattr(env, "gpu_vendor", None) == "nvidia":
+        use_dgpu_nvdec = (
+            getattr(env, "has_libcuda", False)
+            and not getattr(env, "gpu_hybrid", False)
+        )
+        if use_dgpu_nvdec:
+            updated, n_hwdec = re.subn(
+                r"^([ \t]*)hwdec[ \t]*=[ \t]*(?:auto|auto-safe|auto-copy)\b[^\r\n]*$",
+                lambda m: m.group(1) + "hwdec".ljust(26) + "= nvdec",
+                updated,
+                flags=re.MULTILINE,
+            )
+            if n_hwdec:
+                hwdec_fixed = True
     # Ensure osd-fonts-dir and sub-fonts-dir are configured for uosc font resolution
     fonts_dir_fixed = False
     if "osd-border-color" in updated:
@@ -2526,6 +2568,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             detail += f" — border → no ({border_fixed})"
         if font_fixed and preferred_font:
             detail += f" — font → {preferred_font}"
+        if hwdec_fixed:
+            detail += " — hwdec → nvdec"
         if fonts_dir_fixed:
             detail += " — added osd/sub-fonts-dir"
         if removed_format or fixed_format_sort:
