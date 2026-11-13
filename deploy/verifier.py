@@ -144,7 +144,7 @@ def _mpv_optimization_row(env):
 
 def verify(config_dir, env):
     """Verify the explicitly selected configuration, without running its Lua scripts."""
-    ui.header("Verifying Deployment")
+    ui.header("Verifying Deployment", key="verify")
     results = []
     checks_passed = 0
     checks_total = 0

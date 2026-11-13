@@ -40,3 +40,27 @@ jobs:
 
       - name: Run test suite
         run: python -m unittest discover -s tests
+
+  ui:
+    name: Renderer (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.7'
+          cache-dependency-path: ui/go.sum
+
+      - name: Format, vet and test
+        working-directory: ui
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          GOOS=windows go vet ./...
+          go test ./...
+
+      - name: Builds match the pinned hashes in ui/release.json
+        run: python3 ui/build_release.py --check

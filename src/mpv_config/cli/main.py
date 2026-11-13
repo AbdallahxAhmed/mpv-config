@@ -4,14 +4,17 @@ mpv_config CLI entry point.
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import List, Optional, Sequence
 
 from rich.console import Console
 from rich.markup import escape
 
+from mpv_config import renderer
 from mpv_config.downloaders import get_downloader
 
 # Ensure UTF-8 output on Windows console
@@ -139,9 +142,17 @@ def _run_deployer(action: str, extra_args: Sequence[str]) -> int:
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 
     command = [sys.executable, "-m", "deploy.deployer", action, *extra_args]
-    console.print(f"[dim]Using repository: {escape(str(repo_root))}[/dim]")
+    ui_binary = _renderer_for(repo_root, err_console)
+    if ui_binary is not None:
+        # The renderer runs the deployer as ITS child and draws its events.
+        command = [str(ui_binary), "--", *command]
+    else:
+        console.print(f"[dim]Using repository: {escape(str(repo_root))}[/dim]")
     try:
-        completed = subprocess.run(command, cwd=str(repo_root), env=env, shell=False, check=False)
+        with _sigint_left_to_child():
+            completed = subprocess.run(
+                command, cwd=str(repo_root), env=env, shell=False, check=False
+            )
     except KeyboardInterrupt:
         return 130
     except OSError as exc:
@@ -150,6 +161,41 @@ def _run_deployer(action: str, extra_args: Sequence[str]) -> int:
         )
         return 1
     return completed.returncode
+
+
+def _renderer_for(repo_root: Path, err_console: Console) -> Optional[Path]:
+    """The verified mpv-config-ui binary, or None for the built-in output."""
+    if not renderer.wanted():
+        return None
+    explain = os.environ.get("MPV_CONFIG_UI", "").strip().lower() == "fancy"
+
+    def notice(text: str) -> None:
+        if explain:
+            err_console.print(f"[dim]Plain output: {escape(text)}[/dim]")
+
+    return renderer.resolve(repo_root, notice=notice)
+
+
+class _sigint_left_to_child:
+    """While the deployer runs, Ctrl+C belongs to it.
+
+    The terminal delivers SIGINT to this process too. subprocess.run() then
+    re-raised KeyboardInterrupt and KILLED the deployer 0.25 s later — in the
+    middle of the very rollback the interrupt had started. A no-op handler
+    (not SIG_IGN, which children would inherit) keeps waiting instead; the
+    deployer's own exit code (130) reports the cancellation.
+    """
+
+    def __enter__(self):
+        self._previous = None
+        if threading.current_thread() is threading.main_thread():
+            self._previous = signal.signal(signal.SIGINT, lambda signum, frame: None)
+        return self
+
+    def __exit__(self, *exc):
+        if self._previous is not None:
+            signal.signal(signal.SIGINT, self._previous)
+        return False
 
 
 def cmd_install(args: argparse.Namespace) -> int:

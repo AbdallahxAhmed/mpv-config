@@ -1,0 +1,42 @@
+name: Renderer release
+
+# Publishes mpv-config-ui binaries for the version pinned in ui/release.json.
+# Tag with `ui-v<version>` (the "tag" field of ui/release.json) after the
+# pins are merged. Nothing is uploaded unless every reproducible build
+# matches the SHA-256 the reviewed source pins.
+on:
+  push:
+    tags:
+      - 'ui-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.7'
+          cache-dependency-path: ui/go.sum
+
+      - name: Tag matches the pinned version
+        run: |
+          pinned="$(python3 -c 'import json; print(json.load(open("ui/release.json"))["tag"])')"
+          test "$pinned" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != pinned $pinned"; exit 1; }
+
+      - name: Reproducible builds match the pins
+        run: python3 ui/build_release.py --check
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/ui/*.gz \
+            --title "mpv-config-ui ${GITHUB_REF_NAME#ui-v}" \
+            --notes "Renderer binaries for mpv-config. The CLI verifies each against ui/release.json before running it."

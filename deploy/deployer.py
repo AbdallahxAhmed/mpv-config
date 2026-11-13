@@ -1194,6 +1194,7 @@ def deploy(
     """
     if dry_run:
         return [{"name": "deploy", "status": "skipped", "detail": "dry run"}]
+    ui.header("Deploying Configuration", key="deploy")
     config_dir = tx.config_path(env.config_dir)
     tx.assert_disjoint(config_dir, staging_dir, repo_dir)
     tx.validate_staging(staging_dir)
@@ -2792,7 +2793,9 @@ _DEPLOY_DEFAULTS = {
 
 
 def _is_interactive_session():
-    return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
+    # ui.is_interactive() also covers the renderer protocol, where stdin is a
+    # pipe carrying prompt answers rather than a terminal.
+    return ui.is_interactive()
 
 
 def _prompts_enabled(args):
@@ -2839,7 +2842,7 @@ def _resolve_anime_preset(args):
     if chosen:
         return chosen
     if _prompts_enabled(args):
-        ui.header("Anime4K shader mode")
+        ui.header("Anime4K shader mode", key="anime")
         ui.info(
             "The anime profile uses this chain. Heavier modes cost GPU time; "
             "'off' disables the shaders."
@@ -2858,6 +2861,17 @@ def cmd_install(args):
     transactionally and rolls back if the verification callback raises.
     """
     ui.banner()
+    stages = [("detect", "Detect environment"), ("plan", "Review plan")]
+    if not args.dry_run:
+        if not getattr(args, "anime_preset", None) and _prompts_enabled(args):
+            stages.append(("anime", "Anime4K mode"))
+        stages += [
+            ("fetch", "Download scripts & shaders"),
+            ("deps", "Install dependencies"),
+            ("deploy", "Deploy configuration"),
+            ("verify", "Verify"),
+        ]
+    ui.outline(stages)
     env = detect()
     # ONE decision source for the whole session: the plan below and the
     # installer both render/execute these exact actions (plan cannot
@@ -2868,10 +2882,12 @@ def cmd_install(args):
     if args.dry_run:
         ui.info("[DRY RUN] No downloads, installs, audit writes, or replacements.")
         return 0
-    args.anime_preset = _resolve_anime_preset(args)
+    # Confirm first, then ask the one preference: the confirmation belongs
+    # to the plan it answers, and a declined plan never asks anything else.
     if _prompts_enabled(args) and not confirm_plan(plan, "installation"):
         ui.warn("Installation cancelled by user.")
         return 0
+    args.anime_preset = _resolve_anime_preset(args)
 
     config_dir = tx.config_path(env.config_dir)
     tx.assert_disjoint(config_dir, str(REPO_ROOT))
@@ -2963,7 +2979,7 @@ def cmd_install(args):
                 ui.summary(deploy_results + verify_results)
                 audit_log.complete_session("completed")
                 ui.panel(
-                    f"Deployment complete. Config: {config_dir}", title="Success", style="green"
+                    f"Deployment complete.\nConfig: {config_dir}", title="Success", style="green"
                 )
             except BaseException as exc:
                 status = "cancelled" if isinstance(exc, KeyboardInterrupt) else "failed"
@@ -2986,6 +3002,10 @@ def cmd_verify(args):
 def cmd_update(args):
     """Update only assets after complete fetch, keeping a recoverable backup."""
     ui.banner()
+    stages = [("detect", "Detect environment"), ("plan", "Review plan")]
+    if not args.dry_run:
+        stages += [("fetch", "Download scripts & shaders"), ("deploy", "Apply update")]
+    ui.outline(stages)
     env = detect()
     plan = build_update_plan(env)
     display_plan(plan, "Update Plan")
@@ -3003,6 +3023,7 @@ def cmd_update(args):
             fetch_results, lockfile = fetch_all(SCRIPTS, SHADERS, staging)
             ui.summary(fetch_results)
             _require_complete_fetch(fetch_results)
+            ui.header("Applying Update", key="deploy")
             backup = tx.update_assets(config_dir, staging, str(REPO_ROOT), lockfile)
         audit_log = _audit_log_for(env)
         audit_log.start_session("update", env)

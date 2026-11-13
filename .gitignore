@@ -45,3 +45,8 @@ tools/native_host/com.mpv.cookiesync.json
 .env
 .env.*
 !.env.example
+
+# === Renderer build outputs (ui/) ===
+/ui/ui
+/ui/ui.exe
+/ui/mpv-config-ui*

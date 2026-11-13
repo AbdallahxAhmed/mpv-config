@@ -347,6 +347,8 @@ mpv-config install
 
 Preview first with `mpv-config install --dry-run`: nothing is downloaded, installed or replaced.
 
+**Installer display.** In a terminal, progress is drawn by `mpv-config-ui`, a small Go renderer: a stage checklist, live download bars, inline prompts, and a summary card — identical on Linux, macOS and Windows. The CLI downloads it once from this repository's releases and runs it only when its SHA-256 matches `ui/release.json`; otherwise (and with `MPV_CONFIG_UI=plain`, piped output or CI) you get the classic text output. The binary is cached in `~/.local/share/mpv-config/bin` (Windows: `%LOCALAPPDATA%\mpv-config\bin`): run it with `--demo` to preview the design without touching anything, or `--bench` to measure it on your terminal. Every run is logged to `~/.cache/mpv-config/logs` (Windows: `%LOCALAPPDATA%\mpv-config\logs`).
+
 Deploy-time options (forwarded to the deployer; run `python -m deploy.deployer --help` for the full list):
 
 | Option | Choices (default) | Meaning |

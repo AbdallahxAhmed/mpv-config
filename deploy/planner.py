@@ -304,6 +304,14 @@ _CATEGORY_LABELS: Dict[str, str] = {
     "file": "Configuration Files",
 }
 
+# One-word labels for the compact renderer plan.
+_CATEGORY_SHORT: Dict[str, str] = {
+    "package": "Packages",
+    "fetch": "Downloads",
+    "backup": "Backup",
+    "file": "Config",
+}
+
 
 def _short_path(path: str) -> str:
     """Replace the home directory prefix with ``~`` for compact display."""
@@ -318,8 +326,7 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     Print the action plan grouped by category using a Rich table.
     Nothing is executed — this is purely informational output.
     """
-    ui.header(title)
-    ui.info("The following actions will be performed:")
+    ui.header(title, key="plan")
 
     # Collect categories in the order they first appear
     seen_cats: List[str] = []
@@ -334,6 +341,19 @@ def display_plan(plan: List[PlanEntry], title: str = "Planned Actions"):
     ordered = [c for c in cat_order if c in categories] + [
         c for c in seen_cats if c not in cat_order
     ]
+
+    if ui.plan(
+        title,
+        [
+            (
+                _CATEGORY_SHORT.get(cat, cat.title()),
+                [(e.action, _short_path(e.target), e.detail or "") for e in categories[cat]],
+            )
+            for cat in ordered
+        ],
+    ):
+        return
+    ui.info("The following actions will be performed:")
 
     for cat in ordered:
         entries = categories[cat]

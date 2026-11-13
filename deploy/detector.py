@@ -632,7 +632,7 @@ def _check_python_module_import(py, module, run_kwargs):
 
 def detect():
     """Run full environment detection. Returns an Environment object."""
-    ui.header("Detecting Environment")
+    ui.header("Detecting Environment", key="detect")
 
     env = Environment()
     rows = []

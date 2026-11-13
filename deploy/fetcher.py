@@ -96,7 +96,10 @@ def _request(url, binary=False, progress=None):
                         f"GitHub API rate limit exhausted for {url}. Wait for the reset "
                         "or set GITHUB_TOKEN to a personal access token and re-run."
                     ) from e
-                ui.warn(f"Rate limited (attempt {attempt}/{MAX_RETRIES}), waiting {delay}s...")
+                ui.warn(
+                    f"Rate limited (attempt {attempt}/{MAX_RETRIES}), waiting {delay}s...",
+                    transient=True,
+                )
                 time.sleep(delay)
                 delay *= 2
                 continue
@@ -111,7 +114,8 @@ def _request(url, binary=False, progress=None):
         ) as e:
             if attempt < MAX_RETRIES:
                 ui.warn(
-                    f"Network error (attempt {attempt}/{MAX_RETRIES}): {e}, retrying in {delay}s..."
+                    f"Network error (attempt {attempt}/{MAX_RETRIES}): {e}, retrying in {delay}s...",
+                    transient=True,
                 )
                 time.sleep(delay)
                 delay *= 2
@@ -379,7 +383,7 @@ def fetch_all(scripts, shaders, staging_dir):
     results = []
     lockfile = {"fetched_at": datetime.now(timezone.utc).isoformat(), "scripts": {}}
 
-    ui.header("Fetching Scripts & Shaders")
+    ui.header("Fetching Scripts & Shaders", key="fetch")
 
     # Fetch scripts
     for script in scripts:

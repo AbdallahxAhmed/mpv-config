@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "tag": "ui-v1.0.0",
+  "go": "go1.24.7",
+  "assets": {
+    "linux-amd64": {
+      "file": "mpv-config-ui_linux_amd64.gz",
+      "sha256": "761b8be02a92628e6c86029a5aa028b92f74a4d575650bb0718ae9fadedce7d0"
+    },
+    "linux-arm64": {
+      "file": "mpv-config-ui_linux_arm64.gz",
+      "sha256": "61c58f9d15ecf5153b15160d63d428de13d62c4a69e25d388e491691f990e14e"
+    },
+    "windows-amd64": {
+      "file": "mpv-config-ui_windows_amd64.exe.gz",
+      "sha256": "38da71fade6f60ead140818cb9b5b2ca56b8463f05fe4d8d92e0dce7251fd5a5"
+    },
+    "windows-arm64": {
+      "file": "mpv-config-ui_windows_arm64.exe.gz",
+      "sha256": "7f27bbe1975af42f0a595bb617487994eb54ae484d4b0112b65f47f40a64b364"
+    },
+    "darwin-amd64": {
+      "file": "mpv-config-ui_darwin_amd64.gz",
+      "sha256": "7bf9eee133146094b997f19702833e4b3386f2a101d02a8ab78ad6e66f9c88df"
+    },
+    "darwin-arm64": {
+      "file": "mpv-config-ui_darwin_arm64.gz",
+      "sha256": "23b5aee919ee55405cf37be6be7d8e16fed07ad5bf5390d9f66a208f9512964a"
+    }
+  }
+}

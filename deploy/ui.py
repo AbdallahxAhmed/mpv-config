@@ -22,6 +22,11 @@ if sys.platform == "win32":
     except Exception:
         pass  # Fallback: ASCII symbols will be used
 
+# ─── Renderer protocol (Go UI) ───────────────────────────────────────
+# Imported after the UTF-8 reconfigure above so events are always UTF-8.
+
+from deploy import ui_protocol as _proto  # noqa: E402
+
 # ─── Rich Integration ─────────────────────────────────────────────────
 
 try:
@@ -133,6 +138,8 @@ def _print(text="", **kwargs):
 
 
 def banner():
+    if _proto.ACTIVE:
+        return  # the renderer draws its own header
     if _RICH_AVAILABLE:
         art = "[cyan][bold]+======================================================+\n|              MPV Auto-Deploy System v1.0             |\n+======================================================+[/bold][/cyan]"
         _console.print(art)
@@ -142,7 +149,11 @@ def banner():
         )
 
 
-def header(text):
+def header(text, key=None):
+    """Start a named stage. ``key`` matches a stage announced by outline()."""
+    if _proto.ACTIVE:
+        _proto.emit("phase", key=key, title=_proto.plain(text))
+        return
     if _RICH_AVAILABLE:
         _console.print()
         _console.print(Rule(f"[bold blue]{text}[/bold blue]", style="blue"))
@@ -154,6 +165,9 @@ def header(text):
 
 
 def step(text, **kwargs):
+    if _proto.ACTIVE:
+        _proto.emit("log", level="step", text=_proto.plain(text))
+        return
     if _RICH_AVAILABLE:
         _console.print(f"[cyan]>[/cyan] {text}", **kwargs)
     else:
@@ -161,13 +175,20 @@ def step(text, **kwargs):
 
 
 def success(text, **kwargs):
+    if _proto.ACTIVE:
+        _proto.emit("log", level="ok", text=_proto.plain(text))
+        return
     if _RICH_AVAILABLE:
         _console.print(f"[green]✓[/green] {text}", **kwargs)
     else:
         _print(f"  {_C.GREEN}{S.CHECK}{_C.RESET} {text}", **kwargs)
 
 
-def warn(text, **kwargs):
+def warn(text, transient=False, **kwargs):
+    """``transient``: a passing notice (a retry) the renderer shows live only."""
+    if _proto.ACTIVE:
+        _proto.emit("log", level="warn", text=_proto.plain(text), transient=transient or None)
+        return
     if _RICH_AVAILABLE:
         _console.print(f"[yellow]![/yellow] {text}", **kwargs)
     else:
@@ -175,6 +196,9 @@ def warn(text, **kwargs):
 
 
 def error(text, **kwargs):
+    if _proto.ACTIVE:
+        _proto.emit("log", level="error", text=_proto.plain(text))
+        return
     if _RICH_AVAILABLE:
         _console.print(Panel(text, title="Error", border_style="red"), **kwargs)
     else:
@@ -182,6 +206,9 @@ def error(text, **kwargs):
 
 
 def info(text, **kwargs):
+    if _proto.ACTIVE:
+        _proto.emit("log", level="info", text=_proto.plain(text))
+        return
     if _RICH_AVAILABLE:
         _console.print(f"[dim]ℹ[/dim] {text}", **kwargs)
     else:
@@ -189,6 +216,11 @@ def info(text, **kwargs):
 
 
 def item(name, detail="", **kwargs):
+    if _proto.ACTIVE:
+        _proto.emit(
+            "log", level="item", text=_proto.plain(name), detail=_proto.plain(detail) or None
+        )
+        return
     if _RICH_AVAILABLE:
         if detail:
             _console.print(f"  [white]*[/white] {name} [dim]({detail})[/dim]", **kwargs)
@@ -201,6 +233,84 @@ def item(name, detail="", **kwargs):
             )
         else:
             _print(f"    {_C.WHITE}{S.BULLET}{_C.RESET} {name}", **kwargs)
+
+
+def outline(steps):
+    """Announce the stages of a command up front: [(key, title), ...].
+
+    The renderer shows them as a checklist; the plain renderer has no use for
+    it (each header() prints when the stage starts)."""
+    if _proto.ACTIVE:
+        _proto.emit("outline", steps=[{"key": k, "title": t} for k, t in steps])
+
+
+def plan(title, groups):
+    """Structured install plan: [(label, [(action, target, detail), ...]), ...].
+
+    Returns True when the renderer took it; callers fall back to tables."""
+    if not _proto.ACTIVE:
+        return False
+    _proto.emit(
+        "plan",
+        title=_proto.plain(title),
+        groups=[
+            {
+                "label": _proto.plain(label),
+                "entries": [
+                    {"action": a, "target": _proto.plain(t), "detail": _proto.plain(d)}
+                    for a, t, d in entries
+                ],
+            }
+            for label, entries in groups
+        ],
+    )
+    return True
+
+
+# External commands (installer._run). The plain renderer keeps the exact
+# historical lines; the protocol sends structured start/output/end events so
+# the renderer can show a live timer instead of heartbeat lines.
+
+
+def command_start(text):
+    """Announce a command; returns its id."""
+    if _proto.ACTIVE:
+        command_id = _proto.next_id()
+        _proto.emit("command", state="start", id=command_id, text=text)
+        return command_id
+    print(f"  $ {text}", flush=True)
+    return 0
+
+
+def command_output(command_id, line):
+    """A line that must reach the user now (prompts, verbose streaming)."""
+    if _proto.ACTIVE:
+        _proto.emit("command", state="output", id=command_id, text=line)
+        return
+    print(f"      {line}", flush=True)
+
+
+def command_heartbeat(elapsed, timeout):
+    if _proto.ACTIVE:
+        return  # the renderer ticks its own timer
+    print(f"      ... running {elapsed}s / limit {timeout}s", flush=True)
+
+
+def command_end(command_id, ok, seconds, tail=()):
+    if _proto.ACTIVE:
+        _proto.emit(
+            "command",
+            state="end",
+            id=command_id,
+            ok=bool(ok),
+            secs=round(seconds, 2),
+            tail=list(tail) or None,
+        )
+
+
+def request_sudo(reason):
+    """Protocol mode only: let the renderer run `sudo -v` on the terminal."""
+    return _proto.ACTIVE and _proto.request_sudo(reason)
 
 
 # ─── Inline Download Progress (system deps + fetcher) ────────────────
@@ -278,6 +388,21 @@ class InlineDownloadProgress:
             self._tty = bool(self._stdout.isatty())
         except Exception:
             self._tty = False
+        # Protocol mode: report numbers, the renderer draws the bar.
+        self._proto_id = _proto.next_id() if _proto.ACTIVE and stdout is None else None
+        if self._proto_id is not None:
+            self._tty = False  # never draw locally
+
+    def _report(self, state):
+        if self._proto_id is not None:
+            _proto.emit(
+                "progress",
+                id=self._proto_id,
+                label=self.label,
+                state=state,
+                done=self._done,
+                total=self.total,
+            )
 
     def start(self):
         """Anchor the elapsed-time base (called when the transfer begins)."""
@@ -293,6 +418,7 @@ class InlineDownloadProgress:
         """
         self._started = self._clock()
         self._stop_ticks_and_join()
+        self._report("run")
 
     def start_connect_ticks(self):
         """Liveness during the connect phase (DNS/TLS/CDN), where no bytes flow.
@@ -303,6 +429,7 @@ class InlineDownloadProgress:
         """
         self._started = self._clock()
         self._stop_ticks_and_join()
+        self._report("connect")
         if not self._tty:
             return
         self._stop_ticks = threading.Event()
@@ -341,12 +468,16 @@ class InlineDownloadProgress:
         self.start()
         self._done += max(0, int(chunk_size))
         now = self._clock()
+        if self._proto_id is not None and now - self._last_render >= self._interval:
+            self._last_render = now
+            self._report("run")
         if self._tty and now - self._last_render >= self._interval:
             self._render()
 
     def finish(self):
         """Final render at the real byte count, then close the line."""
         self._stop_ticks_and_join()
+        self._report("done")
         if not self._tty:
             return
         self._render()
@@ -357,6 +488,7 @@ class InlineDownloadProgress:
     def abort(self):
         """Close the in-place line after a failure so logs stay readable."""
         self._stop_ticks_and_join()
+        self._report("fail")
         if self._tty and self._rendered:
             self._stdout.write("\n")
             self._stdout.flush()
@@ -505,6 +637,21 @@ def summary(results):
     failures = [r for r in results if r.get("status") not in ("ok", "skipped")]
     fail_count = len(failures)
 
+    if _proto.ACTIVE:
+        _proto.emit(
+            "summary",
+            succeeded=ok_count,
+            skipped=skip_count,
+            failed=[
+                {
+                    "name": _proto.plain(r.get("name", "")),
+                    "detail": _proto.plain(r.get("detail", "")),
+                }
+                for r in failures
+            ],
+        )
+        return
+
     if failures:
         if _RICH_AVAILABLE:
             table = Table(title="Summary", box=None)
@@ -548,6 +695,8 @@ def summary(results):
 
 def is_interactive():
     """True when stdin is a TTY — i.e. safe to prompt without an EOF crash."""
+    if _proto.ACTIVE:
+        return _proto.interactive()
     try:
         return sys.stdin.isatty()
     except Exception:
@@ -555,6 +704,8 @@ def is_interactive():
 
 
 def confirm(text):
+    if _proto.ACTIVE:
+        return _proto.ask_confirm(text)
     if _RICH_AVAILABLE:
         try:
             return Confirm.ask(f"[yellow]?[/yellow] {text}")
@@ -813,6 +964,8 @@ def menu_select(text, items, default_index=0, _read_key=None):
         raise ValueError(f"default_index {default_index!r} is outside {len(items)} item(s)")
 
     default_value = items[default_index][0]
+    if _proto.ACTIVE and _read_key is None:
+        return _proto.ask_menu(text, items, default_index)
     restore = None
     reader = _read_key
     if reader is None:
@@ -832,6 +985,13 @@ def menu_select(text, items, default_index=0, _read_key=None):
 @contextmanager
 def spinner(text):
     """Show a spinner during an operation."""
+    if _proto.ACTIVE:
+        _proto.emit("spinner", state="start", text=_proto.plain(text))
+        try:
+            yield None
+        finally:
+            _proto.emit("spinner", state="stop")
+        return
     if _RICH_AVAILABLE:
         with _console.status(text) as status:
             yield status
@@ -842,6 +1002,14 @@ def spinner(text):
 
 def table(title, columns, rows):
     """Render a table."""
+    if _proto.ACTIVE:
+        _proto.emit(
+            "table",
+            title=_proto.plain(title),
+            columns=[_proto.plain(c) for c in columns],
+            rows=[[_proto.plain(x) for x in row] for row in rows],
+        )
+        return
     if _RICH_AVAILABLE:
         t = Table(title=title)
         for col in columns:
@@ -861,6 +1029,9 @@ def table(title, columns, rows):
 
 def panel(text, title=None, style=None):
     """Render a panel."""
+    if _proto.ACTIVE:
+        _proto.emit("panel", title=_proto.plain(title), text=_proto.plain(text), style=style)
+        return
     if _RICH_AVAILABLE:
         _console.print(Panel(text, title=title, border_style=style))
     else:

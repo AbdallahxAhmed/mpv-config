@@ -22,6 +22,7 @@ import urllib.request
 import zipfile
 
 from deploy import ui
+from deploy import ui_protocol as _proto
 from deploy.dep_actions import (
     compute_dep_actions,
     dir_is_writable,
@@ -100,18 +101,70 @@ def _verbose():
     return os.environ.get("MPV_VERBOSE", "").strip().lower() in _VERBOSE_ON
 
 
-def _echo_command(cmd):
-    """Print the command once, compact and truncated to a tidy line."""
+def _command_text(cmd):
     text = shlex.join(cmd)
     if len(text) > _CMD_ECHO_LIMIT:
         text = text[: _CMD_ECHO_LIMIT - 1].rstrip() + "…"
-    print(f"  $ {text}", flush=True)
+    return text
+
+
+def _echo_command(cmd):
+    """Print the command once, compact and truncated to a tidy line; returns its id."""
+    return ui.command_start(_command_text(cmd))
+
+
+# AUR helpers call sudo themselves, mid-run.
+_SUDO_FRONTENDS = ("paru", "yay")
+
+
+def _needs_sudo(cmd):
+    if os.name == "nt" or not cmd:
+        return False
+    head = os.path.basename(str(cmd[0]))
+    if head == "sudo" or head in _SUDO_FRONTENDS:
+        return True
+    return head in ("sh", "bash") and any(re.search(r"\bsudo\b", str(a)) for a in cmd[1:])
+
+
+def _sudo_cached():
+    try:
+        probe = subprocess.run(
+            ["sudo", "-n", "true"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+def _prepare_privileges(cmd):
+    """Protocol mode: sudo must never prompt behind the live renderer.
+
+    The renderer owns the terminal, so a password prompt from a child sudo
+    would be garbled and its keystrokes eaten. Before a privileged command,
+    the credential is checked non-interactively; when it is missing, the
+    renderer suspends itself and runs `sudo -v` on the real terminal. The
+    command then runs with `sudo -n`, which fails instead of prompting.
+    Returns (command, allowed).
+    """
+    if not _proto.ACTIVE or not _needs_sudo(cmd) or not shutil.which("sudo"):
+        return cmd, True
+    if not _sudo_cached():
+        if not ui.request_sudo(_command_text(cmd)) or not _sudo_cached():
+            ui.error(f"Administrator access was not granted: {_command_text(cmd)}")
+            return cmd, False
+    if os.path.basename(str(cmd[0])) == "sudo" and cmd[1:2] != ["-n"]:
+        cmd = ["sudo", "-n", *cmd[1:]]
+    return cmd, True
 
 
 def _show_captures(tail, seen_lines, verbose):
     """After a failed command, surface a short tail of its captured output."""
-    if verbose:
-        return  # everything already streamed live
+    if verbose or _proto.ACTIVE:
+        return  # streamed live already / the renderer gets it in command_end
     shown = list(tail)[-_TAIL_SHOW:]
     if not shown:
         return
@@ -139,22 +192,37 @@ def _run(cmd, check=True, env=None, timeout=300):
     """
     verbose = _verbose()
     auto = _auto_answered(cmd)
+    cmd, allowed = _prepare_privileges(cmd)
+    if not allowed:
+        return False
     start = time.monotonic()
-    _echo_command(cmd)
+    command_id = _echo_command(cmd)
+    tail = collections.deque(maxlen=_TAIL_KEEP)
+
+    def finish(ok):
+        failed_tail = () if ok else list(tail)[-_TAIL_SHOW:]
+        ui.command_end(command_id, ok, time.monotonic() - start, failed_tail)
+        return ok
+
     try:
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
+            # Protocol mode: stdin carries the renderer's answers and must
+            # never be read by a child (pacman/apt run non-interactively).
+            stdin=subprocess.DEVNULL if _proto.ACTIVE else None,
             text=True,
             encoding="utf-8",
             errors="replace",
             env=env,
         )
     except FileNotFoundError:
+        finish(False)
         ui.error(f"Command not found: {cmd[0]}")
         return False
     except OSError as exc:
+        finish(False)
         ui.error(f"Could not start {cmd[0]}: {exc}")
         return False
 
@@ -162,7 +230,6 @@ def _run(cmd, check=True, env=None, timeout=300):
     reader = threading.Thread(target=_pump_lines, args=(proc.stdout, lines), daemon=True)
     reader.start()
 
-    tail = collections.deque(maxlen=_TAIL_KEEP)
     seen_lines = 0
     deadline = None if timeout is None else start + timeout
     got_eof = False
@@ -176,9 +243,9 @@ def _run(cmd, check=True, env=None, timeout=300):
         # pre-answered); confirm prompts forward only when the command
         # does not auto-answer them. Everything else streams in verbose.
         if verbose or _PASSWORD_PROMPT_RE.search(item):
-            print(f"      {item}", flush=True)
+            ui.command_output(command_id, item)
         elif not auto and _CONFIRM_PROMPT_RE.search(item):
-            print(f"      {item}", flush=True)
+            ui.command_output(command_id, item)
 
     try:
         while not got_eof and proc.poll() is None:
@@ -191,14 +258,12 @@ def _run(cmd, check=True, env=None, timeout=300):
                 # 5x/s, and a heartbeat on every slice drowned the sudo
                 # password prompt before it could be answered.
                 if now - last_beat >= _HEARTBEAT_INTERVAL:
-                    print(
-                        f"      ... running {elapsed}s / limit {timeout}s",
-                        flush=True,
-                    )
+                    ui.command_heartbeat(elapsed, timeout)
                     last_beat = now
                 if timeout is not None and elapsed >= timeout:
                     proc.kill()
                     proc.wait()
+                    finish(False)
                     ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
                     _show_captures(tail, seen_lines, verbose)
                     return False
@@ -213,6 +278,7 @@ def _run(cmd, check=True, env=None, timeout=300):
             if deadline is not None and time.monotonic() >= deadline:
                 proc.kill()
                 proc.wait()
+                finish(False)
                 ui.error(f"Command timed out after {timeout}s: {' '.join(cmd)}")
                 _show_captures(tail, seen_lines, verbose)
                 return False
@@ -228,6 +294,7 @@ def _run(cmd, check=True, env=None, timeout=300):
     except KeyboardInterrupt:
         proc.kill()
         proc.wait()
+        finish(False)
         ui.warn(f"Interrupted: {' '.join(cmd)}")
         raise
 
@@ -236,9 +303,10 @@ def _run(cmd, check=True, env=None, timeout=300):
     rc = proc.wait()
 
     success = rc == 0
+    finish(success)
     if not success:
         _show_captures(tail, seen_lines, verbose)
-    if verbose:
+    if verbose and not _proto.ACTIVE:
         elapsed = int(time.monotonic() - start)
         print(f"      (finished in {elapsed}s, exit {rc})", flush=True)
     # Success = child's own exit code, in BOTH check modes. The pre-streaming
@@ -1697,7 +1765,7 @@ def uninstall_deps(env, remove_python=False, dry_run=False, pre_existing_pkgs=No
 
     Returns list of result dicts.
     """
-    ui.header("Uninstalling System Dependencies")
+    ui.header("Uninstalling System Dependencies", key="deps")
 
     # When no log is available the safest default is to skip everything so
     # we never accidentally remove software we did not install.
@@ -1773,7 +1841,7 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None, dep_actio
 
     Returns list of result dicts.
     """
-    ui.header("Installing System Dependencies")
+    ui.header("Installing System Dependencies", key="deps")
 
     # sudo credential warm-up: one password prompt UP-FRONT so none of the
     # package-manager steps below stop mid-flow waiting for a password.
@@ -2024,7 +2092,7 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
             {"name": "ffsubsync", "status": "skipped", "detail": "dry-run"},
         ]
 
-    ui.header("Syncing MPV Dependencies Suite")
+    ui.header("Syncing MPV Dependencies Suite", key="deps")
     target = target_dir or _get_target_tools_dir(env)
     ui.info(f"Target directory: {target}")
 
