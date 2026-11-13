@@ -724,6 +724,11 @@ end
 
 local activity_timer
 
+-- Forward declarations: spawn() and pump_overlay() are defined before these
+-- and must capture the locals, not read an always-nil global.
+local respawn_thumbnailer
+local overlay_generation = 0
+
 local function spawn(time)
     if disabled then return end
 
@@ -974,7 +979,7 @@ local function run(command)
     end
 end
 
-local function respawn_thumbnailer(seek_time)
+function respawn_thumbnailer(seek_time)
     run("quit")
     if winapi then
         winapi.close_pipe()
@@ -1066,8 +1071,6 @@ local function pump_overlay()
         end
     end
 end
-
-local overlay_generation = 0
 
 local function draw(w, h, script)
     if not w or not show_thumbnail or not thumbnail_path then return end

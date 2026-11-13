@@ -100,6 +100,18 @@ if [ ! -x "${VENV_PYTHON}" ]; then
     fi
 fi
 
+# A venv that uv created on an earlier run has no pip module, even when this
+# run found ensurepip (python3-venv installed since): keep using uv for it, or
+# seed pip into it, instead of dying on "No module named pip".
+if [ -z "${USE_UV}" ] && ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
+    if command -v uv >/dev/null 2>&1; then
+        USE_UV=1
+    else
+        "${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 ||
+            die "the virtual environment at ${VENV_DIR} has no pip; remove it and re-run."
+    fi
+fi
+
 # Editable, so the CLI can always find this checkout: deploy/ and config/ are not packaged.
 if [ -n "${USE_UV}" ]; then
     # uv-created venvs have no pip module — install through uv instead.

@@ -73,8 +73,9 @@ def unpatch_topbar_lua(content: str) -> str:
 def run_patcher(uosc_dir: Path, unpatch: bool = False) -> None:
     topbar_path = uosc_dir / "elements" / "TopBar.lua"
     if not topbar_path.exists():
-        print(f"Error: Target file missing: {topbar_path}", file=sys.stderr)
-        sys.exit(1)
+        # Raise instead of sys.exit(): deploy() calls this in-process after the
+        # transaction committed, and SystemExit escapes its `except Exception`.
+        raise FileNotFoundError(f"Target file missing: {topbar_path}")
 
     content = topbar_path.read_text(encoding="utf-8")
     new_content = unpatch_topbar_lua(content) if unpatch else patch_topbar_lua(content)
@@ -103,7 +104,11 @@ def main():
         help="Revert patch and restore original uosc source",
     )
     args = parser.parse_args()
-    run_patcher(args.uosc_dir, args.unpatch)
+    try:
+        run_patcher(args.uosc_dir, args.unpatch)
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

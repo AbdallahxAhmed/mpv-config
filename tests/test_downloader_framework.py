@@ -167,5 +167,33 @@ class TestDownloaderFramework(unittest.TestCase):
         mock_good_dl.download.assert_called_once()
 
 
+class DownloaderRegressionTests(unittest.TestCase):
+    def test_numeric_quality_rank_is_not_used_as_a_resolution(self):
+        dl = GenericDownloader()
+        item = dl._info_to_media_item({"title": "t", "quality": 8, "height": None}, "https://x/y")
+        self.assertEqual(item.quality, "best")
+        item = dl._info_to_media_item({"title": "t", "quality": 8, "height": 720}, "https://x/y")
+        self.assertEqual(item.quality, "720p")
+
+    @patch("yt_dlp.YoutubeDL")
+    def test_subtitles_are_embedded_through_the_postprocessor(self, mock_ydl_cls):
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = {"title": "t"}
+        mock_ydl.prepare_filename.return_value = "t.mp4"
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        GenericDownloader().download(
+            MediaItem(title="t", url="https://x/y", subtitles=["en"]), scratch.name
+        )
+        opts = mock_ydl_cls.call_args.args[0]
+        self.assertNotIn("embedsubtitles", opts)
+        self.assertIn("FFmpegEmbedSubtitle", [pp["key"] for pp in opts["postprocessors"]])
+
+    @patch("tools.core.clipboard.ClipboardService.is_supported", return_value=False)
+    def test_watch_refuses_platforms_without_clipboard_support(self, _supported):
+        self.assertEqual(main(["download", "--watch"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

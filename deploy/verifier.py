@@ -184,7 +184,11 @@ def verify(config_dir, env):
     # mpv is required for playback but deliberately not fatal for deployment:
     # config deployment remains valid while the player is missing/slow to
     # install. The mpv launch test below only runs when a binary exists.
-    if shutil.which("mpv") or _run_check(["mpv", "--version"]):
+    # One answer for both the binary row and the launch test below: they used
+    # to disagree ("mpv binary OK" followed by "launch test skipped: mpv not
+    # installed") whenever mpv ran but shutil.which() could not see it.
+    mpv_present = bool(shutil.which("mpv")) or _run_check(["mpv", "--version"])
+    if mpv_present:
         check("mpv binary", True)
         from deploy.registry import MPV_MINIMUM_VERSION
 
@@ -367,7 +371,7 @@ def verify(config_dir, env):
             )
 
     ui.step("Testing selected config startup (scripts disabled)...")
-    if shutil.which("mpv") is None:
+    if not mpv_present:
         # No player installed — the launch test would fail on a missing
         # binary, not on a config problem. Everything else just verified;
         # a later `mpv-config verify` validates startup once mpv exists.

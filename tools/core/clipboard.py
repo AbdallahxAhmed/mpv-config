@@ -10,6 +10,11 @@ class ClipboardService:
     """Provides pure-Win32 clipboard access and URL detection with zero external dependencies."""
 
     @staticmethod
+    def is_supported() -> bool:
+        """Clipboard reading is implemented for Windows only (get_text is "" elsewhere)."""
+        return sys.platform == "win32"
+
+    @staticmethod
     def get_text() -> str:
         """Retrieve UTF-16 text directly from Windows clipboard."""
         if sys.platform != "win32":

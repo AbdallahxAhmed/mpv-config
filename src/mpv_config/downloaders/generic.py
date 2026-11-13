@@ -50,15 +50,17 @@ class GenericDownloader(BaseDownloader):
         title = info.get("title") or "Unknown"
         item_url = info.get("webpage_url") or info.get("url") or fallback_url
 
-        quality = info.get("quality")
-        if not quality:
-            height = info.get("height")
-            if height:
-                quality = f"{height}p"
-            else:
-                quality = info.get("format_note") or "best"
+        # yt-dlp's "quality" field is a numeric format RANK (e.g. 8, -1), not
+        # a resolution. download() turns the first number of this string into
+        # a height ceiling, so a rank of 8 became `height<=?8` and fell back
+        # to a tiny pre-merged format. Only real resolutions are used here.
+        height = info.get("height")
+        if isinstance(height, (int, float)) and height > 0:
+            quality = f"{int(height)}p"
         else:
-            quality = str(quality)
+            note = str(info.get("format_note") or "")
+            match = re.search(r"(\d{3,4})p", note)
+            quality = f"{match.group(1)}p" if match else "best"
 
         subs = info.get("subtitles")
         subtitles: List[str] = []
@@ -97,7 +99,11 @@ class GenericDownloader(BaseDownloader):
         if item.subtitles:
             opts["writesubtitles"] = True
             opts["subtitleslangs"] = item.subtitles
-            opts["embedsubtitles"] = True
+            # "embedsubtitles" is a yt-dlp CLI flag, not a YoutubeDL() param
+            # (it was silently ignored): embedding is a postprocessor.
+            opts["postprocessors"] = [
+                {"key": "FFmpegEmbedSubtitle", "already_have_subtitle": False}
+            ]
 
         # Apply SiteKit/Session/Engine plugins from tools.core if available
         extractor = None

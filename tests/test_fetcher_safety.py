@@ -154,5 +154,75 @@ class RequestStreamingProgressTests(unittest.TestCase):
         self.assertEqual(sink.getvalue(), "")
 
 
+class ReleaseResolutionAndRetryTests(unittest.TestCase):
+    def test_unpinned_release_uses_latest_endpoint_and_skips_prereleases(self):
+        payload = json.dumps(
+            [
+                {"tag_name": "v2-rc1", "prerelease": True, "assets": []},
+                {
+                    "tag_name": "v1",
+                    "assets": [{"name": "uosc.zip", "browser_download_url": "https://x/uosc.zip"}],
+                },
+            ]
+        )
+        zip_payload = _zip_bytes({"scripts/uosc/main.lua": "x", "fonts/a.ttf": "f"})
+        entry = json.loads(json.dumps(UOSC_ENTRY))
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with mock.patch(
+                "deploy.fetcher._request", side_effect=[payload, zip_payload]
+            ) as request:
+                result = fetch_release(entry, tmpdir)
+        self.assertTrue(request.call_args_list[0].args[0].endswith("/releases/latest"))
+        self.assertEqual(result["version"], "v1")
+
+    def _response(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.read.return_value = b"ok"
+        return response
+
+    def test_connection_reset_mid_body_is_retried(self):
+        with (
+            mock.patch(
+                "urllib.request.urlopen",
+                side_effect=[ConnectionResetError("reset"), self._response()],
+            ),
+            mock.patch("deploy.fetcher.time.sleep"),
+        ):
+            self.assertEqual(fetcher._request("https://example.invalid/a", binary=True), b"ok")
+
+    def test_exhausted_rate_limit_fails_fast_with_token_hint(self):
+        import urllib.error
+        from email.message import Message
+
+        headers = Message()
+        headers["X-RateLimit-Remaining"] = "0"
+        error = urllib.error.HTTPError("https://api.github.com/x", 403, "rate", headers, None)
+        with (
+            mock.patch("urllib.request.urlopen", side_effect=error) as urlopen,
+            mock.patch("deploy.fetcher.time.sleep") as sleep,
+            self.assertRaisesRegex(ConnectionError, "GITHUB_TOKEN"),
+        ):
+            fetcher._request("https://api.github.com/x")
+        self.assertEqual(urlopen.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_github_token_is_sent_only_to_the_api_host(self):
+        seen = []
+
+        def fake_urlopen(request, timeout):
+            seen.append((request.full_url, request.get_header("Authorization")))
+            return self._response()
+
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_TOKEN": "t0k"}),
+            mock.patch("urllib.request.urlopen", side_effect=fake_urlopen),
+        ):
+            fetcher._request("https://api.github.com/repos/a/b/releases/latest")
+            fetcher._request("https://raw.githubusercontent.com/a/b/main/x.lua")
+        self.assertEqual(seen[0][1], "Bearer t0k")
+        self.assertIsNone(seen[1][1])
+
+
 if __name__ == "__main__":
     unittest.main()

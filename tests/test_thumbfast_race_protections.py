@@ -511,7 +511,7 @@ class TestThumbfastPersistentPipeAndDraining(unittest.TestCase):
         """respawn_thumbnailer, quit, shutdown, and remove_thumbnail_files must close pipe."""
         for fn_name in ["respawn_thumbnailer", "quit", "shutdown", "remove_thumbnail_files"]:
             match = re.search(
-                rf"local function {fn_name}\([^)]*\)\n(.*?)^end",
+                rf"^(?:local )?function {fn_name}\([^)]*\)\n(.*?)^end",
                 self.thumbfast_lua,
                 re.MULTILINE | re.DOTALL,
             )
@@ -675,7 +675,7 @@ class TestThumbfastNetworkReliability(unittest.TestCase):
         fl_idx = self.thumbfast_lua.find("function file_load()")
         self.assertNotEqual(fl_idx, -1)
         self.assertIn("script_written = false", self.thumbfast_lua[fl_idx : fl_idx + 400])
-        rp_idx = self.thumbfast_lua.find("local function respawn_thumbnailer(")
+        rp_idx = self.thumbfast_lua.find("function respawn_thumbnailer(")
         self.assertNotEqual(rp_idx, -1)
         self.assertIn("script_written = false", self.thumbfast_lua[rp_idx : rp_idx + 1200])
         # the client-script write step must still be gated on script_written
@@ -803,6 +803,33 @@ class TestThumbfastNetworkWorkerDoesNotStarvePlayback(unittest.TestCase):
         self.assertIn('local demux_bytes = is_net and "16MiB" or "32MiB"', self.thumbfast_lua)
         self.assertIn('local reahead_secs = is_net and "1" or "0"', self.thumbfast_lua)
         self.assertNotIn('"64MiB"', self.thumbfast_lua)
+
+
+class TestThumbfastUpvalueScope(unittest.TestCase):
+    """Lua resolves a name at compile time: a function that uses a local
+    declared further down the file reads an always-nil GLOBAL instead.
+    That silently disabled the stale-overlay generation guard (nil == nil
+    is always true) and the worker respawn retry after a failed spawn."""
+
+    def setUp(self):
+        self.lua = (REPO_ROOT / "scripts" / "thumbfast.lua").read_text(encoding="utf-8")
+
+    def _first_use_after_declaration(self, name, declaration):
+        decl = re.search(declaration, self.lua, re.MULTILINE)
+        self.assertIsNotNone(decl, f"{name} must be declared as a file-level local")
+        first_use = re.search(rf"(?<![\w.:]){name}\b", self.lua)
+        self.assertGreaterEqual(
+            first_use.start(), decl.start(), f"{name} is used before its local declaration"
+        )
+
+    def test_overlay_generation_is_declared_before_pump_overlay(self):
+        self._first_use_after_declaration(
+            "overlay_generation", r"^local overlay_generation = 0$"
+        )
+
+    def test_respawn_thumbnailer_is_forward_declared_before_spawn(self):
+        self._first_use_after_declaration("respawn_thumbnailer", r"^local respawn_thumbnailer$")
+        self.assertNotIn("local function respawn_thumbnailer(", self.lua)
 
 
 if __name__ == "__main__":

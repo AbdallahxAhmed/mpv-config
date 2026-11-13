@@ -45,16 +45,29 @@ def _supports_color():
         return False
     if os.getenv("FORCE_COLOR"):
         return True
+    # Redirected/piped output (log files, CI) must stay free of ANSI codes on
+    # every OS: the Windows branch used to answer True unconditionally.
+    if not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty()):
+        return False
     if sys.platform == "win32":
         try:
             import ctypes
 
+            from ctypes import wintypes
+
             kernel32 = ctypes.windll.kernel32
-            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-            return True
+            handle = kernel32.GetStdHandle(-11)
+            mode = wintypes.DWORD()
+            # Add VT processing (0x4) to the CURRENT mode instead of
+            # overwriting it with 7. Failure is a 0 return, never an exception.
+            if kernel32.GetConsoleMode(handle, ctypes.byref(mode)) and kernel32.SetConsoleMode(
+                handle, mode.value | 0x0004
+            ):
+                return True
         except Exception:
-            return os.getenv("WT_SESSION") is not None
-    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+            pass
+        return os.getenv("WT_SESSION") is not None
+    return True
 
 
 def _supports_unicode():

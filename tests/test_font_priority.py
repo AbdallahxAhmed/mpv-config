@@ -42,9 +42,18 @@ class TestFontPriority(unittest.TestCase):
 
     def test_resolve_preferred_font_on_linux_queries_fc_list(self):
         env = Environment(os="linux", platform_key="arch", distro="arch")
-        with mock.patch(
-            "deploy.deployer._probe_fc_list_families",
-            return_value={"noto sans arabic", "dejavu sans"},
+        installed = {"noto sans arabic", "dejavu sans"}
+        with (
+            mock.patch(
+                "deploy.deployer._probe_fc_list_families",
+                return_value=installed,
+            ),
+            # Hermetic: the real validator shells out to fc-match, so the
+            # result used to depend on the fonts of the machine running tests.
+            mock.patch(
+                "deploy.deployer._probe_font_has_regular_face",
+                side_effect=lambda font: font.lower() in installed,
+            ),
         ):
             self.assertEqual(_resolve_preferred_font(env), "Noto Sans Arabic")
 

@@ -200,11 +200,27 @@ def cmd_download(args: argparse.Namespace) -> int:
         try:
             from tools.core.clipboard import ClipboardService
         except ImportError:
+            # `tools` lives in the checkout, not in the installed package: from
+            # any other working directory the import failed and --watch was
+            # unusable. Retry with the located checkout on sys.path.
             ClipboardService = None
+            try:
+                sys.path.insert(0, str(find_repo_root()))
+                from tools.core.clipboard import ClipboardService
+            except (ImportError, RepositoryNotFoundError):
+                pass
 
         if not ClipboardService:
             err_console.print(
                 "[bold red][!] ClipboardService not available for watch mode.[/bold red]"
+            )
+            return 1
+        if not ClipboardService.is_supported():
+            # get_text() is always "" off Windows: the loop polled forever
+            # without ever reacting to a copied link.
+            err_console.print(
+                "[bold red][!] --watch reads the Windows clipboard and is only "
+                "available on Windows.[/bold red]"
             )
             return 1
 

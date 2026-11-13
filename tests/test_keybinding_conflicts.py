@@ -259,11 +259,15 @@ class TestArabicKeyMigrations(unittest.TestCase):
                 self.assertNotIn(banned, bindings, "%s survived migration" % banned)
 
             # The mnemonic twins (actions on OTHER physical keys) are NOT
-            # force-appended anymore: the same-physical-key twins are
-            # generated from the file's own Latin bindings, and this legacy
-            # fixture carries none (b/ؤ/ش/ب survive as pre-existing lines).
-            self.assertIsNone(bindings.get("ح"), "mnemonic twin ح must not be appended")
-            self.assertIsNone(bindings.get("ت"), "mnemonic twin ت must not be appended")
+            # force-appended: twins are generated from the file's own Latin
+            # bindings only. The migration now makes mpv's standard keys
+            # explicit (p, j, ...), so their SAME-physical-key twins exist:
+            # ح is the p key and ت the j key on the Arabic (101) layout.
+            self.assertEqual(bindings.get("p"), "cycle pause")
+            self.assertEqual(bindings.get("ح"), "cycle pause")
+            self.assertEqual(bindings.get("j"), "cycle sub")
+            self.assertEqual(bindings.get("ت"), "cycle sub")
+            # l (م) is not among the standard keys made explicit: no twin.
             self.assertIsNone(bindings.get("م"), "mnemonic twin م must not be appended")
             self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
             self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")

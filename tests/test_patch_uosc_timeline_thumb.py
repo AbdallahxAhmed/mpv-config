@@ -47,6 +47,30 @@ class TestPatchUoscTimelineThumb(unittest.TestCase):
             patcher.run_patcher(base, unpatch=True)
             self.assertNotIn("self:clear_thumbnail()", timeline_file.read_text(encoding="utf-8"))
 
+    def test_missing_target_raises_instead_of_exiting(self):
+        # deploy() runs the patcher in-process after the transaction has
+        # committed; SystemExit would escape its `except Exception` guard.
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with self.assertRaises(FileNotFoundError):
+                patcher.run_patcher(Path(tmp_dir))
+
+    def test_update_migration_reapplies_patch_to_fresh_upstream_uosc(self):
+        from deploy.deployer import _migrate_deployed_configs
+        from deploy.detector import Environment
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            timeline = Path(tmp_dir) / "scripts" / "uosc" / "elements" / "Timeline.lua"
+            timeline.parent.mkdir(parents=True)
+            timeline.write_text(SAMPLE_TIMELINE_LUA, encoding="utf-8")
+            env = Environment(os="windows", platform_key="windows")
+
+            rows = _migrate_deployed_configs(tmp_dir, env)
+
+            self.assertIn(patcher.PATCH_MARKER, timeline.read_text(encoding="utf-8"))
+            self.assertIn("migrate-uosc-timeline-patch", [row["name"] for row in rows])
+            again = _migrate_deployed_configs(tmp_dir, env)
+            self.assertNotIn("migrate-uosc-timeline-patch", [row["name"] for row in again])
+
 
 if __name__ == "__main__":
     unittest.main()

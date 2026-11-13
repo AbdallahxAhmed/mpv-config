@@ -627,7 +627,9 @@ class MenuSelectTests(unittest.TestCase):
         below — the bug this pins shut."""
         blob = io.StringIO()
         reader = self.keystrokes(["down", "enter"])  # exactly one repaint
-        with redirect_stdout(blob):
+        # The climb sequence is only emitted on color terminals; pytest/CI
+        # stdout is not a TTY, so pin USE_COLOR instead of inheriting it.
+        with mock.patch.object(deployer.ui, "USE_COLOR", True), redirect_stdout(blob):
             self.assertEqual(
                 deployer.ui.menu_select("Anime4K mode", self.ITEMS, _read_key=reader), "A"
             )

@@ -176,10 +176,32 @@ class TestLinuxUiUxFixes(unittest.TestCase):
             )
             self.assertFalse(_probe_font_has_regular_face("NonExistentFont"))
 
+    def test_probe_font_rejects_fc_match_fallback_to_a_shorter_family(self):
+        # fc-match never fails: a missing "Noto Sans Arabic" resolves to
+        # "Noto Sans". That fallback must not count as the requested font.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Noto Sans|Regular|0|/usr/share/fonts/noto/NotoSans-Regular.ttf",
+            )
+            self.assertFalse(_probe_font_has_regular_face("Noto Sans Arabic"))
+
+    def test_probe_font_accepts_segoe_ui_regular_file_name(self):
+        # Segoe UI Regular ships as segoeui.ttf — the name ends in "i.ttf"
+        # but it is the upright face.
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="Segoe UI|Regular|0|/usr/share/fonts/TTF/segoeui.ttf",
+            )
+            self.assertTrue(_probe_font_has_regular_face("Segoe UI"))
+
     def test_pick_preferred_font_with_validator(self):
         installed = {"Segoe UI", "Noto Sans Arabic"}
         # Segoe UI fails validator (e.g. only has italic)
-        validator = lambda f: f != "Segoe UI"
+        def validator(font):
+            return font != "Segoe UI"
+
         chosen = _pick_preferred_font(installed, validator=validator)
         self.assertEqual(chosen, "Noto Sans Arabic")
 

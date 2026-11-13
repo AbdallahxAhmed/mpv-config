@@ -63,9 +63,12 @@ def _probe_font_has_regular_face(font_name):
             return False
         family, style, slant, file_path = parts[0], parts[1], parts[2], parts[3]
 
-        # 1. Family check: candidate font must be in matched families
+        # 1. Family check: fc-match ALWAYS answers (it falls back to the
+        #    closest font), so the requested family must be one of the
+        #    matched names exactly. A substring test accepted fallbacks:
+        #    "Noto Sans Arabic" missing -> fc-match "Noto Sans" -> accepted.
         matched_families = [f.strip().lower() for f in family.split(",") if f.strip()]
-        if not any(font_name.lower() in mf or mf in font_name.lower() for mf in matched_families):
+        if font_name.strip().lower() not in matched_families:
             return False
 
         # 2. Slant check: 0 is upright roman; non-zero is italic/oblique
@@ -79,9 +82,11 @@ def _probe_font_has_regular_face(font_name):
         if any(k in style_lower for k in ("black", "heavy", "fat", "ultra", "extra bold", "extrabold")):
             return False
 
-        # 4. File name heuristic check for italic/bold variants
+        # 4. File name heuristic for italic variants. No single-letter suffix
+        #    rule: it rejected Segoe UI Regular itself (segoeui.ttf); style
+        #    and slant above already come from fontconfig.
         base = os.path.basename(file_path).lower()
-        if any(k in base for k in ("italic", "oblique")) or base.endswith("i.ttf") or base.endswith("z.ttf"):
+        if any(k in base for k in ("italic", "oblique")):
             return False
 
         return True
@@ -1325,12 +1330,12 @@ def deploy(
         try:
             from pathlib import Path
 
-            from tools.patch_uosc_timeline_thumb import get_default_uosc_dir, run_patcher
+            from tools.patch_uosc_timeline_thumb import run_patcher
             from tools.patch_uosc_topbar import run_patcher as run_topbar_patcher
 
+            # Only the config just deployed: never fall back to a different
+            # (default ~/.config/mpv or %APPDATA%) uosc install.
             uosc_dir = Path(config_dir) / "scripts" / "uosc"
-            if not uosc_dir.exists():
-                uosc_dir = get_default_uosc_dir()
             if uosc_dir.exists():
                 run_patcher(uosc_dir)
                 run_topbar_patcher(uosc_dir)
@@ -1474,6 +1479,13 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
             "migrate-uosc-topbar-patch",
             os.path.join(config_dir, "scripts", "uosc", "elements", "TopBar.lua"),
             lambda p: _migrate_uosc_topbar_patch(p, audit_log=audit_log),
+        ),
+        (
+            # `update` swaps scripts/uosc for a fresh upstream copy: without
+            # this the Timeline thumbnail patch only survived full installs.
+            "migrate-uosc-timeline-patch",
+            os.path.join(config_dir, "scripts", "uosc", "elements", "Timeline.lua"),
+            lambda p: _migrate_uosc_timeline_patch(p, audit_log=audit_log),
         ),
     )
     results = []
@@ -2333,6 +2345,35 @@ def _migrate_uosc_topbar_patch(topbar_lua_path, audit_log=None):
         if audit_log:
             audit_log.record_file(
                 topbar_lua_path, "modify", "warn", f"TopBar.lua patch: {exc}"
+            )
+    return False
+
+
+def _migrate_uosc_timeline_patch(timeline_lua_path, audit_log=None):
+    """Re-apply the uosc Timeline.lua thumbnail cleanup patch (idempotent)."""
+    if not os.path.isfile(timeline_lua_path):
+        return False
+    try:
+        from tools.patch_uosc_timeline_thumb import patch_timeline_lua
+
+        with open(timeline_lua_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        patched = patch_timeline_lua(content)
+        if patched != content:
+            with open(timeline_lua_path, "w", encoding="utf-8") as f:
+                f.write(patched)
+            if audit_log:
+                audit_log.record_file(
+                    timeline_lua_path,
+                    "modify",
+                    "ok",
+                    "patched Timeline.lua thumbnail cleanup",
+                )
+            return True
+    except Exception as exc:
+        if audit_log:
+            audit_log.record_file(
+                timeline_lua_path, "modify", "warn", f"Timeline.lua patch: {exc}"
             )
     return False
 

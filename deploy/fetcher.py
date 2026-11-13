@@ -10,6 +10,7 @@ All network operations use urllib (stdlib) — zero external dependencies.
 """
 
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -50,6 +51,11 @@ def _request(url, binary=False, progress=None):
     callers stay memory-buffered and staging writes remain all-or-nothing.
     """
     headers = {"User-Agent": USER_AGENT}
+    # Unauthenticated GitHub API calls share 60 requests/hour per IP, which
+    # NAT/CGNAT users and repeated installs exhaust. A token is optional.
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token and url.startswith("https://api.github.com/"):
+        headers["Authorization"] = f"Bearer {token}"
     delay = RETRY_DELAY
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -82,13 +88,27 @@ def _request(url, binary=False, progress=None):
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 raise FileNotFoundError(f"404 Not Found: {url}")
-            if e.code == 403:  # rate limit
+            if e.code in (403, 429):  # primary (403) / secondary (429) rate limit
+                if e.headers is not None and e.headers.get("X-RateLimit-Remaining") == "0":
+                    # The hourly quota is spent: a few seconds of backoff
+                    # cannot help, so fail now with the actionable fix.
+                    raise ConnectionError(
+                        f"GitHub API rate limit exhausted for {url}. Wait for the reset "
+                        "or set GITHUB_TOKEN to a personal access token and re-run."
+                    ) from e
                 ui.warn(f"Rate limited (attempt {attempt}/{MAX_RETRIES}), waiting {delay}s...")
                 time.sleep(delay)
                 delay *= 2
                 continue
             raise
-        except (urllib.error.URLError, TimeoutError) as e:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            # Mid-body drops (connection reset, truncated chunked body) used
+            # to escape without any retry.
+            ConnectionError,
+            http.client.HTTPException,
+        ) as e:
             if attempt < MAX_RETRIES:
                 ui.warn(
                     f"Network error (attempt {attempt}/{MAX_RETRIES}): {e}, retrying in {delay}s..."
@@ -238,11 +258,19 @@ def fetch_release(entry, staging_dir, is_shader=False):
             raise FileNotFoundError(f"Release {pin} not found for {repo}")
         releases = [release]
     else:
-        data = _request(api_url)
-        releases = json.loads(data)
-        if not releases:
+        # /releases/latest is GitHub's newest NON-prerelease, non-draft
+        # release. The plain /releases list is ordered by creation date and
+        # can start with a beta/RC, which then got installed as "latest".
+        try:
+            latest = json.loads(_request(api_url + "/latest"))
+        except FileNotFoundError:
             raise FileNotFoundError(f"No releases found for {repo}")
-        releases = [releases[0]]  # latest
+        if isinstance(latest, list):  # tolerate list-shaped payloads
+            stable = [r for r in latest if not r.get("prerelease") and not r.get("draft")]
+            latest = (stable or latest)[0] if latest else None
+        if not latest:
+            raise FileNotFoundError(f"No releases found for {repo}")
+        releases = [latest]
 
     release = releases[0]
     tag = release.get("tag_name", "unknown")
