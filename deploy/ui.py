@@ -52,7 +52,6 @@ def _supports_color():
     if sys.platform == "win32":
         try:
             import ctypes
-
             from ctypes import wintypes
 
             kernel32 = ctypes.windll.kernel32
@@ -240,10 +239,18 @@ class InlineDownloadProgress:
 
     BAR_WIDTH = 24
 
-    def __init__(self, label, total=None, stdout=None, clock=time.monotonic,
-                 update_interval=0.1, tick_interval=1.0, theme=None,
-                 width_fn=None):
-        self.label = (label or "download")
+    def __init__(
+        self,
+        label,
+        total=None,
+        stdout=None,
+        clock=time.monotonic,
+        update_interval=0.1,
+        tick_interval=1.0,
+        theme=None,
+        width_fn=None,
+    ):
+        self.label = label or "download"
         if len(self.label) > 40:
             self.label = self.label[:37] + "..."
         try:
@@ -301,9 +308,7 @@ class InlineDownloadProgress:
         self._stop_ticks = threading.Event()
         self._write_line(self._connect_line())
         event = self._stop_ticks
-        self._tick_thread = threading.Thread(
-            target=self._tick_loop, args=(event,), daemon=True
-        )
+        self._tick_thread = threading.Thread(target=self._tick_loop, args=(event,), daemon=True)
         self._tick_thread.start()
 
     def _tick_loop(self, stop_event):
@@ -403,7 +408,7 @@ class InlineDownloadProgress:
         label = self.label if label is None else label
         cyan, dim, reset = _C.CYAN, _C.DIM, _C.RESET
         if USE_COLOR:
-            pairs = [(f"> ", f"{cyan}>{reset} ")]
+            pairs = [("> ", f"{cyan}>{reset} ")]
         else:
             pairs = [("> ", None)]
         pairs.append((label, None))
@@ -415,16 +420,13 @@ class InlineDownloadProgress:
             bar_plain = self._bar_full * filled + self._bar_empty * rest
             if USE_COLOR:
                 bar_rich = (
-                    f"{cyan}{self._bar_full * filled}{reset}"
-                    f"{dim}{self._bar_empty * rest}{reset}"
+                    f"{cyan}{self._bar_full * filled}{reset}{dim}{self._bar_empty * rest}{reset}"
                 )
             else:
                 bar_rich = None
             pairs.append(("  " + bar_plain, None if bar_rich is None else "  " + bar_rich))
             pairs.append((f"  {pct:3d}%", None))
-            pairs.append(
-                (f"  {_human_bytes(self._done)}/{_human_bytes(self.total)}", None)
-            )
+            pairs.append((f"  {_human_bytes(self._done)}/{_human_bytes(self.total)}", None))
             if extra_text:
                 pairs.append(("  " + extra_text, None))
         else:

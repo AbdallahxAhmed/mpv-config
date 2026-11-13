@@ -8,19 +8,17 @@ and append engine diagnostic error lines to failure notifications.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
-from typing import Optional
 
 AUTOSUBSYNC_STDERR_MARKER = "-- AUTOSUBSYNC_STDERR_DIAGNOSTICS_PATCH"
 
 SUBPROCESS_PATTERN = re.compile(
-    r'(local\s+function\s+subprocess\s*\(\s*args\s*\)\s*\n'
-    r'\s*return\s+mp\.command_native\s*\{\s*\n'
+    r"(local\s+function\s+subprocess\s*\(\s*args\s*\)\s*\n"
+    r"\s*return\s+mp\.command_native\s*\{\s*\n"
     r'\s*name\s*=\s*"subprocess",\s*\n'
-    r'\s*playback_only\s*=\s*false,\s*\n'
-    r'\s*capture_stdout\s*=\s*true,)(\s*\n\s*args\s*=\s*args)',
+    r"\s*playback_only\s*=\s*false,\s*\n"
+    r"\s*capture_stdout\s*=\s*true,)(\s*\n\s*args\s*=\s*args)",
     re.MULTILINE,
 )
 
@@ -30,20 +28,20 @@ FAILURE_NOTIFY_PATTERN = re.compile(
 )
 
 PATCHED_FAILURE_BLOCK = (
-    r'\1' + AUTOSUBSYNC_STDERR_MARKER + '\n'
+    r"\1" + AUTOSUBSYNC_STDERR_MARKER + "\n"
     r'        local err_msg = "Subtitle synchronization failed."\n'
     r'        if ret and ret.stderr and ret.stderr ~= "" then\n'
-    r'            local lines = {}\n'
+    r"            local lines = {}\n"
     r'            for line in ret.stderr:gmatch("[^\\r\\n]+") do\n'
     r'                local trimmed = line:match("^%s*(.-)%s*$")\n'
     r'                if trimmed ~= "" then table.insert(lines, trimmed) end\n'
-    r'            end\n'
-    r'            if #lines > 0 then\n'
-    r'                local _unpack = table.unpack or unpack\n'
+    r"            end\n"
+    r"            if #lines > 0 then\n"
+    r"                local _unpack = table.unpack or unpack\n"
     r'                local tail = table.concat({ _unpack(lines, math.max(1, #lines - 2)) }, "\\n")\n'
     r'                err_msg = err_msg .. ":\\n" .. tail\n'
-    r'            end\n'
-    r'        end\n'
+    r"            end\n"
+    r"        end\n"
     r'        notify(err_msg, "error", 5)'
 )
 
@@ -55,7 +53,7 @@ def patch_autosubsync_lua(content: str) -> str:
     # 1. Enable capture_stderr = true in subprocess()
     if "capture_stderr = true" not in patched:
         patched, _ = SUBPROCESS_PATTERN.subn(
-            r'\1\n        capture_stderr = true,\2',
+            r"\1\n        capture_stderr = true,\2",
             patched,
             count=1,
         )

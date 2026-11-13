@@ -226,11 +226,7 @@ def verify(config_dir, env):
     # on the rendering iGPU (vaapi), so the notice would be noise there.
     # Informational only: mpv still plays via auto-safe fallbacks, so a
     # missing driver stack must not abort a deployment.
-    if (
-        env.os == "linux"
-        and env.gpu_vendor == "nvidia"
-        and not getattr(env, "gpu_hybrid", False)
-    ):
+    if env.os == "linux" and env.gpu_vendor == "nvidia" and not getattr(env, "gpu_hybrid", False):
         if getattr(env, "has_libcuda", False):
             check("cuda runtime (nvdec in-VRAM decode)", True, "libcuda available")
         else:
@@ -338,8 +334,12 @@ def verify(config_dir, env):
     # stream_quality.conf only ships in full installs; a partial/manual
     # deployment without it just means ytdl_hook uses its built-in default.
     if os.path.isfile(os.path.join(config_dir, "script-opts", "stream_quality.conf")):
-        with open(os.path.join(config_dir, "script-opts", "stream_quality.conf"), "r", encoding="utf-8") as stream:
-            quality_content = "\n".join(line for line in stream if not line.lstrip().startswith("#"))
+        with open(
+            os.path.join(config_dir, "script-opts", "stream_quality.conf"), "r", encoding="utf-8"
+        ) as stream:
+            quality_content = "\n".join(
+                line for line in stream if not line.lstrip().startswith("#")
+            )
         has_quality_value = "default_quality=" in quality_content
         quality_value = next(
             (

@@ -101,6 +101,7 @@ from deploy import ui
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
+
 # ── Rich bootstrap guard ───────────────────────────────────────
 # Rich is needed by deploy.ui. If it is missing we must install it
 # BEFORE importing anything from deploy/.
@@ -118,13 +119,12 @@ def _bootstrap_rich():
 
         if "arch" in os_release or "cachyos" in os_release or "endeavour" in os_release:
             print("[bootstrap] Trying: sudo pacman -S --noconfirm python-rich")
-            rc = subprocess.call(
-                ["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-rich"]
-            )
+            rc = subprocess.call(["sudo", "pacman", "-S", "--noconfirm", "--needed", "python-rich"])
             if rc == 0:
                 # Verify import works after system install
                 try:
                     import rich as _test  # noqa: F811
+
                     return  # success — continue in this process
                 except ImportError:
                     pass
@@ -135,6 +135,7 @@ def _bootstrap_rich():
             if rc == 0:
                 try:
                     import rich as _test  # noqa: F811
+
                     return
                 except ImportError:
                     pass
@@ -167,11 +168,13 @@ def _bootstrap_rich():
         else:
             # Venv exists but rich broken — recreate
             import shutil
+
             shutil.rmtree(venv_dir, ignore_errors=True)
 
     if needs_create:
         print(f"[bootstrap] Creating venv at {venv_dir} ...")
         import venv as _venv_mod
+
         _venv_mod.create(venv_dir, with_pip=True)
 
     # pip install inside venv (ONLY place pip runs outside a venv is never)
@@ -198,8 +201,11 @@ from deploy.deployer import deploy, rollback_config, list_backups, _remove_path 
 from deploy.verifier import verify
 from deploy.audit_log import AuditLog
 from deploy.planner import (
-    build_install_plan, build_update_plan, build_uninstall_plan,
-    display_plan, confirm_plan,
+    build_install_plan,
+    build_update_plan,
+    build_uninstall_plan,
+    display_plan,
+    confirm_plan,
 )
 ```
 
@@ -227,49 +233,49 @@ SYSTEM_DEPS = {
     # ── Category A — CLI executables ── NEVER pip ──────────────
     "mpv": {
         "windows": {"method": "winget", "id": "mpv-player.mpv"},
-        "arch":    {"method": "pacman", "pkg": "mpv"},
-        "ubuntu":  {"method": "apt",    "pkg": "mpv"},
-        "fedora":  {"method": "dnf",    "pkg": "mpv"},
-        "macos":   {"method": "brew",   "pkg": "mpv"},
-        "verify":  ["mpv", "--version"],
+        "arch": {"method": "pacman", "pkg": "mpv"},
+        "ubuntu": {"method": "apt", "pkg": "mpv"},
+        "fedora": {"method": "dnf", "pkg": "mpv"},
+        "macos": {"method": "brew", "pkg": "mpv"},
+        "verify": ["mpv", "--version"],
     },
     "yt-dlp": {
         "windows": {"method": "winget", "id": "yt-dlp.yt-dlp"},
-        "arch":    {"method": "pacman", "pkg": "yt-dlp"},
-        "ubuntu":  {"method": "apt",    "pkg": "yt-dlp"},        # was pip
-        "fedora":  {"method": "dnf",    "pkg": "yt-dlp"},
-        "macos":   {"method": "brew",   "pkg": "yt-dlp"},
-        "verify":  ["yt-dlp", "--version"],
+        "arch": {"method": "pacman", "pkg": "yt-dlp"},
+        "ubuntu": {"method": "apt", "pkg": "yt-dlp"},  # was pip
+        "fedora": {"method": "dnf", "pkg": "yt-dlp"},
+        "macos": {"method": "brew", "pkg": "yt-dlp"},
+        "verify": ["yt-dlp", "--version"],
     },
     "ffmpeg": {
         "windows": {"method": "winget", "id": "Gyan.FFmpeg"},
-        "arch":    {"method": "pacman", "pkg": "ffmpeg"},
-        "ubuntu":  {"method": "apt",    "pkg": "ffmpeg"},
-        "fedora":  {"method": "dnf",    "pkg": "ffmpeg"},
-        "macos":   {"method": "brew",   "pkg": "ffmpeg"},
-        "verify":  ["ffmpeg", "-version"],
+        "arch": {"method": "pacman", "pkg": "ffmpeg"},
+        "ubuntu": {"method": "apt", "pkg": "ffmpeg"},
+        "fedora": {"method": "dnf", "pkg": "ffmpeg"},
+        "macos": {"method": "brew", "pkg": "ffmpeg"},
+        "verify": ["ffmpeg", "-version"],
     },
     "python": {
-        "windows": {"method": "winget",  "id": "Python.Python.3.11"},
-        "arch":    {"method": "pacman",  "pkg": "python"},
-        "ubuntu":  {"method": "apt",     "pkg": "python3"},
-        "fedora":  {"method": "dnf",     "pkg": "python3"},
-        "macos":   {"method": "brew",    "pkg": "python@3"},
-        "verify":  ["python", "--version"],
+        "windows": {"method": "winget", "id": "Python.Python.3.11"},
+        "arch": {"method": "pacman", "pkg": "python"},
+        "ubuntu": {"method": "apt", "pkg": "python3"},
+        "fedora": {"method": "dnf", "pkg": "python3"},
+        "macos": {"method": "brew", "pkg": "python@3"},
+        "verify": ["python", "--version"],
         "verify_alt": ["python3", "--version"],
     },
     "ffsubsync": {
-        "arch":    {"method": "aur", "pkg": "ffsubsync"},         # was pip+break-system-packages
-        "ubuntu":  {"method": "apt", "pkg": "ffsubsync"},
-        "fedora":  {"method": "dnf", "pkg": "ffsubsync"},
-        "macos":   {"method": "brew", "pkg": "ffsubsync"},
-        "windows": {"method": "winget", "id": "ffsubsync"},       # fallback manual if missing
-        "verify":  ["ffsubsync", "--version"],
+        "arch": {"method": "aur", "pkg": "ffsubsync"},  # was pip+break-system-packages
+        "ubuntu": {"method": "apt", "pkg": "ffsubsync"},
+        "fedora": {"method": "dnf", "pkg": "ffsubsync"},
+        "macos": {"method": "brew", "pkg": "ffsubsync"},
+        "windows": {"method": "winget", "id": "ffsubsync"},  # fallback manual if missing
+        "verify": ["ffsubsync", "--version"],
     },
     "alass": {
-        "arch":    {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},
+        "arch": {"method": "aur", "pkg": "alass-bin", "fallback_pkg": "alass"},
         "windows": {"method": "manual", "url": "https://github.com/kaegi/alass/releases"},
-        "verify":  ["alass", "--version"],
+        "verify": ["alass", "--version"],
     },
 }
 ```

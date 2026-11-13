@@ -43,7 +43,8 @@ class TestSubBackdropToggle(unittest.TestCase):
         ]
         self.assertEqual(
             sorted(k for k in active if any(ord(c) > 0x590 for c in k)),
-            sorted(["أ", "’", "آ", "‘"]))
+            sorted(["أ", "’", "آ", "‘"]),
+        )
 
     def test_uppercase_sponsorblock_B_binding_untouched(self):
         self.assertIn("B        script-binding sponsorblock_upvote", self.template)
@@ -113,10 +114,10 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
             Path(conf_path).write_text(
                 "# SponsorBlock voting — B = Block (Upvote), Ctrl+B = Downvote\n"
                 "B        script-binding sponsorblock_upvote\n"
-                "b    cycle-values sub-back-color \"#B3080808\" \"#00000000\"\n"
+                'b    cycle-values sub-back-color "#B3080808" "#00000000"\n'
                 "\n"
                 "# Subtitle background box toggle — ب = b\n"
-                "ب       cycle-values sub-back-color \"#B3080808\" \"#00000000\"\n",
+                'ب       cycle-values sub-back-color "#B3080808" "#00000000"\n',
                 encoding="utf-8",
             )
 
@@ -138,7 +139,7 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
             conf_path = os.path.join(tmpdir, "input.conf")
             Path(conf_path).write_text(
                 "# Subtitle background box toggle — لا = b\n"
-                "لا       cycle-values sub-back-color \"#B3080808\" \"#00000000\"\n",
+                'لا       cycle-values sub-back-color "#B3080808" "#00000000"\n',
                 encoding="utf-8",
             )
 
@@ -155,8 +156,8 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
             Path(conf_path).write_text(
-                "F8 cycle-values af \"lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],"
-                "lavfi=[alimiter=limit=0.9:level=false]\" \"\"\n",
+                'F8 cycle-values af "lavfi=[dynaudnorm=f=500:g=15:p=0.95:m=10],'
+                'lavfi=[alimiter=limit=0.9:level=false]" ""\n',
                 encoding="utf-8",
             )
 
@@ -175,21 +176,19 @@ class TestMigrateInputConfSubBackdrop(unittest.TestCase):
             # lines here are the backup combo and its generated Arabic twin
             # Ctrl+آ (Ctrl+Shift+b under Arabic arrives as Ctrl+آ).
             self.assertNotIn("cycle-values sub-back-color", content)
-            backdrops = [
-                line
-                for line in content.splitlines()
-                if "sub_backdrop" in line
-            ]
+            backdrops = [line for line in content.splitlines() if "sub_backdrop" in line]
             self.assertTrue(backdrops)
             for line in backdrops:
                 self.assertIn(
                     line.split(None, 2)[:2],
-                    (["Ctrl+Shift+b", "script-binding"],
-                      ["Ctrl+آ", "script-binding"],
-                      ["Ctrl+ﻵ", "script-binding"],
-                      ["b", "script-binding"],
-                      ["ﻻ", "script-binding"],
-                      ["آ", "script-binding"]),
+                    (
+                        ["Ctrl+Shift+b", "script-binding"],
+                        ["Ctrl+آ", "script-binding"],
+                        ["Ctrl+ﻵ", "script-binding"],
+                        ["b", "script-binding"],
+                        ["ﻻ", "script-binding"],
+                        ["آ", "script-binding"],
+                    ),
                     "unexpected rewrite of unrelated binding: %r" % line,
                 )
 

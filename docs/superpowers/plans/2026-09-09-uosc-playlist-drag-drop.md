@@ -83,6 +83,7 @@ function Menu:render()
 end
 """
 
+
 class TestPatchUoscPlaylistDrag(unittest.TestCase):
     def test_menus_lua_patch_and_unpatch(self):
         patched = patcher.patch_menus_lua(SAMPLE_MENUS_LUA)
@@ -141,6 +142,7 @@ class TestPatchUoscPlaylistDrag(unittest.TestCase):
             self.assertIn("move_up", menus_path.read_text(encoding="utf-8"))
             self.assertNotIn("start_reorder", menu_path.read_text(encoding="utf-8"))
 
+
 if __name__ == "__main__":
     unittest.main()
 ```
@@ -198,6 +200,7 @@ def get_default_uosc_dir() -> Path:
 # ---------------------------------------------------------------------------
 # lib/menus.lua patchers
 # ---------------------------------------------------------------------------
+
 
 def patch_menus_lua(content: str) -> str:
     """Replace move_up and move_down actions with drag_reorder in lib/menus.lua."""
@@ -463,7 +466,9 @@ def unpatch_menu_lua(content: str) -> str:
     patched = re.sub(pattern_helpers, "\n", content, flags=re.DOTALL)
 
     patched = re.sub(r"    if self\.is_reordering then self:finish_reorder\(\) end\n", "", patched)
-    patched = re.sub(r"    if self\.is_reordering then self:update_reorder\(cursor\.y\) end\n", "", patched)
+    patched = re.sub(
+        r"    if self\.is_reordering then self:update_reorder\(cursor\.y\) end\n", "", patched
+    )
     patched = re.sub(
         r"    if self\.is_reordering and \(name == 'esc' or name == 'escape'\) then\n"
         r"        self:abort_reorder\(\)\n"
@@ -487,6 +492,7 @@ def unpatch_menu_lua(content: str) -> str:
 # ---------------------------------------------------------------------------
 # CLI Execution
 # ---------------------------------------------------------------------------
+
 
 def run_patcher(uosc_dir: Path, unpatch: bool = False) -> None:
     menus_path = uosc_dir / "lib" / "menus.lua"
@@ -521,7 +527,9 @@ def run_patcher(uosc_dir: Path, unpatch: bool = False) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Patch uosc for playlist drag-and-drop reordering.")
+    parser = argparse.ArgumentParser(
+        description="Patch uosc for playlist drag-and-drop reordering."
+    )
     parser.add_argument(
         "--uosc-dir",
         type=Path,

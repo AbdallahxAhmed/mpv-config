@@ -93,9 +93,12 @@ class LandingProbeTests(unittest.TestCase):
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
             "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
-        with mock.patch.object(dep_actions, "dir_is_writable", _probe_table({info["install_dir"]: True})):
-            self.assertEqual(dep_actions._landing(info, dep_actions.dir_is_writable),
-                             (info["install_dir"], True))
+        with mock.patch.object(
+            dep_actions, "dir_is_writable", _probe_table({info["install_dir"]: True})
+        ):
+            self.assertEqual(
+                dep_actions._landing(info, dep_actions.dir_is_writable), (info["install_dir"], True)
+            )
 
     def test_readonly_primary_lands_in_the_fallback_dir(self):
         info = {
@@ -110,9 +113,7 @@ class LandingProbeTests(unittest.TestCase):
             "install_dir": r"C:\Program Files\mpv\yt-dlp",
             "fallback_install_dir": r"C:\mpv-config-tests\tools",
         }
-        self.assertEqual(
-            dep_actions._landing(info, _probe_table({})), (info["install_dir"], False)
-        )
+        self.assertEqual(dep_actions._landing(info, _probe_table({})), (info["install_dir"], False))
 
 
 class ComputeActionTests(unittest.TestCase):
@@ -130,8 +131,10 @@ class ComputeActionTests(unittest.TestCase):
             },
             mpv_version=(0, 41, 0),
         )
-        with mock.patch.object(dep_actions, "dir_is_writable", lambda _path: True), \
-                mock.patch.object(dep_actions, "dep_is_fresh", return_value=True):
+        with (
+            mock.patch.object(dep_actions, "dir_is_writable", lambda _path: True),
+            mock.patch.object(dep_actions, "dep_is_fresh", return_value=True),
+        ):
             actions = dep_actions.compute_dep_actions(env)
         by_name = {action.name: action for action in actions}
         for name in ("mpv", "yt-dlp", "ffmpeg", "python", "uv", "ffsubsync"):
@@ -171,13 +174,9 @@ class ComputeActionTests(unittest.TestCase):
                 "ensure_in_dir": tmpdir,
                 "refresh_days": 7,
             }
-            env = Environment(
-                os="linux", platform_key="ubuntu", installed={"yt-dlp": True}
-            )
+            env = Environment(os="linux", platform_key="ubuntu", installed={"yt-dlp": True})
             with mock.patch.dict(SYSTEM_DEPS, {"yt-dlp": {"ubuntu": reg_info}}):
-                ytdlp = next(
-                    a for a in dep_actions.compute_dep_actions(env) if a.name == "yt-dlp"
-                )
+                ytdlp = next(a for a in dep_actions.compute_dep_actions(env) if a.name == "yt-dlp")
         self.assertEqual(ytdlp.kind, "refresh")
         self.assertIn("refreshing", ytdlp.detail)
         self.assertIn("older than 7 days", ytdlp.detail)
@@ -191,9 +190,7 @@ class ComputeActionTests(unittest.TestCase):
                 "refresh_days": 7,
                 "fallback_install_dir": fallback,
             }
-            env = Environment(
-                os="windows", platform_key="windows", installed={"yt-dlp": True}
-            )
+            env = Environment(os="windows", platform_key="windows", installed={"yt-dlp": True})
             probe = _probe_table({fallback: True})
             with mock.patch.dict(SYSTEM_DEPS, {"yt-dlp": {"windows": reg_info}}):
                 with mock.patch.object(dep_actions, "dir_is_writable", probe):
@@ -214,9 +211,7 @@ class ComputeActionTests(unittest.TestCase):
         env = Environment(os="windows", platform_key="windows", installed={})
         with mock.patch.dict(SYSTEM_DEPS, {"yt-dlp": {"windows": reg_info}}):
             with mock.patch.object(dep_actions, "dir_is_writable", _probe_table({})):
-                ytdlp = next(
-                    a for a in dep_actions.compute_dep_actions(env) if a.name == "yt-dlp"
-                )
+                ytdlp = next(a for a in dep_actions.compute_dep_actions(env) if a.name == "yt-dlp")
         self.assertFalse(ytdlp.writable)
         self.assertIn("needs Administrator", ytdlp.detail)
 
@@ -241,9 +236,7 @@ class ComputeActionTests(unittest.TestCase):
                 self.assertEqual(entry.target, action.name)
                 self.assertEqual(entry.detail, action.detail)
 
-        default_rows = [
-            entry for entry in default_plan if entry.category == "package"
-        ]
+        default_rows = [entry for entry in default_plan if entry.category == "package"]
         self.assertEqual(
             [(e.action, e.target, e.detail) for e in default_rows],
             [(e.action, e.target, e.detail) for e in package_rows],
@@ -298,10 +291,12 @@ class InstallerConsumptionTests(unittest.TestCase):
         def install_mock(name, _info, _env, mpv_version=None, landing_dir=None):
             return name != "yt-dlp"
 
-        with mock.patch.object(dep_actions, "dep_is_fresh", return_value=False), \
-                mock.patch.object(dep_actions, "dir_is_writable", lambda _path: True), \
-                mock.patch.object(installer, "_run", return_value=(0, "", "")), \
-                mock.patch.object(installer, "_install_one", side_effect=install_mock):
+        with (
+            mock.patch.object(dep_actions, "dep_is_fresh", return_value=False),
+            mock.patch.object(dep_actions, "dir_is_writable", lambda _path: True),
+            mock.patch.object(installer, "_run", return_value=(0, "", "")),
+            mock.patch.object(installer, "_install_one", side_effect=install_mock),
+        ):
             results = installer.install_deps(env, dry_run=False)
 
         by_name = {r["name"]: r for r in results}
@@ -317,9 +312,11 @@ class InstallerConsumptionTests(unittest.TestCase):
             platform_key="windows",
             installed={"yt-dlp": True},
         )
-        with mock.patch.object(dep_actions, "dep_is_fresh", return_value=False), \
-                mock.patch.object(dep_actions, "dir_is_writable", self._probe_false()), \
-                mock.patch.object(installer, "_install_one", side_effect=AssertionError("downloaded")):
+        with (
+            mock.patch.object(dep_actions, "dep_is_fresh", return_value=False),
+            mock.patch.object(dep_actions, "dir_is_writable", self._probe_false()),
+            mock.patch.object(installer, "_install_one", side_effect=AssertionError("downloaded")),
+        ):
             results = installer.install_deps(env, dry_run=False)
 
         by_name = {r["name"]: r for r in results}
@@ -334,9 +331,10 @@ class InstallerConsumptionTests(unittest.TestCase):
             platform_key="windows",
             installed={},
         )
-        with mock.patch.object(
-            dep_actions, "dir_is_writable", self._probe_false()
-        ), mock.patch.object(installer, "_install_one", side_effect=AssertionError("downloaded")):
+        with (
+            mock.patch.object(dep_actions, "dir_is_writable", self._probe_false()),
+            mock.patch.object(installer, "_install_one", side_effect=AssertionError("downloaded")),
+        ):
             results = installer.install_deps(env, dry_run=False)
 
         by_name = {r["name"]: r for r in results}

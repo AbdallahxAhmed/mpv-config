@@ -57,9 +57,7 @@ def build_install_plan(env: "Environment", dep_actions=None) -> List[PlanEntry]:
     # ── System packages ──────────────────────────────────────────────
     actions = dep_actions if dep_actions is not None else compute_dep_actions(env)
     for action in actions:
-        plan.append(
-            PlanEntry("package", action.kind, action.name, action.detail)
-        )
+        plan.append(PlanEntry("package", action.kind, action.name, action.detail))
 
     # ── Scripts & shaders to download ────────────────────────────────
     for script in SCRIPTS:

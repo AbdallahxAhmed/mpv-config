@@ -204,8 +204,10 @@ class CaptionPlayback(unittest.TestCase):
         before = self.get("time-pos")
         self.command("script-message-to", "ytdl_sub_menu", "fetch-sub", "en")
         self.wait(
-            lambda: any(t.get("selected") for t in self.subtitles())
-            and self.get("sub-visibility") is True
+            lambda: (
+                any(t.get("selected") for t in self.subtitles())
+                and self.get("sub-visibility") is True
+            )
         )
         self.assertTrue(self.get("sub-visibility"))
         self.assertGreaterEqual(self.get("time-pos"), before)
@@ -234,8 +236,10 @@ class CaptionPlayback(unittest.TestCase):
         generated = next(item for item in menu["items"] if item["title"] == "Auto-generated")
         self.command(*generated["items"][0]["value"])
         self.wait(
-            lambda: any(t.get("selected") for t in self.subtitles())
-            and self.get("sub-visibility") is True
+            lambda: (
+                any(t.get("selected") for t in self.subtitles())
+                and self.get("sub-visibility") is True
+            )
         )
         self.assertEqual(self.hits["/caption.vtt"], 1)
         self.command(*menu["items"][0]["value"])

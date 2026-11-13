@@ -201,8 +201,9 @@ def compute_dep_actions(env) -> List[DepAction]:
                 )
                 actions.append(DepAction(name, "refresh", optional, landing, writable, detail))
             else:
-                actions.append(DepAction(name, "skip", optional, None, None,
-                                         "already installed — no change"))
+                actions.append(
+                    DepAction(name, "skip", optional, None, None, "already installed — no change")
+                )
             continue
 
         suffix = " (optional)" if optional else " (required)"

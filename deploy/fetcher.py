@@ -422,9 +422,7 @@ def fetch_all(scripts, shaders, staging_dir):
     # Fetch shaders
     try:
         meta = fetch_release(shaders, staging_dir, is_shader=True)
-        results.append(
-            {"name": shaders["name"], "status": "ok", "detail": meta.get("version", "")}
-        )
+        results.append({"name": shaders["name"], "status": "ok", "detail": meta.get("version", "")})
         lockfile["scripts"][shaders["name"]] = meta
     except Exception as e:
         ui.error(f"{shaders['name']}: {e}")

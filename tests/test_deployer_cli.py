@@ -176,7 +176,6 @@ class DeployerParserTests(unittest.TestCase):
         module_file = Path(deployer.__file__).resolve()
         self.assertEqual((deployer.REPO_ROOT / "deploy" / "deployer.py").resolve(), module_file)
 
-
     def test_yes_flag_skips_the_anime_mode_menu(self):
         """--yes means scripted defaults even on a real TTY."""
         args = deployer.build_arg_parser().parse_args(["--install", "--yes"])

@@ -591,9 +591,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertEqual(
             [preset for preset, _label in items], [preset for preset, _label in ANIME4K_PRESETS]
         )
-        self.assertEqual(
-            sorted(preset for preset, _label in items), sorted(ANIME4K_CHAINS)
-        )
+        self.assertEqual(sorted(preset for preset, _label in items), sorted(ANIME4K_CHAINS))
         self.assertTrue(all(label for _preset, label in items))
 
     def test_migrate_mpv_conf_user_prunes_legacy_audio_sync_override(self):
@@ -2165,10 +2163,7 @@ class TestAuditPatches(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "input.conf")
-            old_content = (
-                "S screenshot video\n"
-                "ٍ script-binding sponsorblock_submit_segment\n"
-            )
+            old_content = "S screenshot video\nٍ script-binding sponsorblock_submit_segment\n"
             with open(conf_path, "w", encoding="utf-8") as f:
                 f.write(old_content)
 
@@ -2470,9 +2465,7 @@ class FfsubsyncInstallerTests(unittest.TestCase):
         from deploy.registry import SYSTEM_DEPS
 
         env = Environment(os="linux", platform_key="arch", aur_helper="")
-        with mock.patch.object(
-            installer, "_install_uv_tool", return_value=True
-        ) as m_uv:
+        with mock.patch.object(installer, "_install_uv_tool", return_value=True) as m_uv:
             ok = installer._install_one("ffsubsync", SYSTEM_DEPS["ffsubsync"], env)
 
         self.assertTrue(ok)
@@ -3017,9 +3010,7 @@ class DetectorAutoHotkeyGuardTests(unittest.TestCase):
                     detector.shutil, "which", side_effect=AssertionError("PATH probed twice")
                 ) as which:
                     which.return_value = None
-                    self.assertTrue(
-                        detector._check_installed("autohotkey", self._dep_info(tmpdir))
-                    )
+                    self.assertTrue(detector._check_installed("autohotkey", self._dep_info(tmpdir)))
 
     @unittest.skipUnless(os.name == "nt", "the autohotkey existence check is Windows-only")
     def test_path_installed_hit_never_spawns_a_process(self):
@@ -3043,9 +3034,7 @@ class DetectorAutoHotkeyGuardTests(unittest.TestCase):
                     "which",
                     return_value=r"C:\Program Files\AutoHotkey\v2\AutoHotkey64.exe",
                 ):
-                    self.assertTrue(
-                        detector._check_installed("autohotkey", self._dep_info(tmpdir))
-                    )
+                    self.assertTrue(detector._check_installed("autohotkey", self._dep_info(tmpdir)))
 
     def test_run_silent_refuses_every_autohotkey_interpreter_name(self):
         from deploy import detector

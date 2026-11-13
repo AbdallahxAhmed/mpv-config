@@ -1,12 +1,10 @@
 import os
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from deploy.deployer import (
-    PREFERRED_FONTS,
     REPO_ROOT,
     _deploy_linux_fontconfig_conf,
     _migrate_input_conf,
@@ -39,12 +37,7 @@ class TestLinuxUiUxFixes(unittest.TestCase):
         self.assertIn("Q         set window-minimized yes ; quit-watch-later", content)
 
     def test_migrate_mpv_conf_adds_fonts_dir(self):
-        sample_conf = (
-            "# mpv.conf\n"
-            "osc = no\n"
-            "osd-border-color = #000000\n"
-            "idle = yes\n"
-        )
+        sample_conf = "# mpv.conf\nosc = no\nosd-border-color = #000000\nidle = yes\n"
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = Path(tmpdir) / "mpv.conf"
             conf_path.write_text(sample_conf, encoding="utf-8")
@@ -61,11 +54,7 @@ class TestLinuxUiUxFixes(unittest.TestCase):
             self.assertFalse(migrated_again)
 
     def test_migrate_input_conf_updates_fast_close(self):
-        sample_input = (
-            "# input.conf\n"
-            "CLOSE_WIN quit\n"
-            "SPACE cycle pause\n"
-        )
+        sample_input = "# input.conf\nCLOSE_WIN quit\nSPACE cycle pause\n"
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = Path(tmpdir) / "input.conf"
             input_path.write_text(sample_input, encoding="utf-8")
@@ -96,12 +85,17 @@ class TestLinuxUiUxFixes(unittest.TestCase):
             fake_xdg_data = Path(tmpdir) / "local_share"
             fake_xdg_config = Path(tmpdir) / "config_home"
 
-            with patch.dict(os.environ, {
-                "XDG_DATA_HOME": str(fake_xdg_data),
-                "XDG_CONFIG_HOME": str(fake_xdg_config),
-            }), \
-                 patch("shutil.which", return_value="/usr/bin/fc-cache"), \
-                 patch("subprocess.run") as mock_run:
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "XDG_DATA_HOME": str(fake_xdg_data),
+                        "XDG_CONFIG_HOME": str(fake_xdg_config),
+                    },
+                ),
+                patch("shutil.which", return_value="/usr/bin/fc-cache"),
+                patch("subprocess.run") as mock_run,
+            ):
                 env = MagicMock()
                 env.os = "linux"
                 result = _sync_linux_uosc_fonts(str(config_dir), env=env)
@@ -115,9 +109,11 @@ class TestLinuxUiUxFixes(unittest.TestCase):
     def test_deploy_linux_fontconfig_conf(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_config = Path(tmpdir) / "config_home"
-            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(fake_config)}), \
-                 patch("shutil.which", return_value="/usr/bin/fc-cache"), \
-                 patch("subprocess.run") as mock_run:
+            with (
+                patch.dict(os.environ, {"XDG_CONFIG_HOME": str(fake_config)}),
+                patch("shutil.which", return_value="/usr/bin/fc-cache"),
+                patch("subprocess.run") as mock_run,
+            ):
                 env = MagicMock()
                 env.os = "linux"
                 deployed = _deploy_linux_fontconfig_conf(env=env)
@@ -198,6 +194,7 @@ class TestLinuxUiUxFixes(unittest.TestCase):
 
     def test_pick_preferred_font_with_validator(self):
         installed = {"Segoe UI", "Noto Sans Arabic"}
+
         # Segoe UI fails validator (e.g. only has italic)
         def validator(font):
             return font != "Segoe UI"
@@ -208,15 +205,21 @@ class TestLinuxUiUxFixes(unittest.TestCase):
     def test_resolve_preferred_font_linux(self):
         env = MagicMock()
         env.os = "linux"
-        with patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Tahoma"}), \
-             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe:
+        with (
+            patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Tahoma"}),
+            patch("deploy.deployer._probe_font_has_regular_face") as mock_probe,
+        ):
             # Both Tahoma and Segoe UI are probed; Tahoma has regular face
             mock_probe.side_effect = lambda f: f == "Tahoma"
             font = _resolve_preferred_font(env=env)
             self.assertEqual(font, "Tahoma")
 
-        with patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Noto Sans"}), \
-             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe:
+        with (
+            patch(
+                "deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Noto Sans"}
+            ),
+            patch("deploy.deployer._probe_font_has_regular_face") as mock_probe,
+        ):
             # Tahoma not installed, Segoe UI lacks regular face, Noto Sans has regular
             mock_probe.side_effect = lambda f: f == "Noto Sans"
             font = _resolve_preferred_font(env=env)

@@ -1,4 +1,3 @@
-import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +7,6 @@ from deploy.deployer import (
     _find_binary,
     _migrate_autosubsync_conf,
     _migrate_autosubsync_patch,
-    _resolve_autosubsync_paths,
 )
 from deploy.detector import Environment
 
@@ -41,9 +39,12 @@ class TestAutosubsyncHealing(unittest.TestCase):
             local_bin_file.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             local_bin_file.chmod(0o755)
 
-            with mock.patch("shutil.which", return_value=None), mock.patch(
-                "os.path.expanduser",
-                side_effect=lambda p: str(tmpdir) if "~/.local/bin" in p else p,
+            with (
+                mock.patch("shutil.which", return_value=None),
+                mock.patch(
+                    "os.path.expanduser",
+                    side_effect=lambda p: str(tmpdir) if "~/.local/bin" in p else p,
+                ),
             ):
                 resolved = _find_binary("my_mock_tool", env)
                 self.assertEqual(resolved, str(local_bin_file))

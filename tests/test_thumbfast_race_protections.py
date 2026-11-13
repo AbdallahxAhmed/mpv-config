@@ -177,9 +177,7 @@ class TestThumbfastConfig(unittest.TestCase):
 class TestUoscTimelinePatcher(unittest.TestCase):
     """Test the uosc timeline patcher input/output directly, not from a machine-local file."""
 
-    SAMPLE_TIMELINE = (
-        "function Timeline:on_global_mouse_leave()\n" "\tself.pressed = false\n" "end\n"
-    )
+    SAMPLE_TIMELINE = "function Timeline:on_global_mouse_leave()\n\tself.pressed = false\nend\n"
 
     SAMPLE_FULL_TIMELINE = (
         "function Timeline:on_global_mouse_leave()\n"
@@ -735,8 +733,13 @@ class TestThumbfastQualitySwitchKeepsThumbnail(unittest.TestCase):
         load_idx = self.thumbfast_lua.find("function file_load()")
         self.assertNotEqual(load_idx, -1)
         body = self.thumbfast_lua[load_idx : load_idx + 2500]
-        self.assertIn("stream_ctx.user_agent = stream_ctx.user_agent or stream_ctx.prev_user_agent", body)
-        self.assertIn("stream_ctx.header_fields = stream_ctx.header_fields or stream_ctx.prev_header_fields", body)
+        self.assertIn(
+            "stream_ctx.user_agent = stream_ctx.user_agent or stream_ctx.prev_user_agent", body
+        )
+        self.assertIn(
+            "stream_ctx.header_fields = stream_ctx.header_fields or stream_ctx.prev_header_fields",
+            body,
+        )
 
     def test_remove_thumbnail_files_spares_active_frame_on_same_video(self):
         """Active frame buffer must not be deleted while waiting for replacement worker frame."""
@@ -759,7 +762,7 @@ class TestThumbfastQualitySwitchKeepsThumbnail(unittest.TestCase):
         self.assertNotEqual(spawn_idx, -1)
         body = self.thumbfast_lua[spawn_idx : spawn_idx + 3500]
         self.assertIn('local worker_vid = "auto"', body)
-        self.assertIn('if not is_net or is_edl then', body)
+        self.assertIn("if not is_net or is_edl then", body)
         self.assertIn('"--vid="..worker_vid', body)
 
     def test_sync_changes_vid_re_enables_info_immediately(self):
@@ -767,7 +770,10 @@ class TestThumbfastQualitySwitchKeepsThumbnail(unittest.TestCase):
         sync_idx = self.thumbfast_lua.find("local function sync_changes(prop, val)")
         self.assertNotEqual(sync_idx, -1)
         body = self.thumbfast_lua[sync_idx : sync_idx + 600]
-        self.assertIn("if has_vid == 1 and (last_has_vid == 0 or disabled) and effective_w and effective_h then", body)
+        self.assertIn(
+            "if has_vid == 1 and (last_has_vid == 0 or disabled) and effective_w and effective_h then",
+            body,
+        )
         self.assertIn("info(effective_w, effective_h)", body)
 
 
@@ -789,14 +795,10 @@ class TestThumbfastNetworkWorkerDoesNotStarvePlayback(unittest.TestCase):
         load_idx = self.thumbfast_lua.find("function file_load()")
         self.assertNotEqual(load_idx, -1)
         body = self.thumbfast_lua[load_idx : load_idx + 4000]
-        self.assertIn(
-            "options.spawn_first and not disabled and not is_network_stream()", body
-        )
+        self.assertIn("options.spawn_first and not disabled and not is_network_stream()", body)
 
     def test_idle_watcher_does_not_pre_spawn_for_network_streams(self):
-        self.assertIn(
-            "(options.spawn_first and not is_network_stream())", self.thumbfast_lua
-        )
+        self.assertIn("(options.spawn_first and not is_network_stream())", self.thumbfast_lua)
 
     def test_worker_cache_is_capped(self):
         """The worker needs one frame, not the whole stream."""
@@ -823,9 +825,7 @@ class TestThumbfastUpvalueScope(unittest.TestCase):
         )
 
     def test_overlay_generation_is_declared_before_pump_overlay(self):
-        self._first_use_after_declaration(
-            "overlay_generation", r"^local overlay_generation = 0$"
-        )
+        self._first_use_after_declaration("overlay_generation", r"^local overlay_generation = 0$")
 
     def test_respawn_thumbnailer_is_forward_declared_before_spawn(self):
         self._first_use_after_declaration("respawn_thumbnailer", r"^local respawn_thumbnailer$")

@@ -288,10 +288,8 @@ def prepare_assets(config_dir, staging_dir, repo_dir, prepared):
 
 def _ignore_root_metadata(root):
     root = canonical(root)
-    return (
-        lambda current, names: list(PROTECTED.intersection(names))
-        if canonical(current) == root
-        else []
+    return lambda current, names: (
+        list(PROTECTED.intersection(names)) if canonical(current) == root else []
     )
 
 

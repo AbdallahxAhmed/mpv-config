@@ -40,7 +40,9 @@ SMARTSKIP_CONF = os.path.join(REPO_ROOT, "config", "script-opts", "SmartSkip.con
 # pops on every press of the physical b key.
 LAM_ALEF_COMPOSITE_GLYPHS = ("لا", "لآ", "لأ", "لإ")
 
-SPECIAL_KEY_RE = re.compile(r"^(?:F\d+|MBTN\S*|WHEEL\S*|CLOSE_WIN|CTRL\+\d|SPC|TAB|ENTER)$", re.IGNORECASE)
+SPECIAL_KEY_RE = re.compile(
+    r"^(?:F\d+|MBTN\S*|WHEEL\S*|CLOSE_WIN|CTRL\+\d|SPC|TAB|ENTER)$", re.IGNORECASE
+)
 
 
 def _active_lines(path):
@@ -144,7 +146,8 @@ class TestInputConfConflictAudit(unittest.TestCase):
         self.assertEqual(
             twins,
             sorted(["أ", "’", "آ", "‘"]),
-            "only the documented bare shift-layer keys belong in the template")
+            "only the documented bare shift-layer keys belong in the template",
+        )
 
     def test_modified_arabic_combos_are_not_declared(self):
         """Only the five documented Arabic-key bindings exist; no modified
@@ -193,8 +196,10 @@ class TestSmartSkipConflictAudit(unittest.TestCase):
         bindings, _ = _parse_input_bindings()
         input_plain = {k for k in bindings if "+" not in k and not SPECIAL_KEY_RE.match(k)}
         smart_plain = {
-            key for keys in self.conf.values() for key in keys if "+" not in key
-            and re.search(r"[\u0600-\u06FF]", key)
+            key
+            for keys in self.conf.values()
+            for key in keys
+            if "+" not in key and re.search(r"[\u0600-\u06FF]", key)
         }
         overlap = input_plain & smart_plain
         self.assertEqual(
@@ -214,7 +219,9 @@ class TestSmartSkipConflictAudit(unittest.TestCase):
             "write_chapters_keybind": "ك",
         }
         for name, arabic in expected_subset.items():
-            self.assertIn(arabic, self.conf.get(name, []), "SmartSkip %s lost its %r twin" % (name, arabic))
+            self.assertIn(
+                arabic, self.conf.get(name, []), "SmartSkip %s lost its %r twin" % (name, arabic)
+            )
 
 
 class TestArabicKeyMigrations(unittest.TestCase):
@@ -272,8 +279,7 @@ class TestArabicKeyMigrations(unittest.TestCase):
             self.assertEqual(bindings.get("ؤ"), "script-binding uosc/subtitles")
             self.assertEqual(bindings.get("ش"), "script-binding uosc/audio")
             # b's untwinnable action gets the layout-independent backup
-            self.assertEqual(
-                bindings.get("Ctrl+Shift+b"), "script-binding sub_backdrop/toggle")
+            self.assertEqual(bindings.get("Ctrl+Shift+b"), "script-binding sub_backdrop/toggle")
 
             # Each safe twin appears at most once — pre-existing twins must
             # not be duplicated by the ensure-twins append.
@@ -282,7 +288,8 @@ class TestArabicKeyMigrations(unittest.TestCase):
                     count = sum(
                         1
                         for line in f
-                        if line.strip() and not line.strip().startswith("#")
+                        if line.strip()
+                        and not line.strip().startswith("#")
                         and line.split(None, 1)[0].strip() == twin
                     )
                     f.seek(0)

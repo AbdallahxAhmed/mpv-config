@@ -79,7 +79,9 @@ def _probe_font_has_regular_face(font_name):
         style_lower = style.lower()
         if any(k in style_lower for k in ("italic", "oblique", "kursiv", "cursiva", "slanted")):
             return False
-        if any(k in style_lower for k in ("black", "heavy", "fat", "ultra", "extra bold", "extrabold")):
+        if any(
+            k in style_lower for k in ("black", "heavy", "fat", "ultra", "extra bold", "extrabold")
+        ):
             return False
 
         # 4. File name heuristic for italic variants. No single-letter suffix
@@ -559,7 +561,11 @@ def _patch_mpv_conf(
         and getattr(env, "has_libcuda", False)
         and not getattr(env, "gpu_hybrid", False)
     )
-    if env.os == "windows" and selected_profile in {"native", "windows-like"} and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+    if (
+        env.os == "windows"
+        and selected_profile in {"native", "windows-like"}
+        and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}
+    ):
         hwdec = "d3d11va"
     elif env.os == "linux":
         if env.gpu_vendor == "nvidia":
@@ -567,7 +573,12 @@ def _patch_mpv_conf(
                 hwdec = "nvdec"
             elif selected_profile == "native":
                 hwdec = "nvdec" if use_dgpu_nvdec else base_hwdec
-        elif env.gpu_vendor in {"amd", "intel"} and base_hwdec in {"", "auto", "auto-copy", "auto-safe"}:
+        elif env.gpu_vendor in {"amd", "intel"} and base_hwdec in {
+            "",
+            "auto",
+            "auto-copy",
+            "auto-safe",
+        }:
             if selected_profile in {"native", "linux-like"}:
                 hwdec = "vaapi"
     replacements["{{HWDEC}}"] = hwdec
@@ -1354,9 +1365,7 @@ def deploy(
                     }
                 )
         except Exception as exc:
-            results.append(
-                {"name": "uosc-patch", "status": "warn", "detail": str(exc)}
-            )
+            results.append({"name": "uosc-patch", "status": "warn", "detail": str(exc)})
         # Apply autosubsync stderr capture and diagnostics patch
         try:
             from tools.patch_autosubsync import find_and_patch_autosubsync
@@ -1973,8 +1982,7 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
     )
     if not re.search(r"^[ \t]*q[ \t]+", updated_content, re.MULTILINE):
         updated_content = (
-            updated_content.rstrip()
-            + "\nq                set window-minimized yes ; quit\n"
+            updated_content.rstrip() + "\nq                set window-minimized yes ; quit\n"
         )
 
     updated_content = re.sub(
@@ -2190,54 +2198,54 @@ def _deploy_linux_fontconfig_conf(env=None, audit_log=None):
         content = (
             '<?xml version="1.0"?>\n'
             '<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">\n'
-            '<fontconfig>\n'
+            "<fontconfig>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>uosc_icons</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
             '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
             '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>MaterialIconsRound</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
             '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
             '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>MaterialIconsRound-Regular</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
             '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
             '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>Material Icons Round</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Material Icons Round</string></edit>\n'
             '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
             '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>uosc_textures</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>uosc_textures</string></edit>\n'
             '        <edit name="weight" mode="assign" binding="strong"><const>regular</const></edit>\n'
             '        <edit name="slant" mode="assign" binding="strong"><const>roman</const></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>Tahoma</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Tahoma</string></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>Noto Sans Arabic</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Noto Sans Arabic</string></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>Noto Sans</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>Noto Sans</string></edit>\n'
-            '    </match>\n'
+            "    </match>\n"
             '    <match target="pattern">\n'
             '        <test qual="any" name="family"><string>DejaVu Sans</string></test>\n'
             '        <edit name="family" mode="assign_replace" binding="strong"><string>DejaVu Sans</string></edit>\n'
-            '    </match>\n'
-            '</fontconfig>\n'
+            "    </match>\n"
+            "</fontconfig>\n"
         )
 
     if os.path.isfile(target):
@@ -2299,7 +2307,9 @@ def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
         src_file = os.path.join(src_fonts, filename)
         if os.path.isfile(src_file) and (filename.endswith(".otf") or filename.endswith(".ttf")):
             dst_file = os.path.join(dest_dir, filename)
-            if not os.path.isfile(dst_file) or os.path.getsize(src_file) != os.path.getsize(dst_file):
+            if not os.path.isfile(dst_file) or os.path.getsize(src_file) != os.path.getsize(
+                dst_file
+            ):
                 shutil.copy2(src_file, dst_file)
                 copied = True
 
@@ -2316,7 +2326,9 @@ def _sync_linux_uosc_fonts(config_dir, env=None, audit_log=None):
             pass
 
     if copied and audit_log:
-        audit_log.record_file(dest_dir, "modify", "ok", "synced uosc fonts to ~/.local/share/fonts/mpv-uosc")
+        audit_log.record_file(
+            dest_dir, "modify", "ok", "synced uosc fonts to ~/.local/share/fonts/mpv-uosc"
+        )
     return copied or fc_conf_updated
 
 
@@ -2343,9 +2355,7 @@ def _migrate_uosc_topbar_patch(topbar_lua_path, audit_log=None):
             return True
     except Exception as exc:
         if audit_log:
-            audit_log.record_file(
-                topbar_lua_path, "modify", "warn", f"TopBar.lua patch: {exc}"
-            )
+            audit_log.record_file(topbar_lua_path, "modify", "warn", f"TopBar.lua patch: {exc}")
     return False
 
 
@@ -2372,9 +2382,7 @@ def _migrate_uosc_timeline_patch(timeline_lua_path, audit_log=None):
             return True
     except Exception as exc:
         if audit_log:
-            audit_log.record_file(
-                timeline_lua_path, "modify", "warn", f"Timeline.lua patch: {exc}"
-            )
+            audit_log.record_file(timeline_lua_path, "modify", "warn", f"Timeline.lua patch: {exc}")
     return False
 
 
@@ -2555,10 +2563,13 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
 
     # Hardware decoding migration on Linux + Nvidia: prioritize nvdec when CUDA runtime is present
     hwdec_fixed = False
-    if env is not None and getattr(env, "os", None) == "linux" and getattr(env, "gpu_vendor", None) == "nvidia":
-        use_dgpu_nvdec = (
-            getattr(env, "has_libcuda", False)
-            and not getattr(env, "gpu_hybrid", False)
+    if (
+        env is not None
+        and getattr(env, "os", None) == "linux"
+        and getattr(env, "gpu_vendor", None) == "nvidia"
+    ):
+        use_dgpu_nvdec = getattr(env, "has_libcuda", False) and not getattr(
+            env, "gpu_hybrid", False
         )
         if use_dgpu_nvdec:
             updated, n_hwdec = re.subn(
@@ -3207,7 +3218,12 @@ def _remove_deployed_files(
                     fc_cache = shutil.which("fc-cache")
                     if fc_cache:
                         try:
-                            subprocess.run([fc_cache, "-f"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            subprocess.run(
+                                [fc_cache, "-f"],
+                                check=False,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                            )
                         except Exception:
                             pass
                     ui.success(f"Removed font dir: {font_dir}")
@@ -3366,7 +3382,9 @@ def cmd_uninstall(args):
         ui.summary(remove_results + cleanup_results)
         return 0
 
-    if _prompts_enabled(args) and not ui.confirm("Are you sure you want to uninstall MPV configuration?"):
+    if _prompts_enabled(args) and not ui.confirm(
+        "Are you sure you want to uninstall MPV configuration?"
+    ):
         ui.warn("Uninstall cancelled by user.")
         return 0
 

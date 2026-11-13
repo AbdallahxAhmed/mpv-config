@@ -296,7 +296,6 @@ class TransactionTests(unittest.TestCase):
             # macOS: signal-0 fallback only; sanity-check it doesn't explode.
             self.assertFalse(tx._pid_alive_posix(impossible_pid))
 
-
     def test_rollback_missing_config_preserves_git_and_ignores_old_lock(self):
         backup = self.root / "restore-source"
         put(backup, "mpv.conf", "restored")

@@ -1,4 +1,5 @@
 """Offline unit tests for the layout twins generator."""
+
 import importlib.util
 import os
 import re
@@ -12,8 +13,8 @@ sys.path.insert(0, REPO)
 # Load by file location: an editable install (deploy clone) may be a
 # commit behind and already own the cached mpv_config package.
 _spec = importlib.util.spec_from_file_location(
-    "layout_twins_under_test",
-    os.path.join(REPO, "src", "mpv_config", "layout_twins.py"))
+    "layout_twins_under_test", os.path.join(REPO, "src", "mpv_config", "layout_twins.py")
+)
 layout_twins = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(layout_twins)
 
@@ -78,8 +79,7 @@ class TwinLookupTests(unittest.TestCase):
         on every layout - it needs no twin (and Alt delivery is
         unverified)."""
         for key in ("Ctrl+v", "Ctrl+c", "Alt+t"):
-            self.assertIn(layout_twins._twin_for(key)[1],
-                          ("control-code or unverified combo",))
+            self.assertIn(layout_twins._twin_for(key)[1], ("control-code or unverified combo",))
             self.assertFalse(layout_twins._is_twinable(key), key)
 
     def test_ascii_twins_are_refused(self):
@@ -92,8 +92,7 @@ class TwinLookupTests(unittest.TestCase):
             self.assertIn("US", reason)
 
     def test_modified_and_named_keys_have_no_twin(self):
-        for key in ("Ctrl+v", "Alt+t", "F1", "RIGHT", "MBTN_RIGHT",
-                    "Shift+RIGHT", "CLOSE_WIN"):
+        for key in ("Ctrl+v", "Alt+t", "F1", "RIGHT", "MBTN_RIGHT", "Shift+RIGHT", "CLOSE_WIN"):
             self.assertFalse(layout_twins._is_twinable(key), key)
 
     def test_no_twin_is_typeable_on_the_us_layout(self):
@@ -106,6 +105,7 @@ class TwinLookupTests(unittest.TestCase):
                     emitted, reason = layout_twins._twin_for(key)
                     self.assertIsNone(emitted, key)
                     self.assertIn("US", reason)
+
 
 class GenerateTests(unittest.TestCase):
     MINI = """# comment line
@@ -136,9 +136,7 @@ F9   ignored
 
     def test_replaces_previous_block(self):
         once, _ = layout_twins.generate(self.MINI)
-        mutated = once.replace(
-            "ؤ script-binding uosc/subtitles",
-            "ؤ script-binding something-else")
+        mutated = once.replace("ؤ script-binding uosc/subtitles", "ؤ script-binding something-else")
         self.assertIn("something-else", mutated)
         refreshed, _ = layout_twins.generate(mutated)
         self.assertIn("ؤ script-binding uosc/subtitles", refreshed)
@@ -200,15 +198,13 @@ F9   ignored
             ("آ", "script-binding sub_backdrop/toggle"),
             ("‘", "script-binding sponsorblock_upvote"),
         ]:
-            self.assertRegex(base_text,
-                             r"(?m)^%s\s+%s$" % (glyph, re.escape(command)))
+            self.assertRegex(base_text, r"(?m)^%s\s+%s$" % (glyph, re.escape(command)))
             self.assertEqual(
-                len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)),
-                               text, re.MULTILINE)), 1)
+                len(re.findall(r"^%s[ \t]+%s$" % (glyph, re.escape(command)), text, re.MULTILINE)),
+                1,
+            )
         reported = {key for key, _ in report}
-        self.assertEqual(
-            reported,
-            {"Ctrl+Shift+v", "Ctrl+Shift+V"})
+        self.assertEqual(reported, {"Ctrl+Shift+v", "Ctrl+Shift+V"})
 
     def test_block_is_utf8_round_trip(self):
         text, _ = layout_twins.generate(self.MINI)
@@ -254,8 +250,7 @@ class MigrationTests(unittest.TestCase):
     def _migrate(self, content):
         from deploy.deployer import _migrate_input_conf
 
-        handle = tempfile.NamedTemporaryFile(
-            "w", suffix=".conf", delete=False, encoding="utf-8")
+        handle = tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False, encoding="utf-8")
         try:
             handle.write(content)
             handle.close()
@@ -270,11 +265,12 @@ class MigrationTests(unittest.TestCase):
         self.assertTrue(changed)
         # the mnemonic twins (other physical keys) are gone
         for glyph, command in [
-            ("ح", "memo-history"), ("ت", "sponsorblock_set_segment"),
-            ("م", "sponsorblock_submit_segment"), ("ب", "sub_backdrop"),
+            ("ح", "memo-history"),
+            ("ت", "sponsorblock_set_segment"),
+            ("م", "sponsorblock_submit_segment"),
+            ("ب", "sub_backdrop"),
         ]:
-            self.assertNotRegex(
-                text, r"^%s[ \t]+.*%s" % (glyph, command))
+            self.assertNotRegex(text, r"^%s[ \t]+.*%s" % (glyph, command))
         self.assertNotIn("Arabic Bilingual Twin Bindings", text)
         # the same-key twins are present, exactly once each, plus the
         # modified-combo twins; the template's bare shift-layer lines
@@ -291,8 +287,13 @@ class MigrationTests(unittest.TestCase):
             ("Ctrl+‘", "script-binding sponsorblock_upvote"),
         ]:
             self.assertEqual(
-                len(re.findall(r"^%s[ \t]+%s$" % (re.escape(glyph), re.escape(command)),
-                               text, re.MULTILINE)), 1)
+                len(
+                    re.findall(
+                        r"^%s[ \t]+%s$" % (re.escape(glyph), re.escape(command)), text, re.MULTILINE
+                    )
+                ),
+                1,
+            )
         # the hardware parity twins for h/g/b are generated
         self.assertIn("ا script-binding memo-history", text)
         self.assertIn("ل script-binding sponsorblock_set_segment", text)
@@ -300,8 +301,8 @@ class MigrationTests(unittest.TestCase):
         # the Latin bindings survive untouched
         for latin in ("c", "a", "h", "n", "g", "G", "b"):
             self.assertTrue(
-                re.search(r"^%s[ \t]" % latin, text, re.MULTILINE),
-                "Latin binding lost: %s" % latin)
+                re.search(r"^%s[ \t]" % latin, text, re.MULTILINE), "Latin binding lost: %s" % latin
+            )
 
     def test_layout_independent_backups_are_added(self):
         _, text = self._migrate(LEGACY_DEPLOYED)
@@ -313,9 +314,11 @@ class MigrationTests(unittest.TestCase):
             ("Ctrl+Shift+u", "script-binding sponsorblock_upvote"),
         ]:
             self.assertTrue(
-                re.search(r"^%s[ \t]+%s$" % (re.escape(combo), re.escape(command)),
-                          text, re.MULTILINE),
-                "backup binding missing: %s" % combo)
+                re.search(
+                    r"^%s[ \t]+%s$" % (re.escape(combo), re.escape(command)), text, re.MULTILINE
+                ),
+                "backup binding missing: %s" % combo,
+            )
 
     def test_migration_is_idempotent(self):
         changed_once, text_once = self._migrate(LEGACY_DEPLOYED)
@@ -326,8 +329,7 @@ class MigrationTests(unittest.TestCase):
     def test_guard_conf_migration_disables_the_hook(self):
         from deploy.deployer import _migrate_keyboard_layout_conf
 
-        handle = tempfile.NamedTemporaryFile(
-            "w", suffix=".conf", delete=False, encoding="utf-8")
+        handle = tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False, encoding="utf-8")
         try:
             handle.write('enabled=yes\ncommand="py" -m mpv_config.layout_guard\n')
             handle.close()

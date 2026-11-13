@@ -49,6 +49,7 @@ offline one-shot probe, NOT the guard's banned runtime VK->char path. The
 result agrees with xkeyboard-config's ara(basic) symbol table on every
 key.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,43 +60,148 @@ import sys
 # and Linux XKB ara (Arabic Egypt / basic), unshifted layer. Keys identical in both
 # layouts (digits, "-", "=") are omitted: the original binding already covers them.
 ARABIC_PLAIN_WIN = {
-    "q": "ض", "w": "ص", "e": "ث", "r": "ق", "t": "ف", "y": "غ", "u": "ع",
-    "i": "ه", "o": "خ", "p": "ح",
-    "a": "ش", "s": "س", "d": "ي", "f": "ب", "g": "ل", "h": "ا", "j": "ت",
-    "k": "ن", "l": "م",
-    "z": "ئ", "x": "ء", "c": "ؤ", "v": "ر", "b": "لا", "n": "ى", "m": "ة",
-    "`": "ذ", "[": "ج", "]": "د", ";": "ك", "'": "ط",
-    ",": "و", ".": "ز", "/": "ظ",
+    "q": "ض",
+    "w": "ص",
+    "e": "ث",
+    "r": "ق",
+    "t": "ف",
+    "y": "غ",
+    "u": "ع",
+    "i": "ه",
+    "o": "خ",
+    "p": "ح",
+    "a": "ش",
+    "s": "س",
+    "d": "ي",
+    "f": "ب",
+    "g": "ل",
+    "h": "ا",
+    "j": "ت",
+    "k": "ن",
+    "l": "م",
+    "z": "ئ",
+    "x": "ء",
+    "c": "ؤ",
+    "v": "ر",
+    "b": "لا",
+    "n": "ى",
+    "m": "ة",
+    "`": "ذ",
+    "[": "ج",
+    "]": "د",
+    ";": "ك",
+    "'": "ط",
+    ",": "و",
+    ".": "ز",
+    "/": "ظ",
 }
 
 ARABIC_SHIFT_WIN = {
-    "Q": "َ", "W": "ً", "E": "ُ", "R": "ٌ", "T": "لإ", "Y": "إ", "U": "‘",
-    "I": "÷", "O": "×", "P": "؛",
-    "A": "ِ", "S": "ٍ", "D": "]", "F": "[", "G": "لأ", "H": "أ", "J": "ـ",
-    "K": "،", "L": "/",
-    "Z": "~", "X": "ْ", "C": "}", "V": "{", "B": "لآ", "N": "آ", "M": "’",
-    "~": "ّ", "<": ",", ">": ".", "?": "؟",
+    "Q": "َ",
+    "W": "ً",
+    "E": "ُ",
+    "R": "ٌ",
+    "T": "لإ",
+    "Y": "إ",
+    "U": "‘",
+    "I": "÷",
+    "O": "×",
+    "P": "؛",
+    "A": "ِ",
+    "S": "ٍ",
+    "D": "]",
+    "F": "[",
+    "G": "لأ",
+    "H": "أ",
+    "J": "ـ",
+    "K": "،",
+    "L": "/",
+    "Z": "~",
+    "X": "ْ",
+    "C": "}",
+    "V": "{",
+    "B": "لآ",
+    "N": "آ",
+    "M": "’",
+    "~": "ّ",
+    "<": ",",
+    ">": ".",
+    "?": "؟",
 }
 
 # Linux XKB ara layout (Arabic Egypt / basic)
 ARABIC_PLAIN_XKB = {
-    "q": "ض", "w": "ص", "e": "ث", "r": "ق", "t": "ف", "y": "غ", "u": "ع",
-    "i": "ه", "o": "خ", "p": "ح",
-    "a": "ش", "s": "س", "d": "ي", "f": "ب", "g": "ل", "h": "ا", "j": "ت",
-    "k": "ن", "l": "م",
-    "z": "ئ", "x": "ء", "c": "ؤ", "v": "ر", "b": "\ufefb", "n": "ى", "m": "ة",  # ﻻ
-    "`": "ذ", "[": "ج", "]": "د", ";": "ك", "'": "ط",
-    ",": "و", ".": "ز", "/": "ظ",
+    "q": "ض",
+    "w": "ص",
+    "e": "ث",
+    "r": "ق",
+    "t": "ف",
+    "y": "غ",
+    "u": "ع",
+    "i": "ه",
+    "o": "خ",
+    "p": "ح",
+    "a": "ش",
+    "s": "س",
+    "d": "ي",
+    "f": "ب",
+    "g": "ل",
+    "h": "ا",
+    "j": "ت",
+    "k": "ن",
+    "l": "م",
+    "z": "ئ",
+    "x": "ء",
+    "c": "ؤ",
+    "v": "ر",
+    "b": "\ufefb",
+    "n": "ى",
+    "m": "ة",  # ﻻ
+    "`": "ذ",
+    "[": "ج",
+    "]": "د",
+    ";": "ك",
+    "'": "ط",
+    ",": "و",
+    ".": "ز",
+    "/": "ظ",
 }
 
 ARABIC_SHIFT_XKB = {
-    "Q": "َ", "W": "ً", "E": "ُ", "R": "ٌ", "T": "\ufef9", "Y": "إ", "U": "`",  # ﻹ
-    "I": "÷", "O": "×", "P": "؛",
-    "A": "ِ", "S": "ٍ", "D": "]", "F": "[", "G": "\ufef7", "H": "أ", "J": "ـ",  # ﻷ
-    "K": "،", "L": "/",
-    "Z": "~", "X": "ْ", "C": "}", "V": "{", "B": "\ufef5", "N": "آ", "M": "'",  # ﻵ
-    "~": "ّ", "<": ",", ">": ".", "?": "؟",
-    "{": "<", "}": ">", ":": ":", '"': '"',
+    "Q": "َ",
+    "W": "ً",
+    "E": "ُ",
+    "R": "ٌ",
+    "T": "\ufef9",
+    "Y": "إ",
+    "U": "`",  # ﻹ
+    "I": "÷",
+    "O": "×",
+    "P": "؛",
+    "A": "ِ",
+    "S": "ٍ",
+    "D": "]",
+    "F": "[",
+    "G": "\ufef7",
+    "H": "أ",
+    "J": "ـ",  # ﻷ
+    "K": "،",
+    "L": "/",
+    "Z": "~",
+    "X": "ْ",
+    "C": "}",
+    "V": "{",
+    "B": "\ufef5",
+    "N": "آ",
+    "M": "'",  # ﻵ
+    "~": "ّ",
+    "<": ",",
+    ">": ".",
+    "?": "؟",
+    "{": "<",
+    "}": ">",
+    ":": ":",
+    '"': '"',
 }
 
 # Alias for backward compatibility with probes expecting ARABIC_PLAIN/SHIFT
@@ -105,10 +211,27 @@ ARABIC_SHIFT = ARABIC_SHIFT_WIN
 # What the US layout produces for Shift+<key>, to resolve "Shift+x" style
 # binding names through ARABIC_SHIFT.
 US_SHIFTED = {
-    "`": "~", "1": "!", "2": "@", "3": "#", "4": "$", "5": "%", "6": "^",
-    "7": "&", "8": "*", "9": "(", "0": ")",
-    "-": "_", "=": "+", "[": "{", "]": "}", "\\": "|", ";": ":", "'": '"',
-    ",": "<", ".": ">", "/": "?",
+    "`": "~",
+    "1": "!",
+    "2": "@",
+    "3": "#",
+    "4": "$",
+    "5": "%",
+    "6": "^",
+    "7": "&",
+    "8": "*",
+    "9": "(",
+    "0": ")",
+    "-": "_",
+    "=": "+",
+    "[": "{",
+    "]": "}",
+    "\\": "|",
+    ";": ":",
+    "'": '"',
+    ",": "<",
+    ".": ">",
+    "/": "?",
 }
 
 # Characters a US layout can type: binding any of these as a twin could
@@ -130,10 +253,7 @@ def _validate(twin):
             % (len(twin) if twin else 0, " ".join("U+%04X" % ord(c) for c in (twin or "")))
         )
     if twin in US_REACHABLE:
-        return None, (
-            "twin %r is typeable on the US layout - would change US behaviour"
-            % twin
-        )
+        return None, ("twin %r is typeable on the US layout - would change US behaviour" % twin)
     return twin, ""
 
 
@@ -146,8 +266,8 @@ def _validate_modified(char):
         return None, "modified twin must be a single character"
     if char in US_REACHABLE:
         return None, (
-            "twin Ctrl+%r is typeable on the US layout - would change US "
-            "behaviour" % char)
+            "twin Ctrl+%r is typeable on the US layout - would change US behaviour" % char
+        )
     return char, ""
 
 
@@ -161,7 +281,7 @@ def _twins_for(key):
         # On Windows, lam-alef delivers the second character (e.g. Ctrl+آ for Ctrl+Shift+b).
         # On Linux XKB, the ligature arrives as a single codepoint (Ctrl+ﻵ).
         # Both are emitted so the user's combo works across operating systems.
-        body = key[len("Ctrl+Shift+"):]
+        body = key[len("Ctrl+Shift+") :]
         if len(body) != 1 or not body.isprintable():
             return [], "not a single printable key"
         shift_char = body.upper() if body.isalpha() else US_SHIFTED.get(body)
@@ -195,7 +315,11 @@ def _twins_for(key):
             (ARABIC_PLAIN_XKB, ARABIC_SHIFT_XKB),
             (ARABIC_PLAIN_WIN, ARABIC_SHIFT_WIN),
         ]:
-            raw = table_plain.get(key) if key in table_plain else (table_shift.get(key) if not key.islower() else None)
+            raw = (
+                table_plain.get(key)
+                if key in table_plain
+                else (table_shift.get(key) if not key.islower() else None)
+            )
             if raw:
                 c, r = _validate(raw)
                 if c and c not in twins:
@@ -239,9 +363,9 @@ def _is_twinable(key):
     if key.startswith(("Ctrl+", "Alt+", "Win+", "Meta+")):
         if not key.startswith("Ctrl+Shift+"):
             return False
-        body = key[len("Ctrl+Shift+"):]
+        body = key[len("Ctrl+Shift+") :]
     else:
-        body = key[len("Shift+"):] if key.startswith("Shift+") else key
+        body = key[len("Shift+") :] if key.startswith("Shift+") else key
     return len(body) == 1 and body.isprintable()
 
 
@@ -279,10 +403,13 @@ def generate(input_conf):
             taken.add(twin)
             twins.append((key, twin, command))
 
-    lines = ["", BEGIN_MARK,
-             "# Same physical keys, Arabic 101 & Linux XKB layouts. Refreshed by every",
-             "# mpv-config install/update - edit your Latin bindings above",
-             "# and these twin lines are regenerated."]
+    lines = [
+        "",
+        BEGIN_MARK,
+        "# Same physical keys, Arabic 101 & Linux XKB layouts. Refreshed by every",
+        "# mpv-config install/update - edit your Latin bindings above",
+        "# and these twin lines are regenerated.",
+    ]
     for source, twin, command in twins:
         lines.append("# twin of %s" % source)
         lines.append("%s %s" % (twin, command))
@@ -302,8 +429,7 @@ def main(argv=None):
         description="Refresh the generated Arabic layout twins in input.conf.",
     )
     parser.add_argument("input", help="path to input.conf")
-    parser.add_argument("--write", action="store_true",
-                        help="rewrite the file instead of printing")
+    parser.add_argument("--write", action="store_true", help="rewrite the file instead of printing")
     args = parser.parse_args(argv)
 
     with open(args.input, "r", encoding="utf-8") as handle:

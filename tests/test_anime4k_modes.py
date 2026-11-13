@@ -1,6 +1,7 @@
 """The Anime4K chains live in two places: deploy/registry.py (the installer)
 and scripts/profile_picker.lua (the runtime). They must agree, otherwise the
 mode you pick at install time is not the mode the player uses."""
+
 import re
 import unittest
 from pathlib import Path

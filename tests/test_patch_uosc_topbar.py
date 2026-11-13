@@ -27,7 +27,9 @@ class TestPatchUoscTopbar(unittest.TestCase):
         # Unpatch
         unpatched = patcher.unpatch_topbar_lua(patched)
         self.assertNotIn(patcher.PATCH_MARKER, unpatched)
-        self.assertNotIn("window-minimized", unpatched.split("local close")[1].split("local max")[0])
+        self.assertNotIn(
+            "window-minimized", unpatched.split("local close")[1].split("local max")[0]
+        )
         self.assertEqual(unpatched.strip(), SAMPLE_TOPBAR_LUA.strip())
 
     def test_full_directory(self):
@@ -44,7 +46,12 @@ class TestPatchUoscTopbar(unittest.TestCase):
 
             # Unpatch
             patcher.run_patcher(base, unpatch=True)
-            self.assertNotIn("window-minimized", topbar_file.read_text(encoding="utf-8").split("local close")[1].split("local max")[0])
+            self.assertNotIn(
+                "window-minimized",
+                topbar_file.read_text(encoding="utf-8")
+                .split("local close")[1]
+                .split("local max")[0],
+            )
 
 
 if __name__ == "__main__":

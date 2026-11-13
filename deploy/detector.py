@@ -5,9 +5,9 @@ Detects everything about the current machine needed for deployment:
 OS, distro, display server, GPU, package manager, installed tools.
 """
 
+import ctypes.util
 import os
 import platform
-import ctypes.util
 import re
 import shlex
 import shutil
@@ -29,7 +29,7 @@ FFSUBSYNC_REQUIRED_HEALTH_MODULES = ("webrtcvad",)
 FFSUBSYNC_SOFT_HEALTH_MODULES = ("pkg_resources",)
 # Kept as the union for _check_python_module_import's whitelist.
 FFSUBSYNC_HEALTH_CHECK_MODULES = FFSUBSYNC_REQUIRED_HEALTH_MODULES + FFSUBSYNC_SOFT_HEALTH_MODULES
-MODULE_IMPORT_CHECK_SCRIPT = "import importlib, sys\n" "importlib.import_module(sys.argv[1])\n"
+MODULE_IMPORT_CHECK_SCRIPT = "import importlib, sys\nimportlib.import_module(sys.argv[1])\n"
 
 
 @dataclass
@@ -691,11 +691,7 @@ def detect():
         # hwdec=auto-safe silently falls back to software decode.
         # On hybrid/Optimus layouts nvdec is not the intended decoder — the
         # rendering iGPU decodes via vaapi — so the CUDA check stays silent.
-        if (
-            env.os == "linux"
-            and env.gpu_vendor == "nvidia"
-            and not env.gpu_hybrid
-        ):
+        if env.os == "linux" and env.gpu_vendor == "nvidia" and not env.gpu_hybrid:
             env.has_libcuda = ctypes.util.find_library("cuda") is not None
             rows.append(
                 [

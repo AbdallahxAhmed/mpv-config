@@ -39,9 +39,7 @@ def _progress(total=None, label="yt-dlp.exe", **kwargs):
     # ASCII glyphs by default so assertions are hermetic across terminals;
     # individual tests may override with theme="unicode".
     kwargs.setdefault("theme", "ascii")
-    progress = _InlineDownloadProgress(
-        label, total=total, stdout=out, clock=clock, **kwargs
-    )
+    progress = _InlineDownloadProgress(label, total=total, stdout=out, clock=clock, **kwargs)
     return progress, out, clock
 
 
@@ -103,9 +101,7 @@ class InlineProgressTests(unittest.TestCase):
         # Sandboxed sink without a TTY: silent mode, matching piped installs.
         out = io.StringIO()
         clock = _FakeClock()
-        progress = _InlineDownloadProgress(
-            "yt-dlp.exe", total=1000, stdout=out, clock=clock
-        )
+        progress = _InlineDownloadProgress("yt-dlp.exe", total=1000, stdout=out, clock=clock)
         progress.update(1000)
         progress.finish()
         self.assertEqual(out.getvalue(), "")
@@ -164,7 +160,9 @@ class InlineProgressWidthClampTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         from unittest import mock
+
         import deploy.ui as ui
+
         patcher = mock.patch.object(ui, "USE_COLOR", False)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -176,9 +174,7 @@ class InlineProgressWidthClampTests(unittest.TestCase):
         otherwise read 0.0 and omit the ETA); the returned text is the
         last frame only, so ladder assertions see exactly one render.
         """
-        progress, out, clock = _progress(
-            total=total, label=label, width_fn=lambda: budget
-        )
+        progress, out, clock = _progress(total=total, label=label, width_fn=lambda: budget)
         clock.advance(0.5)
         progress.update(0)
         clock.advance(1.0)
@@ -339,9 +335,7 @@ class DownloadAssetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             dest = os.path.join(tmpdir, "yt-dlp.exe")
             with self.assertRaises(Exception):
-                _download_asset(
-                    self._url("/missing"), dest, "yt-dlp.exe", io.StringIO()
-                )
+                _download_asset(self._url("/missing"), dest, "yt-dlp.exe", io.StringIO())
             self.assertFalse(os.path.exists(dest))
             self.assertEqual(os.listdir(tmpdir), [])
 

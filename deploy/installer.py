@@ -64,8 +64,8 @@ _POLL_SLICE = 0.2
 # - failure prints ONLY a short tail of recent output (bounded).
 # MPV_VERBOSE=1 restores full live streaming for interactive diagnosis.
 _VERBOSE_ON = ("1", "true", "yes")
-_TAIL_KEEP = 40        # recent lines retained in memory for diagnostics
-_TAIL_SHOW = 6         # lines shown after a failed command
+_TAIL_KEEP = 40  # recent lines retained in memory for diagnostics
+_TAIL_SHOW = 6  # lines shown after a failed command
 _CMD_ECHO_LIMIT = 120  # command echo truncation width
 
 # Output that matters for interaction (password prompts, confirm prompts)
@@ -86,6 +86,7 @@ _AUTO_ANSWER_FLAGS = ("--noconfirm", "--yes", "--assumeyes", "-y")
 def _auto_answered(cmd):
     """True when the command already answers its own confirm prompts."""
     return any(flag in cmd[1:] for flag in _AUTO_ANSWER_FLAGS)
+
 
 # The PPA used to bring the latest stable mpv to Ubuntu/Mint (installer
 # branch in the registry). Direct HTTPS registration below reads its
@@ -158,9 +159,7 @@ def _run(cmd, check=True, env=None, timeout=300):
         return False
 
     lines = queue.Queue()
-    reader = threading.Thread(
-        target=_pump_lines, args=(proc.stdout, lines), daemon=True
-    )
+    reader = threading.Thread(target=_pump_lines, args=(proc.stdout, lines), daemon=True)
     reader.start()
 
     tail = collections.deque(maxlen=_TAIL_KEEP)
@@ -277,9 +276,7 @@ def _ensure_pipx(env):
                 timeout=PKG_TIMEOUT,
             )
         elif env.distro == "fedora":
-            return _run(
-                ["sudo", "dnf", "install", "-y", "pipx"], timeout=PKG_TIMEOUT
-            )
+            return _run(["sudo", "dnf", "install", "-y", "pipx"], timeout=PKG_TIMEOUT)
     elif env.os == "macos":
         return _run(["brew", "install", "pipx"], timeout=PKG_TIMEOUT)
 
@@ -991,7 +988,9 @@ def _direct_ppa_register():
     """
     series = _ubuntu_series()
     if not series:
-        ui.warn("No Ubuntu series codename in /etc/os-release — direct PPA registration unavailable.")
+        ui.warn(
+            "No Ubuntu series codename in /etc/os-release — direct PPA registration unavailable."
+        )
         return False
     ui.step(f"Registering PPA directly for series {series} (HTTPS/IPv4-only path)...")
     ui.step("Fetching the PPA signing-key fingerprint (Launchpad API, HTTPS/IPv4)...")
@@ -1108,9 +1107,7 @@ def _install_mpv_latest(env):
             timeout=300,
         )
     if not added:
-        ui.info(
-            "Tool attempt did not register the PPA — trying the HTTPS/IPv4-only path..."
-        )
+        ui.info("Tool attempt did not register the PPA — trying the HTTPS/IPv4-only path...")
         added = _direct_ppa_register()
     if not added and not shutil.which("add-apt-repository"):
         # Last resort: bootstrap the standard tool and let it try once.
@@ -1126,12 +1123,8 @@ def _install_mpv_latest(env):
                 timeout=300,
             )
     if not added:
-        ui.warn(
-            "Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build."
-        )
-    ui.step(
-        "Refreshing apt cache (single pass; the PPA index downloads over IPv4)..."
-    )
+        ui.warn("Could not add ppa:ubuntuhandbook1/mpv — mpv may remain an old distro build.")
+    ui.step("Refreshing apt cache (single pass; the PPA index downloads over IPv4)...")
     _run(
         ["sudo", "apt-get", "update", *_APT_OPTIONS],
         check=False,
@@ -1161,9 +1154,7 @@ def _install_uv(name, info, env):
             ):
                 return True
         elif env.distro in ("ubuntu", "debian", "mint", "pop"):
-            if _run(
-                ["sudo", "apt", "install", "-y", *_APT_OPTIONS, "uv"], timeout=PKG_TIMEOUT
-            ):
+            if _run(["sudo", "apt", "install", "-y", *_APT_OPTIONS, "uv"], timeout=PKG_TIMEOUT):
                 return True
         elif env.distro == "fedora":
             if _run(["sudo", "dnf", "install", "-y", "uv"], timeout=PKG_TIMEOUT):
@@ -1343,9 +1334,7 @@ def _x86_64_isa_level(loader=None):
     """
     loader = loader or "/lib64/ld-linux-x86-64.so.2"
     try:
-        proc = subprocess.run(
-            [loader, "--help"], capture_output=True, text=True, timeout=15
-        )
+        proc = subprocess.run([loader, "--help"], capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return ""
     text = (proc.stdout or "") + (proc.stderr or "")
@@ -1444,9 +1433,7 @@ def _ensure_cachyos_optimized_repos(
             )
     include_name = f"cachyos-{tier}-mirrorlist"
     if not os.path.isfile(os.path.join(pacman_d_dir, include_name)):
-        ui.warn(
-            f"CachyOS repos: {include_name} still missing — keeping default package sources."
-        )
+        ui.warn(f"CachyOS repos: {include_name} still missing — keeping default package sources.")
         return False
 
     lines = conf_text.splitlines()
@@ -1795,7 +1782,9 @@ def install_deps(env, dry_run=False, audit_log=None, mpv_version=None, dep_actio
     # interrupted.) sudo caches credentials for ~15 minutes, covering the
     # volume of the whole install phase.
     if env.os == "linux" and not dry_run:
-        ui.info("Preauthenticating sudo — type your password if prompted (once for all install steps)...")
+        ui.info(
+            "Preauthenticating sudo — type your password if prompted (once for all install steps)..."
+        )
         _run(["sudo", "-v"], check=False, timeout=120)
 
     # Plan and install share ONE decision source: the actions the plan
@@ -2097,7 +2086,7 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
                 with tempfile.TemporaryDirectory() as tmpdir:
                     archive_path = os.path.join(tmpdir, asset["name"])
                     ui.step(
-                        f"Downloading {asset['name']} ({asset.get('size', 0) / (1024*1024):.1f} MB)..."
+                        f"Downloading {asset['name']} ({asset.get('size', 0) / (1024 * 1024):.1f} MB)..."
                     )
                     _download_asset(asset["browser_download_url"], archive_path)
                     extract_dir = os.path.join(tmpdir, "extracted")
@@ -2233,7 +2222,7 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
                         with tempfile.TemporaryDirectory() as tmpdir:
                             archive_path = os.path.join(tmpdir, asset["name"])
                             ui.step(
-                                f"Downloading {asset['name']} ({asset.get('size', 0) / (1024*1024):.1f} MB)..."
+                                f"Downloading {asset['name']} ({asset.get('size', 0) / (1024 * 1024):.1f} MB)..."
                             )
                             _download_asset(asset["browser_download_url"], archive_path)
                             with zipfile.ZipFile(archive_path) as zf:
@@ -2244,9 +2233,7 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
                         ui.success(f"autohotkey: verified at {ahk_exe}")
                         results.append({"name": "autohotkey", "status": "ok", "path": ahk_exe})
                         if audit_log:
-                            audit_log.record_file(
-                                ahk_exe, "download", "ok", "AutoHotkey binary"
-                            )
+                            audit_log.record_file(ahk_exe, "download", "ok", "AutoHotkey binary")
                     else:
                         ui.warn("No matching AutoHotkey asset found")
                         results.append(
