@@ -170,7 +170,11 @@ sharpen                   = 0
 # display-resample may CONFLICT with VRR. Consider using:
 #   video-sync=audio
 #   interpolation=no
-# The [protocol.https] streaming profile already uses this mode.
+# The deployer's VRR display mode (--display-mode vrr) writes exactly these
+# values (video-sync=audio, interpolation=no), so no manual edit is needed.
+# Caveat: scripts/smart_motion.lua re-sets video-sync=display-resample and
+# interpolation at runtime on local files; disable it (smart_motion.conf
+# enabled=no) for VRR to take effect. See specs/004 open items.
 [live-action]
 profile-desc              = "Live-action: clean native playback"
 profile-restore           = copy-equal
@@ -186,6 +190,8 @@ deband-grain              = 0
 sharpen                   = 0
 interpolation             = {{INTERPOLATION}}
 tscale                    = linear
+# Only used with video-sync=audio (VRR mode). Ignored under display-resample
+# (mpv manual, --video-timing-offset).
 video-timing-offset       = 0.01
 
 #######################################################################################
@@ -210,6 +216,8 @@ deband-range              = 20
 deband-grain              = 32
 interpolation             = {{INTERPOLATION}}
 tscale                    = linear
+# Only used with video-sync=audio (VRR mode). Ignored under display-resample
+# (mpv manual, --video-timing-offset).
 video-timing-offset       = 0.01
 
 # ── Wayland Refresh Rate Stabilization ────────────────────────
@@ -243,7 +251,7 @@ profile                   = live-action
 # Streaming — bigger cache + readahead for network jitter.
 # Sync is deliberately NOT downgraded here: on a fixed 144Hz panel, 30fps at
 # video-sync=audio gives 144/30 = 4.8 (non-integer) cadence = micro-judder.
-# Keeping display-resample + linear aligns 30fps cleanly to vblank, and the
+# Keeping display-resample aligns 30fps cleanly to vblank, and the
 # enlarged cache (800MiB / 60s readahead) absorbs the packet jitter that the old
 # video-sync=audio fallback was compensating for. Buffer starvation is handled
 # by cache-pause=no + readahead, not by abandoning vblank alignment.
@@ -265,8 +273,11 @@ stream-lavf-o-append      = request_size=10485760
 # Deband off for network streams: avoids blurring compression artifacts into muddy textures.
 # Press F3 anytime to toggle deband on when severe gradient banding is visible.
 deband                    = no
-# video-sync and interpolation inherited from base config (display-resample /
-# {{INTERPOLATION}} with tscale=oversample) for smooth 24/30/60fps on 144Hz panel.
+# video-sync comes from the base config ({{VIDEO_SYNC}}); interpolation and
+# tscale come from the active content profile ([live-action] or [anime],
+# tscale=linear); then scripts/smart_motion.lua sets tscale at runtime from
+# script-opts/smart_motion.conf (default oversample). This profile deliberately
+# does not switch to video-sync=audio.
 # Smooth playback protected by cache-pause=no to prevent buffer freezing stalls.
 ytdl-raw-options-append   = no-playlist=
 ytdl-raw-options-append   = format-sort=res,fps,codec:av01,codec:vp9.2,codec:vp9,vbr
