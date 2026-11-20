@@ -470,7 +470,6 @@ def _patch_mpv_conf(
     linux_visual_tuning = (
         _get_linux_visual_tuning_block(preferred_font) if env.os == "linux" else ""
     )
-    native_fs_value = "no" if env.os == "linux" else ""
     # Borderless on every OS so uosc's top bar (title + window controls) is
     # the one chrome everywhere. With border=yes the WM draws decorations and
     # uosc hides its chrome (top_bar=no-border), which made Linux look
@@ -523,7 +522,6 @@ def _patch_mpv_conf(
         "{{SHADER_SEP}}": shader_sep,
         "{{LINUX_VISUAL_TUNING}}": linux_visual_tuning,
         "{{BORDER}}": border_value,
-        "{{NATIVE_FS}}": native_fs_value,
         "{{SCREENSHOT_DIR}}": screenshot_dir,
         "{{ANIME_CHAIN}}": anime_chain,
         "{{SCALE}}": scalers["scale"],
@@ -589,7 +587,6 @@ def _patch_mpv_conf(
         content,
         {
             "GPU_CONTEXT": gpu_context,
-            "NATIVE_FS": native_fs_value,
             "D3D11_FLIP": display_settings["d3d11_flip"] if env.os == "windows" else "",
         },
     )
