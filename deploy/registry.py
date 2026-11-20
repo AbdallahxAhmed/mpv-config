@@ -549,6 +549,7 @@ PLATFORM_NATIVE_MPV_DEFAULTS = {
 PLATFORM_REQUIRED_DEFAULTS = {
     # Platform-required values that are not user experience choices.
     "windows": {
+        "sub_font": "Segoe UI",
         "shader_sep": ";",
         "config_dir": "%APPDATA%/mpv",
         "ffmpeg_path": "auto",
@@ -577,6 +578,7 @@ PLATFORM_REQUIRED_DEFAULTS = {
         "alass_path": "auto",
     },
     "macos": {
+        "sub_font": "Geeza Pro",
         "shader_sep": ":",
         "config_dir": "~/.config/mpv",
         "ffmpeg_path": "ffmpeg",

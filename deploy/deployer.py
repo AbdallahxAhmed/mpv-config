@@ -38,7 +38,60 @@ from deploy.registry import (
 )
 from deploy.verifier import verify
 
-PREFERRED_FONTS = ["Tahoma", "Segoe UI", "Noto Sans Arabic", "Noto Sans", "DejaVu Sans"]
+# Subtitle/OSD font candidates, best first. Every one must cover Arabic: the
+# plain-text subtitles here are Arabic, and libass uses this font as the
+# fallback for ASS fonts that lack Arabic glyphs. "Noto Sans" was dropped: it
+# has no Arabic glyphs at all.
+PREFERRED_FONTS = ["Tahoma", "Segoe UI", "Noto Sans Arabic", "DejaVu Sans"]
+# Names older deployers may have written; the Linux font migration replaces them.
+LEGACY_SUBTITLE_FONTS = ["Noto Sans"]
+# alef, lam, yeh: a font missing any of them cannot render Arabic text.
+ARABIC_PROBE_CODEPOINTS = ("0627", "0644", "064a")
+
+
+def _fc_escape(name):
+    """Escape a family name for a fontconfig pattern ("-", ":" and "," are syntax)."""
+    for char in ("\\", "-", ":", ","):
+        name = name.replace(char, "\\" + char)
+    return name
+
+
+def _font_has_arabic(font_name):
+    """True when fontconfig knows font_name with glyphs for every probe codepoint."""
+    try:
+        for codepoint in ARABIC_PROBE_CODEPOINTS:
+            r = subprocess.run(
+                ["fc-list", f"{_fc_escape(font_name)}:charset={codepoint}", "family"],
+                capture_output=True,
+                text=True,
+                timeout=2.0,
+                check=False,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _font_is_usable_for_subtitles(font_name):
+    return _probe_font_has_regular_face(font_name) and _font_has_arabic(font_name)
+
+
+def _probe_arabic_family():
+    """Last resort: the family fontconfig recommends for Arabic, if it covers it."""
+    try:
+        r = subprocess.run(
+            ["fc-match", "-f", "%{family[0]}", ":lang=ar"],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except Exception:
+        return None
+    family = r.stdout.strip() if r.returncode == 0 else ""
+    return family if family and _font_has_arabic(family) else None
 
 
 def _probe_font_has_regular_face(font_name):
@@ -141,11 +194,21 @@ def _resolve_preferred_font(env=None):
         return "Tahoma"
     installed = _probe_fc_list_families()
     if installed:
-        return _pick_preferred_font(installed, validator=_probe_font_has_regular_face)
-    for font in PREFERRED_FONTS:
-        if _probe_font_has_regular_face(font):
+        font = _pick_preferred_font(installed, validator=_font_is_usable_for_subtitles)
+        if _font_is_usable_for_subtitles(font):
             return font
-    return "Tahoma"
+    else:
+        for font in PREFERRED_FONTS:
+            if _font_is_usable_for_subtitles(font):
+                return font
+    return _probe_arabic_family() or "Tahoma"
+
+
+def _resolve_sub_font(env, preferred_font):
+    """SRT/plain-text subtitle font: fixed per OS where the OS ships one with
+    Arabic glyphs (registry), else the probed preferred font (Linux)."""
+    key = getattr(env, "platform_key", None)
+    return PLATFORM_REQUIRED_DEFAULTS.get(key, {}).get("sub_font") or preferred_font
 
 
 def _get_linux_visual_tuning_block(font="Tahoma"):
@@ -521,6 +584,7 @@ def _patch_mpv_conf(
         "{{INTERPOLATION}}": display_settings["interpolation"],
         "{{DITHER_DEPTH}}": str(dither_value),
         "{{DETECTED_DISPLAY_FPS}}": pin_fps or "0",
+        "{{SUB_FONT}}": _resolve_sub_font(env, preferred_font),
     }
     gpu_context = defaults.get("gpu_context", "")
     base_hwdec = defaults.get("hwdec", "auto")
@@ -2593,7 +2657,10 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     preferred_font = None
     if env is not None and getattr(env, "os", None) == "linux":
         preferred_font = _resolve_preferred_font(env)
-        pattern_fonts = "|".join(re.escape(f) for f in PREFERRED_FONTS)
+        pattern_fonts = "|".join(
+            re.escape(f)
+            for f in sorted(PREFERRED_FONTS + LEGACY_SUBTITLE_FONTS, key=len, reverse=True)
+        )
         # The font name comes from fontconfig at runtime: keep it literal.
         quoted_font = f'"{preferred_font}"'
         osd_sub, n_osd = re.subn(

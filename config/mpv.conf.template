@@ -89,7 +89,10 @@ slang                     = ar,en
 # upscale chain -> ringing, haloing, color bleed on text. Do not change.
 blend-subtitles           = no
 subs-with-matching-audio  = no
-sub-font                  = "Segoe UI"
+# Filled per OS by the deployer with a font that has Arabic glyphs (Windows:
+# Segoe UI, macOS: Geeza Pro, Linux: probed via fontconfig). libass also uses
+# it as the fallback when an ASS track's own fonts lack Arabic glyphs.
+sub-font                  = "{{SUB_FONT}}"
 sub-font-size             = 40
 sub-bold                  = yes
 sub-color                 = "#FFFFFFFF"

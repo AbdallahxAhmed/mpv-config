@@ -208,6 +208,7 @@ class TestLinuxUiUxFixes(unittest.TestCase):
         with (
             patch("deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Tahoma"}),
             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe,
+            patch("deploy.deployer._font_has_arabic", return_value=True),
         ):
             # Both Tahoma and Segoe UI are probed; Tahoma has regular face
             mock_probe.side_effect = lambda f: f == "Tahoma"
@@ -219,11 +220,14 @@ class TestLinuxUiUxFixes(unittest.TestCase):
                 "deploy.deployer._probe_fc_list_families", return_value={"Segoe UI", "Noto Sans"}
             ),
             patch("deploy.deployer._probe_font_has_regular_face") as mock_probe,
+            patch("deploy.deployer._font_has_arabic", return_value=True),
+            patch("deploy.deployer._probe_arabic_family", return_value="Noto Naskh Arabic"),
         ):
-            # Tahoma not installed, Segoe UI lacks regular face, Noto Sans has regular
+            # Segoe UI lacks a regular face and Noto Sans (no Arabic glyphs) is no
+            # longer a candidate: fontconfig's Arabic recommendation is used.
             mock_probe.side_effect = lambda f: f == "Noto Sans"
             font = _resolve_preferred_font(env=env)
-            self.assertEqual(font, "Noto Sans")
+            self.assertEqual(font, "Noto Naskh Arabic")
 
     def test_migrate_uosc_topbar_patch(self):
         sample_topbar = (

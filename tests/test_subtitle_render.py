@@ -114,6 +114,38 @@ class AssRenderUnchangedTests(unittest.TestCase):
         self.assertNotEqual(authored, forced)
 
 
+ARABIC_SRT = "1\n00:00:00,000 --> 00:00:02,000\nمرحباً بك يا صديقي، كيف حالك؟\n"
+
+
+@unittest.skipUnless(MPV and shutil.which("fc-list"), "needs mpv and fontconfig")
+class DeployedSubFontHasArabicTests(unittest.TestCase):
+    """libass logs "Glyph 0x... not found" when the font lacks a character."""
+
+    def test_the_deployed_sub_font_draws_arabic_without_fallback(self):
+        with tempfile.TemporaryDirectory(prefix="mpv-sub-font-") as tmp:
+            root = Path(tmp)
+            env = Environment(os="linux", distro="arch", platform_key="arch", display="x11")
+            with mock.patch.object(deployer, "ui"):
+                text = deployer._render_mpv_conf_text(
+                    env, deployer.MPV_PROFILE_DEFAULT, deployer._infer_mpv_conf_choices("", env)
+                )
+            (root / "cfg").mkdir()
+            (root / "cfg" / "mpv.conf").write_text(text, encoding="utf-8")
+            (root / "plain.srt").write_text(ARABIC_SRT, encoding="utf-8")
+            log = root / "mpv.log"
+            render_frame(
+                root / "cfg",
+                root / "plain.srt",
+                root / "out",
+                "--msg-level=all=no,sub/ass=v",
+                f"--log-file={log}",
+            )
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        font_lines = [line for line in lines if "fontselect" in line]
+        self.assertTrue(font_lines, "libass did not report a font")
+        self.assertEqual([], [line for line in lines if "not found" in line and "Glyph" in line])
+
+
 class SubAssOverrideMigrationTests(unittest.TestCase):
     """A kept mpv.conf (--keep-conf) with the old template value is switched."""
 

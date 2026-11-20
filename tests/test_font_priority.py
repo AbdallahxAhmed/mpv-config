@@ -54,6 +54,7 @@ class TestFontPriority(unittest.TestCase):
                 "deploy.deployer._probe_font_has_regular_face",
                 side_effect=lambda font: font.lower() in installed,
             ),
+            mock.patch("deploy.deployer._font_has_arabic", return_value=True),
         ):
             self.assertEqual(_resolve_preferred_font(env), "Noto Sans Arabic")
 
