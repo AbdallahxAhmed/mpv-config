@@ -7,6 +7,7 @@ bare bash with a controlled PATH, so no clone, venv or download happens.
 
 import os
 import re
+import select
 import shutil
 import subprocess
 import tempfile
@@ -104,37 +105,45 @@ class InstallShOutputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, b"Bootstrapping mpv-config...\n")
 
+    def _run_on_a_terminal(self, snippet, extra_env=None):
+        """Run the wrapper block + snippet with stdout on a pty; return (rc, output).
+
+        Our slave descriptor stays open until the output has been read. On
+        macOS (BSD ptys) closing the last slave descriptor discards output still
+        buffered in the pty, so reading after the close returned b"" there while
+        Linux kept the data (CI: macos-latest). With the slave open the master
+        never reports EOF, so select() with a short timeout ends the drain.
+        """
+        master, slave = pty.openpty()
+        try:
+            proc = subprocess.run(
+                [BASH, "-c", _wrapper_block() + "\n" + snippet],
+                stdin=subprocess.DEVNULL,
+                stdout=slave,
+                stderr=subprocess.DEVNULL,
+                env={"PATH": str(self.bin_dir), **(extra_env or {})},
+                timeout=30,
+            )
+            output = b""
+            while select.select([master], [], [], 0.5)[0]:
+                try:
+                    chunk = os.read(master, 1024)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+        finally:
+            os.close(slave)
+            os.close(master)
+        return proc.returncode, output
+
     @unittest.skipUnless(_HAS_PTY, "needs a pty")
     def test_without_gum_uses_ansi_colour_on_a_terminal_unless_no_color(self):
         for extra_env, want_ansi in (({}, True), ({"NO_COLOR": "1"}, False)):
             with self.subTest(no_color=bool(extra_env)):
-                master, slave = pty.openpty()
-                try:
-                    env = {"PATH": str(self.bin_dir), **extra_env}
-                    proc = subprocess.run(
-                        [BASH, "-c", _wrapper_block() + '\n_styled_echo info "hello"'],
-                        stdin=subprocess.DEVNULL,
-                        stdout=slave,
-                        stderr=subprocess.DEVNULL,
-                        env=env,
-                        timeout=30,
-                    )
-                    os.close(slave)
-                    slave = None
-                    output = b""
-                    while True:
-                        try:
-                            chunk = os.read(master, 1024)
-                        except OSError:  # EIO once the pty is drained
-                            break
-                        if not chunk:
-                            break
-                        output += chunk
-                finally:
-                    if slave is not None:
-                        os.close(slave)
-                    os.close(master)
-                self.assertEqual(proc.returncode, 0)
+                returncode, output = self._run_on_a_terminal('_styled_echo info "hello"', extra_env)
+                self.assertEqual(returncode, 0)
                 self.assertIn(b"hello", output)
                 self.assertEqual(b"\x1b[36m" in output, want_ansi, output)
 
