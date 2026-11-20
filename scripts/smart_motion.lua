@@ -126,8 +126,21 @@ local function evaluate_motion_profile(display_fps, video_fps, is_stream)
     }
 end
 
+-- Same decision as last time? container-fps, estimated-vf-fps and display-fps
+-- re-fire evaluate_and_apply() many times per file; re-setting identical
+-- properties would only spam the log. `reason` carries live fps numbers and
+-- is deliberately not compared.
+local function same_profile(a, b)
+    return a ~= nil and b ~= nil
+        and a.mode == b.mode
+        and a.video_sync == b.video_sync
+        and a.interpolation == b.interpolation
+        and a.tscale == b.tscale
+end
+
 local function apply_profile(profile)
     if not profile then return end
+    if same_profile(profile, state.last_applied) then return end
     state.applying_change = true
 
     if profile.video_sync then
@@ -198,6 +211,10 @@ local function on_file_loaded()
 
     state.manual_override = false
     state.current_path = mp.get_property("path") or ""
+    -- A new file starts clean: auto-profiles ([protocol.file] -> anime) may
+    -- have re-applied their own tscale/interpolation, so the first decision
+    -- for this file must be applied even if it equals the previous file's.
+    state.last_applied = nil
 
     if state.settle_timer then
         state.settle_timer:kill()

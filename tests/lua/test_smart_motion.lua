@@ -10,16 +10,16 @@ local SCRIPT = here .. '../../scripts/smart_motion.lua'
 
 local function create_harness()
     _G.mp = nil
-    local h = {props = {}, bindings = {}, keys = {}, osds = {}, timeouts = {}, events = {}, observers = {}}
+    local h = {props = {}, bindings = {}, keys = {}, osds = {}, timeouts = {}, events = {}, observers = {}, logs = {}, sets = {}}
     _G.mp = {
         log = function() end,
-        msg = {info = function() end, warn = function() end, debug = function() end},
+        msg = {info = function(text) h.logs[#h.logs + 1] = text end, warn = function() end, debug = function() end},
         get_property = function(k, d) local v = h.props[k]; if v == nil then return d end; return v end,
         get_property_native = function(k, d) local v = h.props[k]; if v == nil then return d end; return v end,
         get_property_bool = function(k, d) local v = h.props[k]; if v == nil then return d end; return v end,
-        set_property = function(k, v) h.props[k] = v end,
-        set_property_native = function(k, v) h.props[k] = v end,
-        set_property_bool = function(k, v) h.props[k] = v end,
+        set_property = function(k, v) h.props[k] = v; h.sets[#h.sets + 1] = k end,
+        set_property_native = function(k, v) h.props[k] = v; h.sets[#h.sets + 1] = k end,
+        set_property_bool = function(k, v) h.props[k] = v; h.sets[#h.sets + 1] = k end,
         osd_message = function(text, duration) h.osds[#h.osds + 1] = {text = text, duration = duration} end,
         add_key_binding = function(key, name, fn) h.keys[#h.keys + 1] = key; h.bindings[name] = fn end,
         add_timeout = function(sec, fn)
@@ -135,6 +135,68 @@ test('keyless_binding: toggle registered without hardcoded key', function()
     local h, _ = load_script()
     eq('function', type(h.bindings['toggle']))
     eq(nil, h.keys[1])
+end)
+
+local function apply_logs(h)
+    local n = 0
+    for _, line in ipairs(h.logs) do
+        if line:match('^Smart Motion %[') then n = n + 1 end
+    end
+    return n
+end
+
+test('dedupe: same profile twice = one log line, no set_property calls', function()
+    local h, sm = load_script()
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+    eq(1, apply_logs(h))
+    eq(3, #h.sets)  -- video-sync, interpolation, tscale
+    h.sets = {}
+    -- A fresh table with the same decision; only the fps-bearing reason differs.
+    local again = sm.evaluate_motion_profile(143.98, 23.976, false)
+    eq('integer_cadence_lock', again.mode)
+    sm.apply_profile(again)
+    eq(1, apply_logs(h))
+    eq(0, #h.sets)
+end)
+
+test('dedupe: a different profile is still applied and logged', function()
+    local h, sm = load_script()
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+    h.sets = {}
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 60.0, false))
+    eq('high_fps_crisp', sm.state.last_applied.mode)
+    eq(2, apply_logs(h))
+    eq(3, #h.sets)
+    eq(false, h.props['interpolation'])
+end)
+
+test('dedupe: manual override detection still works after a skipped apply', function()
+    local h, sm = load_script()
+    local p = sm.evaluate_motion_profile(143.981, 23.976, false)
+    sm.apply_profile(p)
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+    h.observers['tscale'](nil, p.tscale)       -- echo of our own value: not a tweak
+    h.observers['interpolation'](nil, true)
+    eq(false, sm.state.manual_override)
+    h.observers['tscale'](nil, 'linear')       -- the user changed it
+    eq(true, sm.state.manual_override)
+end)
+
+test('dedupe: a new file re-applies even an identical decision', function()
+    local h, sm = load_script()
+    h.props['vid'] = 1
+    h.props['display-fps'] = 143.981
+    h.props['container-fps'] = 23.976
+    h.props['path'] = '/videos/a.mkv'
+    h.events['file-loaded']()
+    h.timeouts[#h.timeouts].fn()
+    eq(1, apply_logs(h))
+    h.sets = {}
+    h.props['path'] = '/videos/b.mkv'
+    h.events['file-loaded']()
+    h.timeouts[#h.timeouts].fn()
+    eq(2, apply_logs(h))
+    eq(3, #h.sets)
 end)
 
 print(string.format("All %d smart_motion Lua tests passed successfully!", total))
