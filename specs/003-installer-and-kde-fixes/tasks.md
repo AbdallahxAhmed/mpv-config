@@ -4,7 +4,7 @@
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
 **Status (2026-11-20)**: Partially superseded — installer design replaced; see
 [spec.md — As-built](spec.md#as-built-2026-11-19). Ticked: T001, T004, T006, T008,
-O1–O3. Superseded: T002, T003, T005, T007. Open: T009, O4, O5.
+O1–O3, O5 (needs Windows test). Superseded: T002, T003, T005, T007. Open: T009, O4, O6.
 
 **Tests**: Not requested — no test tasks included. (As-built: related
 tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
@@ -160,7 +160,7 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
   - These are NOT presented as "window snap fixes" — they are convenience sizing helpers
   - No changes to Windows deploys
 
-- [ ] T009 *Not met: `grep -r "break-system" .` hits `.specify/memory/constitution.md:119` (the ban itself); `"method": "pip"` → 0; constitution Principle III is not satisfied (O5); O1 and O2 were fixed 2026-11-20.* Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
+- [ ] T009 *Not met: `grep -r "break-system" .` hits `.specify/memory/constitution.md:119` (the ban itself); `"method": "pip"` → 0; Principle III met in code since O1 and O5 were fixed 2026-11-20; still open: Principle I (O4) and Principle V for `install.ps1` (O6).* Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
 
   **Files**: entire codebase (read-only scan)
   **Acceptance**:
@@ -178,7 +178,8 @@ Tracked in [spec.md — Open items](spec.md#open-items-code-bugs--to-be-fixed-in
 - [x] O2 *(fixed 2026-11-20, `729639f`)* Replace raw `echo` in `install.sh` with Gum wrappers and an ANSI fallback (Principle V)
 - [x] O3 *(fixed 2026-11-20, `e6eb056`)* Remove the no-op `native-fs` line from the Linux output (`{{NATIVE_FS}}`, `deploy/deployer.py:473`)
 - [ ] O4 Move the window sizing helpers out of `deploy/deployer.py` into a config template (Principle I) — found in this update
-- [ ] O5 Stop `install.ps1` from running `pip install --user` against the system Python (Principle III) — found in this update
+- [x] O5 *(fixed 2026-11-20, `ac1b484` — **needs Windows test**)* Stop `install.ps1` from running `pip install --user` against the system Python (Principle III) — found in this update
+- [ ] O6 Add `-ForegroundColor` to `install.ps1`'s `Write-Host` output (Principle V) — found while fixing O5
 
 ---
 

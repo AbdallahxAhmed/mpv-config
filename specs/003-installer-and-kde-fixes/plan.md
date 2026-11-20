@@ -548,10 +548,12 @@ autofit-smaller         = 30%x30%
 > **As-built (2026-11-19)**: status against `.specify/memory/constitution.md`:
 > - **I**: partly met — geometry helpers are config literals in
 >   `deploy/deployer.py` (O4).
-> - **III**: not met — `install.ps1` runs `pip install --user` (O5). The
->   `sync_dependencies` pip fallback (O1) was fixed on 2026-11-20.
+> - **III**: met in code since 2026-11-20 — the `sync_dependencies` pip
+>   fallback (O1) and `install.ps1`'s `pip install --user` (O5) were both
+>   fixed; O5 still needs a Windows test.
 > - **V**: met for `install.sh` since 2026-11-20 (O2: Gum wrappers with
->   ANSI/plain fallback).
+>   ANSI/plain fallback); not met for `install.ps1`, whose `Write-Host`
+>   calls have no `-ForegroundColor` (O6).
 > - The constitution's Category C text still describes a `setup.py`
 >   `os.execv` re-exec that no longer exists (constitution not changed here).
 

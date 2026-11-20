@@ -82,7 +82,7 @@
 - [ ] T009 Commit and push changes
 - [x] T010 [US1][US2] Linux/Wayland measurement (CachyOS, KDE Plasma Wayland, RTX 3060, 143.98 Hz, VRR off): full config meets the pass criteria over 60+ s (Black Clover S02E05). Results in [spec.md](spec.md#measurement-results--2026-11-19)
 - [ ] T011 [US1][US3] Windows measurement (nv12 and p010 files) against the same pass criteria — **not measured yet**
-- [ ] T012 Open item: `scripts/smart_motion.lua` needs its own spec or a section here. It sets `tscale`, `video-sync` and `interpolation` at runtime, overriding the profiles' `tscale=linear` and the deployer's VRR mode
+- [ ] T012 Open item: `scripts/smart_motion.lua` needs its own spec or a section here. It sets `tscale`, `video-sync` and `interpolation` at runtime, overriding the profiles' `tscale=linear`. (The VRR-mode override is fixed since 2026-11-20, `1a38d97`: VRR mode seeds `smart_motion.conf` with `enabled=no`.)
 
 ---
 

@@ -132,9 +132,10 @@ fixed in a future KDE release, this override should be re-evaluated.
 other modes (`--video-sync=display-...`), video timing relies on vsync
 blocking, and this option is not used." Under `display-resample`, the
 default mode, it therefore has no effect. It only matters in the
-deployer's VRR mode (`--display-mode vrr`, `video-sync=audio`). Even
-there, `smart_motion.lua` currently re-sets `video-sync=display-resample`
-on local files unless it is disabled (see Open items).
+deployer's VRR mode (`--display-mode vrr`, `video-sync=audio`). Since
+2026-11-20 that mode also writes `enabled=no` into a fresh
+`smart_motion.conf`, so `smart_motion.lua` no longer re-sets
+`video-sync=display-resample` there (see Open items).
 
 ### R4 — `video-sync-max-video-change` Tuning
 
@@ -245,10 +246,12 @@ Add a comment block before the `[live-action]` profile:
 #   interpolation=no
 # The deployer's VRR display mode (--display-mode vrr) writes exactly these
 # values (video-sync=audio, interpolation=no), so no manual edit is needed.
-# Caveat: scripts/smart_motion.lua re-sets video-sync=display-resample and
-# interpolation at runtime on local files; disable it (smart_motion.conf
-# enabled=no) for VRR to take effect. See specs/004 open items.
+# It also seeds script-opts/smart_motion.conf with enabled=no, so
+# scripts/smart_motion.lua cannot switch video-sync back at runtime.
 ```
+
+(The earlier "Caveat: … disable it (smart_motion.conf enabled=no)" lines
+were replaced on 2026-11-20, once the deployer started doing that itself.)
 
 The stale sentence "The [protocol.https] streaming profile already uses
 this mode" was removed on 2026-11-19. `[protocol.https]` keeps
@@ -310,7 +313,8 @@ runtime `tscale` set by `smart_motion.lua`.
 - **smart_motion.lua needs its own spec or a section here.** It sets
   `tscale` (from `default_tscale`, currently `oversample`),
   `video-sync` and `interpolation` at runtime, overriding both the
-  profiles' `tscale=linear` and the deployer's VRR mode.
+  profiles' `tscale=linear`. *The VRR override was fixed 2026-11-20
+  (`1a38d97`): VRR mode seeds `smart_motion.conf` with `enabled=no`.*
 - **Windows verification pending.**
 - **First-run delayed 8–9 / drop 1**: not reproduced; re-check with a
   cold shader cache.

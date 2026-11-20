@@ -2,7 +2,7 @@
 
 **Feature Branch**: `003-installer-and-kde-fixes`
 **Created**: 2026-04-25
-**Status**: Partially superseded — installer design replaced; see [As-built](#as-built-2026-11-19). Open items O1–O3 fixed 2026-11-20; O4–O5 open.
+**Status**: Partially superseded — installer design replaced; see [As-built](#as-built-2026-11-19). Open items O1–O3 and O5 fixed 2026-11-20 (O5 needs a Windows test); O4 and O6 open.
 **Input**: Fix installer crashes, dependency classification violations, and KDE Plasma 6.6.4 window behavior issues
 
 ## As-built (2026-11-19)
@@ -34,8 +34,13 @@ history; each says what replaced it.
   through `_styled_echo` / `die`: Gum when installed, otherwise ANSI
   colour on a terminal and plain text elsewhere (since 2026-11-20, O2).
 - **Windows bootstrap**: `install.ps1` installs missing prerequisites
-  with winget and then runs `pip install --user --editable .` into the
-  user site of the system Python, not a venv (see Open items, O5).
+  with winget, creates a private venv at `%LOCALAPPDATA%\mpv-config\venv`,
+  installs the checkout into it in editable mode with the venv's pip,
+  writes a `mpv-config.cmd` shim to `%LOCALAPPDATA%\mpv-config\bin`, and
+  runs `python -m mpv_config install` with the venv Python. It never runs
+  pip against the system Python (since 2026-11-20, O5; needs a Windows
+  test). `Download-Video.cmd` / `Watch-Clipboard.cmd` use the venv Python,
+  falling back to `python` on PATH.
 - **UI fallback**: `deploy/ui.py` imports Rich and falls back to ANSI
   output when Rich is missing (lines 32–43). `_print(text="", **kwargs)`
   is at `deploy/ui.py:129`.
@@ -90,7 +95,8 @@ history; each says what replaced it.
 
 ### Open items (code bugs — to be fixed in a separate change)
 
-O1–O3 were fixed on 2026-11-20 (one commit each); O4 and O5 remain open.
+O1–O3 and O5 were fixed on 2026-11-20 (one commit each; O5 still needs a
+Windows test). O4 and O6 remain open.
 
 - **O1** — **Fixed 2026-11-20** (`58d50f2`): ffsubsync now uses `uv tool`,
   then pipx, never pip; covered by `tests/test_sync_ffsubsync.py`.
@@ -118,8 +124,17 @@ Additional findings from this update (not in the original list):
   (`_get_linux_visual_tuning_block`), not text in a config template.
   This conflicts with SC-006 and with Principle I ("the deploy package
   … MUST NOT embed configuration literals").
-- **O5** — `install.ps1` runs `pip install --user` against the system
-  Python. Principle III allows pip only inside the isolated venv.
+- **O5** — **Fixed 2026-11-20** (`ac1b484`) — **needs Windows test**:
+  `install.ps1` now creates `%LOCALAPPDATA%\mpv-config\venv` and installs
+  into it, mirroring `install.sh`; the Windows `.cmd` launchers use the
+  venv Python. Covered by `tests/test_install_ps1.py` (static checks; the
+  pwsh parse check runs only where pwsh is installed). An older `--user`
+  install is not removed automatically. Original finding: `install.ps1`
+  runs `pip install --user` against the system Python. Principle III
+  allows pip only inside the isolated venv.
+- **O6** — `install.ps1` prints with plain `Write-Host` (no
+  `-ForegroundColor`), which Principle V requires at minimum for
+  PowerShell — found while fixing O5.
 
 ## User Scenarios & Testing
 
@@ -171,7 +186,8 @@ detection and display the installation plan without any `TypeError`.
 > Scenario 3 is **Superseded** (Rich comes from the venv, not
 > `python-rich`). Scenario 5: Ubuntu gets the yt-dlp GitHub binary, not
 > apt. "`pip` is never invoked outside a venv": the `sync-deps` case was
-> fixed on 2026-11-20 (O1); it is still not met on Windows (O5).
+> fixed on 2026-11-20 (O1), and the Windows `pip install --user` on
+> 2026-11-20 (O5, pending a Windows test).
 
 A user runs `python setup.py --install` on Arch Linux. The installer
 installs `mpv`, `yt-dlp`, `ffmpeg`, `ffsubsync`, and `alass` via the

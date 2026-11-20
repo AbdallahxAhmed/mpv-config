@@ -101,8 +101,12 @@ pass window and are diagnostic only.
   `default_tscale` in `script-opts/smart_motion.conf` (currently
   `oversample`). That overrides the profiles' `tscale=linear`. It also
   sets `video-sync=display-resample` and `interpolation` on local files.
-  That overrides the deployer's VRR mode (`video-sync=audio`,
-  `interpolation=no`) unless smart_motion is disabled.
+  *VRR part fixed 2026-11-20 (`1a38d97`):* with `--display-mode vrr`, a
+  freshly deployed `script-opts/smart_motion.conf` is written with
+  `enabled=no`, so it can no longer override the VRR mode
+  (`video-sync=audio`, `interpolation=no`). An existing, personal
+  `smart_motion.conf` is kept, and the deployer warns if it is enabled.
+  The "needs its own spec" part stays open.
 - **Windows verification**: run the measurement command on Windows
   (nv12 and p010 files) against the pass criteria above.
 - **Delayed 8–9 / drop 1 on first runs**: not reproduced; re-check on a
@@ -327,9 +331,10 @@ for it.
   resample inherently struggles here; the fix must not make it worse.
   Not separately verified.
 - **nv12 + AV1 combination**: Not addressed (see User Story 4).
-- **VRR/G-Sync displays**: display-resample is NOT auto-disabled, and
-  `smart_motion.lua` re-sets `video-sync=display-resample` at runtime
-  on local files even in VRR mode (see Open items). The
+- **VRR/G-Sync displays**: display-resample is NOT auto-disabled. In
+  VRR mode a fresh install also seeds `smart_motion.conf` with
+  `enabled=no`, so `smart_motion.lua` does not switch video-sync back
+  (since 2026-11-20; see Open items). The
   default `auto` display mode resolves to `display-resample`
   (`video-sync=display-resample`, `interpolation=yes`). VRR users must
   pass `--display-mode vrr` to the deployer, which renders
@@ -386,8 +391,8 @@ for it.
   `cache-pause=no`) absorbs network jitter that the old
   `video-sync=audio` fallback was compensating for. `[protocol.http]`
   and `[protocol.ytdl]` alias this profile. VRR users get
-  `video-sync=audio` globally via `--display-mode vrr` (subject to the
-  smart_motion caveat in Open items).
+  `video-sync=audio` globally via `--display-mode vrr`, which also
+  disables smart_motion in a fresh `smart_motion.conf`.
 
 - **FR-006**: The fix MUST work on both Linux and Windows. Platform
   differences use mpv's conditional profile system (`profile-cond`) or
