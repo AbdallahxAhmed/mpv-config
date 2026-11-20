@@ -143,9 +143,11 @@ class SanitizedAssRenderTests(unittest.TestCase):
                 env=env,
             )
             expected = render_frame(config, root / "expected.ass", root / "expected", frames=20)
-            cleaned_files = list((root / "tmp").glob("*.sanitized.ass"))
-        self.assertTrue(cleaned_files, "the sanitizer did not produce a cleaned track")
+            leftovers = [p.name for p in (root / "tmp").iterdir()]
+        # identical pixels also prove the swap happened: unswapped, the
+        # entities would be visible
         self.assertEqual(expected, sanitized)
+        self.assertEqual([], leftovers, "temp files survived mpv quitting")
 
 
 PROBE_LUA = """

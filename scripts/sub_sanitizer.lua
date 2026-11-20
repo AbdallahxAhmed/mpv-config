@@ -18,8 +18,13 @@
 --
 -- Options (script-opts/sub_sanitizer.conf):
 --   enabled=yes            set to no to disable the automatic pass
---   save_next_to_video=no  write `<video>.sanitized.<ext>` next to the
---                          video and reuse it, instead of a temp file
+--   save_next_to_video=no  write `<video>.<track>.sanitized.<ext>` next to
+--                          the video (kept) instead of a temp file
+--
+-- Temp files are named mpv-sub-sanitizer-<pid>-<track hash>.sanitized.<ext>
+-- (no two tracks or mpv instances collide, nothing from the video name ends
+-- up in it) and are deleted when the file ends and when mpv quits. Network
+-- paths (http, edl, ytdl, ...) are skipped: extracting would download them.
 --   remove_original=no     unload the original track after the swap
 --
 -- The `sub-sanitize` script message force-processes the current track;
@@ -322,8 +327,41 @@ local function dirname(path)
     return (tostring(path):gsub("\\", "/"):match("^(.*)/[^/]+$"))
 end
 
-local function temp_dir()
-    return os.getenv("TEMP") or os.getenv("TMPDIR") or "/tmp"
+-- TEMP/TMP first (Windows), then TMPDIR (POSIX).
+local function temp_dir(getenv)
+    getenv = getenv or os.getenv
+    return getenv("TEMP") or getenv("TMP") or getenv("TMPDIR") or "/tmp"
+end
+
+local PID = tostring((utils.getpid and utils.getpid()) or os.time())
+
+-- Short stable hash (djb2) so names stay unique per track without carrying
+-- the track's own path, which may hold characters Windows forbids.
+local function short_hash(text)
+    local h = 5381
+    for i = 1, #text do h = (h * 33 + text:byte(i)) % 4294967296 end
+    return string.format("%08x", h)
+end
+
+-- Safe in a Windows file name: no control characters or <>:"/\|?*.
+local function safe_name(text)
+    text = text:gsub('[%c<>:"/\\|%?%*]', "_"):gsub("[%. ]+$", "")
+    return text:sub(1, 60)
+end
+
+-- Any URL-like path except file://: reading it would mean downloading it.
+local function is_network(path)
+    local scheme = tostring(path or ""):match("^(%a[%w+.%-]*)://")
+    return scheme ~= nil and scheme:lower() ~= "file"
+end
+
+local temp_files = {}
+
+local function remove_temp_files()
+    for path in pairs(temp_files) do
+        os.remove(path)
+        temp_files[path] = nil
+    end
 end
 
 local function read_file(path)
@@ -368,10 +406,11 @@ local function find_ffmpeg()
     return "ffmpeg"  -- last resort: whatever PATH provides
 end
 
-local function extract_track(track, ext)
+local function extract_track(track, ext, key)
     local video = mp.get_property("path")
     if not video then return nil end
-    local raw = utils.join_path(temp_dir(), "sub_sanitizer_extract." .. ext)
+    local raw = utils.join_path(temp_dir(),
+        "mpv-sub-sanitizer-" .. PID .. "-" .. short_hash(key) .. "-extract." .. ext)
     local ret = mp.command_native({
         name = "subprocess",
         playback_only = false,
@@ -394,16 +433,17 @@ local function extract_track(track, ext)
     return content
 end
 
-local function output_path(ext)
-    local base = basename(mp.get_property("path") or "subtitles")
-    base = base:gsub("%.%a+$", "") .. ".sanitized." .. ext
-    if o.save_next_to_video then
-        local dir = dirname(mp.get_property("path") or "")
+local function output_path(track, ext, key)
+    local video = mp.get_property("path") or ""
+    if o.save_next_to_video and not is_network(video) then
+        local dir = dirname(video)
         if dir and dir ~= "" then
-            return utils.join_path(dir, base)
+            local base = safe_name(basename(video):gsub("%.[%w]+$", ""))
+            return utils.join_path(dir, base .. "." .. tostring(track.id) .. ".sanitized." .. ext), false
         end
     end
-    return utils.join_path(temp_dir(), base)
+    local name = "mpv-sub-sanitizer-" .. PID .. "-" .. short_hash(key) .. ".sanitized." .. ext
+    return utils.join_path(temp_dir(), name), true
 end
 
 local function track_key(track)
@@ -427,11 +467,17 @@ local function sanitize_track(track)
         return false
     end
 
+    local source = track.external and track["external-filename"] or mp.get_property("path")
+    if is_network(source) then
+        msg.info("sub_sanitizer: network subtitle source skipped: " .. tostring(source))
+        return false
+    end
+
     local content
     if track.external then
         content = read_file(track["external-filename"])
     else
-        content = extract_track(track, ext)
+        content = extract_track(track, ext, key)
     end
     if not content then return false end
 
@@ -448,11 +494,12 @@ local function sanitize_track(track)
     end
     if write_back then cleaned = write_back(cleaned) end
 
-    local out_path = output_path(ext)
+    local out_path, is_temp = output_path(track, ext, key)
     if not write_file(out_path, cleaned) then
         msg.warn("sub_sanitizer: cannot write " .. out_path)
         return false
     end
+    if is_temp then temp_files[out_path] = true end
     msg.info("sub_sanitizer: cleaned track written to " .. out_path)
     mp.commandv("sub-add", out_path, "select", (track.title or "subtitles") .. " [cleaned]")
     if o.remove_original then
@@ -469,6 +516,9 @@ local function on_sub_text(_, text)
 end
 
 mp.observe_property("sub-text", "string", on_sub_text)
+-- mpv drops external tracks when the file ends; their temp copies go too.
+mp.register_event("end-file", remove_temp_files)
+mp.register_event("shutdown", remove_temp_files)
 mp.register_script_message("sub-sanitize", function()
     sanitize_track(mp.get_property_native("current-tracks/sub"))
 end)
@@ -476,6 +526,9 @@ end)
 _G.sub_sanitizer = {
     detect_encoding = detect_encoding,
     is_utf8 = is_utf8,
+    temp_dir = temp_dir,
+    is_network = is_network,
+    temp_files = temp_files,
     decode_entities = decode_entities,
     sanitize_content = sanitize_content,
     looks_unsanitized = looks_unsanitized,

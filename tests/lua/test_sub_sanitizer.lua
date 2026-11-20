@@ -56,6 +56,7 @@ local function load_script()
         end,
         join_path = function(a, b) return a:gsub('[/\\]$', '') .. '/' .. b end,
         format_time = function() return '' end,
+        getpid = function() return 4242 end,
     } end
     dofile(SCRIPT)
     return h, _G.sub_sanitizer
@@ -373,6 +374,122 @@ end)
 test('an unknown legacy encoding is left alone, not turned into mixed garbage', function()
     local out = run_external('latin1.srt', CUE .. 'caf\233 &rlm;\r\n')
     eq(nil, out)
+end)
+
+-- ── temp files and streams (2026-11-20 audit) ──────────────────────────
+
+local function exists(path)
+    local fh = io.open(path, 'rb')
+    if fh then fh:close() return true end
+    return false
+end
+
+local function added_paths(h)
+    local paths = {}
+    for _, cmd in ipairs(h.commands) do
+        if cmd[1] == 'sub-add' then paths[#paths + 1] = cmd[2] end
+    end
+    return paths
+end
+
+local function embedded(h, id, body)
+    h.on_subprocess = function(t)
+        local out = t.args[#t.args]
+        local fh = assert(io.open(out, 'wb'))
+        fh:write(body)
+        fh:close()
+    end
+    h.props['current-tracks/sub'] = { id = id, external = false, ['ff-index'] = id, codec = 'subrip' }
+    h.messages['sub-sanitize']()
+end
+
+test('temp names: unique per track, carry the pid, never the video name', function()
+    local h, ss = load_script()
+    h.props['path'] = write_temp('Show: Ep?01*.mkv', 'video')
+    embedded(h, 2, '1\n00:00:01,000 --> 00:00:02,000\n&rlm;a\n')
+    embedded(h, 3, '1\n00:00:01,000 --> 00:00:02,000\n&rlm;b\n')
+    local paths = added_paths(h)
+    eq(2, #paths)
+    assert(paths[1] ~= paths[2], 'two tracks share a file: ' .. paths[1])
+    for _, path in ipairs(paths) do
+        local name = path:match('([^/\\]+)$')
+        assert(name:find('^mpv%-sub%-sanitizer%-4242%-%x+%.sanitized%.srt$'), name)
+        assert(not name:find('[<>:"|%?%*]'), name)
+    end
+end)
+
+test('the ffmpeg extraction file is unique and removed after reading', function()
+    local h, ss = load_script()
+    h.props['path'] = write_temp('extract.mkv', 'video')
+    local raw
+    h.on_subprocess = function(t)
+        raw = t.args[#t.args]
+        local fh = assert(io.open(raw, 'wb'))
+        fh:write('1\n00:00:01,000 --> 00:00:02,000\n&rlm;a\n')
+        fh:close()
+    end
+    h.props['current-tracks/sub'] = { id = 2, external = false, ['ff-index'] = 2, codec = 'subrip' }
+    h.messages['sub-sanitize']()
+    assert(raw:match('mpv%-sub%-sanitizer%-4242%-%x+%-extract%.srt$'), raw)
+    eq(false, exists(raw))
+end)
+
+test('temp copies are deleted when the file ends and when mpv quits', function()
+    for _, event in ipairs({'end-file', 'shutdown'}) do
+        local h, ss = load_script()
+        local source = write_temp('cleanup_' .. event .. '.srt', '1\n00:00:01,000 --> 00:00:02,000\n&rlm;x\n')
+        h.props['current-tracks/sub'] = { id = 1, external = true, ['external-filename'] = source, codec = 'subrip' }
+        h.messages['sub-sanitize']()
+        local path = added_paths(h)[1]
+        eq(true, exists(path))
+        h.events[event]()
+        eq(false, exists(path))
+        eq(true, exists(source))  -- the user's own file is never touched
+    end
+end)
+
+test('save_next_to_video writes beside the video and keeps the file', function()
+    local h, ss = load_script()
+    ss.options.save_next_to_video = true
+    local video = write_temp('beside.mkv', 'video')
+    h.props['path'] = video
+    local source = write_temp('beside.srt', '1\n00:00:01,000 --> 00:00:02,000\n&rlm;x\n')
+    h.props['current-tracks/sub'] = { id = 5, external = true, ['external-filename'] = source, codec = 'subrip' }
+    h.messages['sub-sanitize']()
+    local path = added_paths(h)[1]
+    eq(video:gsub('%.tmp$', ''):gsub('[^/\\]+$', '') , path:gsub('[^/\\]+$', ''))
+    assert(path:find('%.5%.sanitized%.srt$'), path)
+    h.events['end-file']()
+    eq(true, exists(path))
+    os.remove(path)
+end)
+
+test('network sources are skipped: nothing downloaded, nothing added', function()
+    for _, video in ipairs({'https://cdn.example/v.mkv', 'edl://https://x/a;https://x/b', 'ytdl://abc'}) do
+        local h, ss = load_script()
+        h.props['path'] = video
+        h.props['current-tracks/sub'] = { id = 2, external = false, ['ff-index'] = 2, codec = 'subrip' }
+        h.messages['sub-sanitize']()
+        eq(0, #h.subprocess)
+        eq(0, #added_paths(h))
+    end
+    local h, ss = load_script()
+    h.props['current-tracks/sub'] = { id = 1, external = true, codec = 'subrip',
+        ['external-filename'] = 'https://example.com/subs/ar.srt' }
+    h.messages['sub-sanitize']()
+    eq(0, #added_paths(h))
+    eq(false, ss.is_network('/media/Data/show.mkv'))
+    eq(false, ss.is_network('C:\\Videos\\show.mkv'))
+    eq(false, ss.is_network('file:///media/show.mkv'))
+end)
+
+test('temp dir: TEMP, then TMP (Windows), then TMPDIR, then /tmp', function()
+    local _, ss = load_script()
+    local function env(t) return function(k) return t[k] end end
+    eq('C:\\Users\\User\\AppData\\Local\\Temp', ss.temp_dir(env({TEMP = 'C:\\Users\\User\\AppData\\Local\\Temp', TMPDIR = '/x'})))
+    eq('C:\\Temp', ss.temp_dir(env({TMP = 'C:\\Temp', TMPDIR = '/x'})))
+    eq('/run/user/1000', ss.temp_dir(env({TMPDIR = '/run/user/1000'})))
+    eq('/tmp', ss.temp_dir(env({})))
 end)
 
 print('Sub sanitizer tests passed: ' .. total)
