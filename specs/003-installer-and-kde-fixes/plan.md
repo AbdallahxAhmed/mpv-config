@@ -333,10 +333,13 @@ That is the **only** occurrence in the codebase (confirmed via grep).
 ### 3.4  `deploy/installer.py` — remove `_get_pip_args` and pip code path
 
 > **As-built (2026-11-19)**: partly done. `_get_pip_args`, `_prepare_ffsubsync_build` and
-> `FFSUBSYNC_SETUPTOOLS_PIN` are gone, and `dnf` handlers exist. But
-> `sync_dependencies` still falls back to `python -m pip` and bare `pip`
-> for ffsubsync (open item O1), and a `pipx` method exists. `_install_one`
-> now handles 15 methods (listed in spec.md As-built).
+> `FFSUBSYNC_SETUPTOOLS_PIN` are gone, and `dnf` handlers exist. A `pipx`
+> method exists. `_install_one` now handles 15 methods (listed in spec.md
+> As-built).
+>
+> **Update 2026-11-20**: done. The `python -m pip` / bare `pip` ffsubsync
+> fallback in `sync_dependencies` was replaced by `_sync_ffsubsync_cli`
+> (uv tool, then pipx; O1, `58d50f2`). `deploy/installer.py` no longer calls pip.
 
 After the registry changes above, no Category A dependency uses
 `method: "pip"` on any platform. The entire pip install machinery in
@@ -387,8 +390,12 @@ and is not managed by `install_deps()`.
 
 > **Superseded (2026-11-19)**: `install.sh` was rewritten: it always creates the venv and
 > installs with the venv's pip or `uv pip`. There is no system-package-first
-> Rich step and no `_gum_spin` / `_styled_echo` wrappers (Gum is unused;
-> raw `echo` is open item O2).
+> Rich step and no `_gum_spin` wrapper.
+>
+> **Update 2026-11-20**: output now goes through `_styled_echo` / `die`
+> (Gum when installed, ANSI/plain fallback otherwise; O2, `729639f`).
+> No spinner or confirm wrapper was added: the script has nothing to spin
+> or confirm without changing its behaviour.
 
 Lines 196–197 currently run system-wide pip. Replace with:
 
@@ -479,7 +486,8 @@ handles this natively. On KDE Wayland/X11, explicitly binding it to
 > **As-built (2026-11-19)**: `native-fs` is written only on Linux, through
 > `{{#if NATIVE_FS}}` (template lines 19–23, set by `deploy/deployer.py:473`).
 > The mpv manual marks `--native-fs` as "(macOS only)", so the rationale
-> below is invalid and the line is a no-op (open item O3). User Story 4 is
+> below is invalid and the line was a no-op (O3; removed 2026-11-20 in
+> `e6eb056`, together with `{{NATIVE_FS}}`). User Story 4 is
 > met by mpv's Wayland backend (manual test 2026-11-19). The geometry /
 > autofit helpers are in `deploy/deployer.py::_get_linux_visual_tuning_block`
 > (lines 169–172), as literal config text (open item O4).
@@ -540,9 +548,10 @@ autofit-smaller         = 30%x30%
 > **As-built (2026-11-19)**: status against `.specify/memory/constitution.md`:
 > - **I**: partly met — geometry helpers are config literals in
 >   `deploy/deployer.py` (O4).
-> - **III**: not met — pip in `sync_dependencies` (O1) and `install.ps1`
->   `pip install --user` (O5).
-> - **V**: not met — `install.sh` uses raw `echo` (O2).
+> - **III**: not met — `install.ps1` runs `pip install --user` (O5). The
+>   `sync_dependencies` pip fallback (O1) was fixed on 2026-11-20.
+> - **V**: met for `install.sh` since 2026-11-20 (O2: Gum wrappers with
+>   ANSI/plain fallback).
 > - The constitution's Category C text still describes a `setup.py`
 >   `os.execv` re-exec that no longer exists (constitution not changed here).
 

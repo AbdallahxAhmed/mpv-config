@@ -2,7 +2,7 @@
 
 **Feature Branch**: `003-installer-and-kde-fixes`
 **Created**: 2026-04-25
-**Status**: Partially superseded — installer design replaced; see [As-built](#as-built-2026-11-19)
+**Status**: Partially superseded — installer design replaced; see [As-built](#as-built-2026-11-19). Open items O1–O3 fixed 2026-11-20; O4–O5 open.
 **Input**: Fix installer crashes, dependency classification violations, and KDE Plasma 6.6.4 window behavior issues
 
 ## As-built (2026-11-19)
@@ -30,7 +30,9 @@ history; each says what replaced it.
   It installs the checkout into the venv in editable mode (venv `pip` or
   `uv pip`), symlinks `~/.local/bin/mpv-config`, and execs
   `python -m mpv_config install`. It never installs into the system
-  Python and never tries a system `python-rich` package.
+  Python and never tries a system `python-rich` package. Its messages go
+  through `_styled_echo` / `die`: Gum when installed, otherwise ANSI
+  colour on a terminal and plain text elsewhere (since 2026-11-20, O2).
 - **Windows bootstrap**: `install.ps1` installs missing prerequisites
   with winget and then runs `pip install --user --editable .` into the
   user site of the system Python, not a venv (see Open items, O5).
@@ -64,8 +66,9 @@ history; each says what replaced it.
   (the `sync-deps` subcommand, `deploy/deployer.py::cmd_sync_deps`)
   refreshes yt-dlp, ffmpeg, alass and ffsubsync (and AutoHotkey on
   Windows) into a tools directory. Its ffsubsync step runs on every OS
-  and tries `uv tool install --upgrade`, then `python -m pip install`,
-  then bare `pip install` (see O1).
+  (`_sync_ffsubsync_cli`) tries `uv tool install --upgrade`, then
+  `pipx upgrade` / `pipx install`, and never uses pip. Without uv or pipx
+  it installs nothing and tells the user to add one (since 2026-11-20, O1).
 
 ### KDE window behaviour
 
@@ -78,8 +81,8 @@ history; each says what replaced it.
   freeze while the Vulkan / libplacebo / Wayland teardown completes.
   Covered by `tests/lua/test_fast_close.lua`.
 - **Fullscreen**: handled by mpv's own Wayland backend (see User Story 4).
-  The `native-fs = no` line that `deploy/deployer.py` writes on Linux
-  through `{{NATIVE_FS}}` has no effect there (see O3).
+  No repo code is involved: the no-op `native-fs = no` line and the
+  `{{NATIVE_FS}}` placeholder were removed on 2026-11-20 (O3).
 - **Window sizing helpers**: `geometry=50%x50%`, `autofit-larger=90%x90%`
   and `autofit-smaller=30%x30%` come from
   `deploy/deployer.py::_get_linux_visual_tuning_block` (lines 169–172),
@@ -87,13 +90,23 @@ history; each says what replaced it.
 
 ### Open items (code bugs — to be fixed in a separate change)
 
-- **O1** — `sync_dependencies` falls back to `python -m pip install` and
+O1–O3 were fixed on 2026-11-20 (one commit each); O4 and O5 remain open.
+
+- **O1** — **Fixed 2026-11-20** (`58d50f2`): ffsubsync now uses `uv tool`,
+  then pipx, never pip; covered by `tests/test_sync_ffsubsync.py`.
+  Original finding: `sync_dependencies` falls back to `python -m pip install` and
   bare `pip install` for ffsubsync (`deploy/installer.py:2248-2256`).
   This violates the constitution's rule that pip is never used for CLI
   tools (Principle III, Category A).
-- **O2** — `install.sh` prints with raw `echo` and has no Gum wrappers,
+- **O2** — **Fixed 2026-11-20** (`729639f`): all output goes through the
+  `_styled_echo` / `die` Gum wrappers with an ANSI/plain fallback;
+  shellcheck clean; covered by `tests/test_install_sh_output.py`.
+  Original finding: `install.sh` prints with raw `echo` and has no Gum wrappers,
   which violates Principle V (Aesthetic CLI UX).
-- **O3** — the `native-fs` line on Linux is a no-op (`--native-fs` is
+- **O3** — **Fixed 2026-11-20** (`e6eb056`): `native_fs_value`,
+  `{{NATIVE_FS}}` and the template block were removed; covered by
+  `tests/test_mpv_conf_native_fs.py`. Original finding: the `native-fs`
+  line on Linux is a no-op (`--native-fs` is
   macOS-only per the mpv manual) and should be removed from the Linux
   output (`{{NATIVE_FS}}` in `config/mpv.conf.template`,
   `deploy/deployer.py:473`).
@@ -157,7 +170,8 @@ detection and display the installation plan without any `TypeError`.
 > `python-ffsubsync` (fallback `ffsubsync`), with a `uv tool` fallback.
 > Scenario 3 is **Superseded** (Rich comes from the venv, not
 > `python-rich`). Scenario 5: Ubuntu gets the yt-dlp GitHub binary, not
-> apt. "`pip` is never invoked outside a venv" is not met: see O1 and O5.
+> apt. "`pip` is never invoked outside a venv": the `sync-deps` case was
+> fixed on 2026-11-20 (O1); it is still not met on Windows (O5).
 
 A user runs `python setup.py --install` on Arch Linux. The installer
 installs `mpv`, `yt-dlp`, `ffmpeg`, `ffsubsync`, and `alass` via the
@@ -241,7 +255,7 @@ click the X button. The mpv process should terminate within 1 second.
 > **Status (2026-11-19): met by mpv's Wayland backend, no repo code needed.**
 > The only change made for this story was `native-fs = no` on Linux.
 > The mpv manual marks `--native-fs` as "(macOS only)", so it has no
-> effect on Linux (removal tracked as O3). In a manual test on KDE
+> effect on Linux (the line was removed on 2026-11-20, O3). In a manual test on KDE
 > Plasma Wayland (2026-11-19), mpv's `fullscreen` property and the uosc
 > fullscreen icon both followed KWin-initiated fullscreen changes.
 
@@ -350,7 +364,8 @@ reflect the actual window state.
   - `ffsubsync`, `alass` → `paru` (AUR)
   - pip MUST NOT be used for any Category A tool.
   - *As-built:* the ffsubsync AUR package is `python-ffsubsync`, with a
-    `uv tool` fallback. pip is still used in `sync_dependencies` (O1).
+    `uv tool` fallback. Since 2026-11-20 `deploy/installer.py` no longer
+    calls pip at all (O1).
 
 - **FR-006**: For Category A tools on Ubuntu/Debian:
   - `yt-dlp` → `apt` (not pip)
@@ -390,7 +405,7 @@ reflect the actual window state.
   bindings, `mpv.conf` options, or Lua script hooks — all within
   the `config/` directory.
   *As-built:* met by mpv's Wayland backend (manual test 2026-11-19);
-  the `native-fs = no` line is a no-op on Linux (O3).
+  the no-op `native-fs = no` line was removed on 2026-11-20 (O3).
 
 - **FR-011**: Window resize/snap behavior is OUT OF SCOPE for mpv
   configuration changes. This is a KDE compositor feature, not an
@@ -434,7 +449,8 @@ reflect the actual window state.
   `pip list --user` does NOT show `yt-dlp`, `ffsubsync`, or any
   other Category A tool installed via pip.
   *As-built:* the install path does not pip-install Category A tools
-  (ffsubsync uses `uv tool`), but `sync-deps` can (O1). Not re-measured.
+  (ffsubsync uses `uv tool`), and since 2026-11-20 neither does
+  `sync-deps` (O1). Not re-measured.
 
 - **SC-003**: Searching the entire codebase for
   `--break-system-packages` returns zero results.

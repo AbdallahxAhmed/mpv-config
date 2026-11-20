@@ -2,9 +2,9 @@
 
 **Input**: Design documents from `specs/003-installer-and-kde-fixes/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
-**Status (2026-11-19)**: Partially superseded — installer design replaced; see
-[spec.md — As-built](spec.md#as-built-2026-11-19). Ticked: T001, T006, T008.
-Superseded: T002, T003, T005. Open: T004 (partial), T007 (no-op), T009.
+**Status (2026-11-20)**: Partially superseded — installer design replaced; see
+[spec.md — As-built](spec.md#as-built-2026-11-19). Ticked: T001, T004, T006, T008,
+O1–O3. Superseded: T002, T003, T005, T007. Open: T009, O4, O5.
 
 **Tests**: Not requested — no test tasks included. (As-built: related
 tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
@@ -70,7 +70,7 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
   - Every Category A tool has explicit per-platform entries (no `"all": pip` fallback)
   - Fedora/dnf entries present for mpv, yt-dlp, ffmpeg, python, ffsubsync
 
-- [ ] T004 [P] [US2] *Partial: `_get_pip_args`, `_prepare_ffsubsync_build` and `FFSUBSYNC_SETUPTOOLS_PIN` removed; `dnf` handlers added. Not done: `sync_dependencies` still runs `python -m pip` / bare `pip` for ffsubsync (O1); `_install_one` now handles 15 methods.* Remove all pip machinery from deploy/installer.py — delete `_get_pip_args()` (lines 36–94), the `elif method == "pip":` branch in `_install_one()` (lines 121–138), the `elif method == "pip":` branch in `_uninstall_one()` (lines 223–228), `_prepare_ffsubsync_build()` (lines 163–202), and `FFSUBSYNC_SETUPTOOLS_PIN` (line 15). Add `elif method == "dnf":` handlers to both `_install_one` and `_uninstall_one`.
+- [x] T004 [P] [US2] *Done 2026-11-20: `_get_pip_args`, `_prepare_ffsubsync_build` and `FFSUBSYNC_SETUPTOOLS_PIN` removed; `dnf` handlers added; the `sync_dependencies` pip fallback replaced by uv tool / pipx (O1, `58d50f2`). `_install_one` now handles 15 methods.* Remove all pip machinery from deploy/installer.py — delete `_get_pip_args()` (lines 36–94), the `elif method == "pip":` branch in `_install_one()` (lines 121–138), the `elif method == "pip":` branch in `_uninstall_one()` (lines 223–228), `_prepare_ffsubsync_build()` (lines 163–202), and `FFSUBSYNC_SETUPTOOLS_PIN` (line 15). Add `elif method == "dnf":` handlers to both `_install_one` and `_uninstall_one`.
 
   **File**: `deploy/installer.py`
   **Changes**:
@@ -87,7 +87,7 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
   - `_uninstall_one` handles methods: pacman, apt, dnf, brew, winget, aur, manual
   - No reference to `FFSUBSYNC_SETUPTOOLS_PIN` or `_prepare_ffsubsync_build`
 
-- [ ] T005 [US2] **Superseded** — *`install.sh` was rewritten to always create the venv and install with the venv's pip / `uv pip`; no system `python-rich` attempt, no Gum wrappers (raw `echo` is O2).* Replace bare pip calls in install.sh — delete lines 196–197 (system-wide `pip install` of setuptools/wheel/rich) and replace with system-package-first logic from plan.md Section 3.6. Try `pacman -S python-rich` / `apt install python3-rich` / `brew install python-rich`. If all fail, print a dim message that `setup.py` will handle venv fallback.
+- [ ] T005 [US2] **Superseded** — *`install.sh` was rewritten to always create the venv and install with the venv's pip / `uv pip`; no system `python-rich` attempt, no Gum wrappers at the time (added 2026-11-20, O2).* Replace bare pip calls in install.sh — delete lines 196–197 (system-wide `pip install` of setuptools/wheel/rich) and replace with system-package-first logic from plan.md Section 3.6. Try `pacman -S python-rich` / `apt install python3-rich` / `brew install python-rich`. If all fail, print a dim message that `setup.py` will handle venv fallback.
 
   **File**: `install.sh`
   **Changes**: Replace lines 196–198 with the system-pkg-first block from plan.md Section 3.6
@@ -129,7 +129,7 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
 
 **Independent Test**: Toggle fullscreen via uosc button, then via KDE title bar. The uosc icon must always reflect the actual state.
 
-- [ ] T007 [P] [US4] *Not effective: `native-fs = no` is written on Linux via `{{#if NATIVE_FS}}` (template lines 19–23, before `force-window`; there is no `fs = yes` line), but `--native-fs` is macOS-only per the mpv manual. US4 is met by mpv's Wayland backend (manual test 2026-11-19); removing the line is O3.* Add native-fs and geometry options to config/mpv.conf.template — add `native-fs = no` after the `force-window` line (after line 20). Add geometry/autofit lines to the `{{LINUX_VISUAL_TUNING}}` injection point documentation.
+- [ ] T007 [P] [US4] **Superseded** — *`--native-fs` is macOS-only per the mpv manual, so the `native-fs = no` line this task added had no effect on Linux; it was removed on 2026-11-20 (O3, `e6eb056`). US4 is met by mpv's Wayland backend (manual test 2026-11-19).* Add native-fs and geometry options to config/mpv.conf.template — add `native-fs = no` after the `force-window` line (after line 20). Add geometry/autofit lines to the `{{LINUX_VISUAL_TUNING}}` injection point documentation.
 
   **File**: `config/mpv.conf.template`
   **Changes**: Insert after line 20 (`force-window = immediate`):
@@ -160,7 +160,7 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
   - These are NOT presented as "window snap fixes" — they are convenience sizing helpers
   - No changes to Windows deploys
 
-- [ ] T009 *Not met: `grep -r "break-system" .` hits `.specify/memory/constitution.md:119` (the ban itself); `"method": "pip"` → 0; constitution Principles III and V are not satisfied (O1, O2, O5).* Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
+- [ ] T009 *Not met: `grep -r "break-system" .` hits `.specify/memory/constitution.md:119` (the ban itself); `"method": "pip"` → 0; constitution Principle III is not satisfied (O5); O1 and O2 were fixed 2026-11-20.* Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
 
   **Files**: entire codebase (read-only scan)
   **Acceptance**:
@@ -174,9 +174,9 @@ tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
 
 Tracked in [spec.md — Open items](spec.md#open-items-code-bugs--to-be-fixed-in-a-separate-change):
 
-- [ ] O1 Remove the `python -m pip` / bare `pip` ffsubsync fallback from `deploy/installer.py::sync_dependencies` (constitution: no pip for CLI tools)
-- [ ] O2 Replace raw `echo` in `install.sh` with Gum wrappers and an ANSI fallback (Principle V)
-- [ ] O3 Remove the no-op `native-fs` line from the Linux output (`{{NATIVE_FS}}`, `deploy/deployer.py:473`)
+- [x] O1 *(fixed 2026-11-20, `58d50f2`)* Remove the `python -m pip` / bare `pip` ffsubsync fallback from `deploy/installer.py::sync_dependencies` (constitution: no pip for CLI tools)
+- [x] O2 *(fixed 2026-11-20, `729639f`)* Replace raw `echo` in `install.sh` with Gum wrappers and an ANSI fallback (Principle V)
+- [x] O3 *(fixed 2026-11-20, `e6eb056`)* Remove the no-op `native-fs` line from the Linux output (`{{NATIVE_FS}}`, `deploy/deployer.py:473`)
 - [ ] O4 Move the window sizing helpers out of `deploy/deployer.py` into a config template (Principle I) — found in this update
 - [ ] O5 Stop `install.ps1` from running `pip install --user` against the system Python (Principle III) — found in this update
 
