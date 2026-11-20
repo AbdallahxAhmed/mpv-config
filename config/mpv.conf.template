@@ -97,6 +97,11 @@ sub-font-size             = 40
 sub-bold                  = yes
 sub-color                 = "#FFFFFFFF"
 sub-back-color            = "#B3080808"
+# b (scripts/sub_backdrop.lua) toggles the translucent box behind plain-text
+# subtitles. Off, the default: mpv's outline-and-shadow border style, where
+# sub-back-color is the shadow colour. On: sub-border-style=background-box,
+# where the same colour fills a box (margin = sub-shadow-offset). Only the
+# border style changes; ASS tracks keep their own styling either way.
 sub-border-size           = 1.0
 sub-border-color          = "#FF000000"
 sub-shadow-offset         = 0

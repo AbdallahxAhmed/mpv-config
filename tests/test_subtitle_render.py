@@ -308,6 +308,81 @@ class DeployedSubFontHasArabicTests(unittest.TestCase):
         self.assertEqual([], [line for line in lines if "not found" in line and "Glyph" in line])
 
 
+def band_brightness(png):
+    """Mean luma (0-255) inside the subtitle line of a 1280x720 frame (rows 647-683)."""
+    raw = subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            str(png),
+            "-vf",
+            "crop=400:36:440:647,format=gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=30,
+    ).stdout
+    return sum(raw) / len(raw)
+
+
+BACKDROP = Path(__file__).resolve().parent.parent / "scripts" / "sub_backdrop.lua"
+
+
+@unittest.skipUnless(MPV and shutil.which("ffmpeg"), "needs mpv and ffmpeg")
+class BackdropToggleTests(unittest.TestCase):
+    """The real b toggle (sub_backdrop.lua), pressed 0, 1 or 2 times at file load."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="mpv-backdrop-")
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.config = render_config_dir(self.root)
+        self.srt = self.root / "plain.srt"
+        self.srt.write_text(ARABIC_SRT, encoding="utf-8")
+
+    def press(self, times):
+        """Render with the toggle pressed `times` times; return (hash, brightness)."""
+        driver = self.root / f"press{times}.lua"
+        driver.write_text(
+            'mp.register_event("file-loaded", function()\n'
+            f"  for _ = 1, {times} do mp.commandv('script-binding', 'sub_backdrop/toggle') end\n"
+            "end)\n",
+            encoding="utf-8",
+        )
+        out = self.root / f"pressed{times}"
+        digest = render_frame(
+            self.config, self.srt, out, f"--script={BACKDROP}", f"--script={driver}", frames=10
+        )
+        return digest, band_brightness(sorted(out.glob("*.png"))[-1])
+
+    def test_off_is_pixel_identical_to_the_default_look(self):
+        default = render_frame(self.config, self.srt, self.root / "plain", frames=10)
+        explicit = render_frame(
+            self.config,
+            self.srt,
+            self.root / "explicit",
+            "--sub-border-style=outline-and-shadow",
+            "--sub-back-color=#B3080808",
+            frames=10,
+        )
+        off, _ = self.press(0)
+        self.assertEqual(default, off)
+        self.assertEqual(explicit, off)
+
+    def test_on_draws_the_box_and_off_again_restores_the_default(self):
+        off, off_brightness = self.press(0)
+        on, on_brightness = self.press(1)
+        back, _ = self.press(2)
+        self.assertNotEqual(off, on)
+        self.assertGreater(off_brightness - on_brightness, 15.0, "no visible box when on")
+        self.assertEqual(off, back)
+
+
 class SubAssOverrideMigrationTests(unittest.TestCase):
     """A kept mpv.conf (--keep-conf) with the old template value is switched."""
 

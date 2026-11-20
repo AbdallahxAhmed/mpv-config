@@ -55,9 +55,9 @@ class TestSubBackdropToggle(unittest.TestCase):
         self.assertNotIn("cycle-values sub-back-color", self.script)
 
     def test_script_uses_exact_round_trip_colors(self):
-        self.assertIn('local OFF = "#00000000"', self.script)
-        # print_color() in mpv emits #AARRGGBB, so #B3080808 == alpha 0xB3.
+        # mpv prints colors back as #AARRGGBB, so these compare bit-identically
         self.assertIn('local ON_FALLBACK = "#B3080808"', self.script)
+        self.assertIn('color:upper():sub(1, 3) == "#00"', self.script)
 
     def test_on_fallback_matches_mpv_conf_template(self):
         conf = re.search(r'^sub-back-color\s*=\s*"([^"]+)"', self.mpv_conf, re.MULTILINE)
@@ -68,6 +68,13 @@ class TestSubBackdropToggle(unittest.TestCase):
 
     def test_verifier_checks_the_script(self):
         self.assertIn('"sub_backdrop",', self.verifier)
+
+    def test_template_keeps_the_default_border_style(self):
+        # off is the default look; only the b toggle switches to background-box
+        template = (ROOT / "config" / "mpv.conf.template").read_text(encoding="utf-8")
+        self.assertNotRegex(template, r"(?m)^sub-border-style[ \t]*=")
+        self.assertIn('local BOX = "background-box"', self.script)
+        self.assertIn('local PLAIN = "outline-and-shadow"', self.script)
 
     def test_lua_suite_registered(self):
         # run_lua_tests.py runs every tests/lua/test_*.lua it finds
