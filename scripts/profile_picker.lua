@@ -412,9 +412,19 @@ end
 
 -- ── profile handling ──────────────────────────────────────────────────
 
+-- The cache is only trusted while the live chain is still the one this
+-- profile leaves behind. mpv's own auto-profiles ([protocol.file] in
+-- mpv.conf matches "anime" anywhere in the path) can apply a profile between
+-- two files without telling the picker; trusting the cache then left Anime4K
+-- running on every later live-action file (2026-11-20 audit, finding 1.1).
+local function still_applied(want)
+    local expected = want == "anime" and chain_for(state.mode) or {}
+    return chain_key(mp.get_property_native("glsl-shaders") or {}) == chain_key(expected or {})
+end
+
 local function apply_profile(anime)
     local want = anime and "anime" or "live-action"
-    if state.applied == want then return false end
+    if state.applied == want and still_applied(want) then return false end
     state.applied = want
     mp.commandv("apply-profile", want)
     -- apply-profile sets the profile's own chain synchronously; remember it
@@ -444,7 +454,11 @@ local function decide()
     msg.info(string.format("Profile picker: %s (score %d: %s)",
         verdict.anime and "anime" or "live-action", verdict.score,
         table.concat(verdict.reasons, ", ")))
-    if state.manual then return end
+    if state.manual then
+        -- re-assert the pin: an auto-profile may have changed it
+        apply_profile(state.manual == "anime")
+        return
+    end
     if not apply_here then
         -- a stream keeps the light profile: Anime4K is opt-in there
         apply_profile(false)
@@ -498,12 +512,16 @@ end
 
 -- Toggle the manual override: auto -> anime -> live-action -> auto.
 function M.toggle_manual()
-    local order = { nil, "anime", "live-action" }
+    -- "auto" stands for state.manual == nil: ipairs stops at a leading nil,
+    -- which once left this toggle stuck on "anime" forever.
+    local order = { "auto", "anime", "live-action" }
+    local current = state.manual or "auto"
     local index = 1
     for i, value in ipairs(order) do
-        if value == state.manual then index = i end
+        if value == current then index = i end
     end
-    state.manual = order[(index % #order) + 1]
+    local next_value = order[(index % #order) + 1]
+    state.manual = next_value ~= "auto" and next_value or nil
     if state.manual then
         mp.osd_message("Profile: manual " .. state.manual, 2)
         apply_profile(state.manual == "anime")

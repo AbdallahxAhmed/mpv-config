@@ -208,6 +208,73 @@ test('the profile is not re-applied for every file of the same kind', function()
     eq(after_first, #h.commands)
 end)
 
+-- mpv's own auto-profiles ([protocol.file] in mpv.conf matches "anime"
+-- anywhere in the path) can apply the anime profile between two files
+-- without the picker knowing. The picker must notice and re-assert its
+-- verdict instead of trusting its cache (2026-11-20 audit, finding 1.1).
+local ANIME_PROFILE_CHAIN = {
+    '~~/shaders/Anime4K_Clamp_Highlights.glsl',
+    '~~/shaders/Anime4K_Restore_CNN_VL.glsl',
+}
+
+test('an auto-profile switch behind the picker is undone on the next live-action file', function()
+    local h, pp = load_script()
+    h.props['track-list'] = ENG
+    h.props['path'] = '/home/user/Videos/Holiday_Trip.mkv'
+    h.props['glsl-shaders'] = {}
+    h.events['file-loaded']()
+    local after_first = #h.commands
+    -- mpv applies [protocol.file] -> anime for a substring match the picker rejects
+    h.props['glsl-shaders'] = ANIME_PROFILE_CHAIN
+    h.props['path'] = '/home/user/Videos/Top10.Anime.Openings.mkv'
+    h.events['file-loaded']()
+    eq(after_first + 1, #h.commands)
+    eq('apply-profile', h.commands[#h.commands][1])
+    eq('live-action', h.commands[#h.commands][2])
+end)
+
+test('the manual toggle cycles auto -> anime -> live-action -> auto', function()
+    local h, pp = load_script()
+    eq(nil, pp.state.manual)
+    h.messages['toggle-manual']()
+    eq('anime', pp.state.manual)
+    h.messages['toggle-manual']()
+    eq('live-action', pp.state.manual)
+    h.messages['toggle-manual']()
+    eq(nil, pp.state.manual)
+end)
+
+test('a manual live-action pin survives an auto-profile switch', function()
+    local h, pp = load_script()
+    h.props['track-list'] = ENG
+    h.props['path'] = '/home/user/Videos/Holiday_Trip.mkv'
+    h.props['glsl-shaders'] = {}
+    h.events['file-loaded']()
+    h.messages['toggle-manual']()  -- auto -> anime
+    h.messages['toggle-manual']()  -- anime -> live-action
+    eq('live-action', pp.state.manual)
+    h.props['glsl-shaders'] = {}  -- what the real apply-profile live-action leaves
+    local before = #h.commands
+    h.props['glsl-shaders'] = ANIME_PROFILE_CHAIN
+    h.props['path'] = '/home/user/Videos/Top10.Anime.Openings.mkv'
+    h.events['file-loaded']()
+    eq(before + 1, #h.commands)
+    eq('live-action', h.commands[#h.commands][2])
+end)
+
+test('an anime file whose chain was replaced by an auto-profile gets the user mode back', function()
+    local h, pp = load_script()
+    h.props['track-list'] = JPN
+    h.props['path'] = '/home/user/Downloads/[Erai-raws] Show - 01 [1080p].mkv'
+    h.events['file-loaded']()
+    eq(true, pp.set_mode('A'))
+    local mode_chain = h.props['glsl-shaders']
+    h.props['glsl-shaders'] = ANIME_PROFILE_CHAIN  -- auto-profile re-applied the profile's own chain
+    h.props['path'] = '/home/user/Downloads/[Erai-raws] Anime Show - 02 [1080p].mkv'
+    h.events['file-loaded']()
+    eq(table.concat(mode_chain, ';'), table.concat(h.props['glsl-shaders'], ';'))
+end)
+
 test('the Anime4K mode is applied with the anime profile', function()
     local h, pp = load_script()
     h.props['path'] = 'D:\\Video\\[Erai-raws] Show - 05 [1080p].mkv'
