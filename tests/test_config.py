@@ -50,7 +50,7 @@ class TestConfig(unittest.TestCase):
 
         cls.expected_sub_rules = {
             "sub-fix-timing": "yes",
-            "sub-ass-override": "force",
+            "sub-ass-override": "scale",
             "sub-ass-force-margins": "yes",
             "sub-ass-use-video-data": "aspect-ratio",
             "demuxer-mkv-subtitle-preroll": "yes",

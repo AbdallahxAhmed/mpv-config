@@ -101,7 +101,11 @@ sub-margin-y              = 45
 
 # Subtitle Timing & Display Sanitation
 sub-fix-timing = yes
-sub-ass-override = force
+# scale (mpv's default): ASS/SSA tracks keep their own fonts, sizes, colours
+# and positions; the sub-* style above applies to SRT/plain text. force
+# replaced every ASS track's styling ("can break rendering easily", mpv
+# manual). mpv's built-in u key switches a badly styled track to force.
+sub-ass-override          = scale
 sub-ass-force-margins = yes
 sub-ass-use-video-data = aspect-ratio
 demuxer-mkv-subtitle-preroll = yes

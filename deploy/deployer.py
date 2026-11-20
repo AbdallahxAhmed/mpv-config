@@ -2559,6 +2559,16 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
     # already new enough or its version is unknown).
     updated, sanitized_count = _sanitize_mpv_conf_for_mpv_version(updated, mpv_version)
 
+    # sub-ass-override=force replaced every ASS track's own styling; the
+    # template now ships mpv's default (scale). Only the old template value is
+    # switched: anything else (no, yes, strip) was set on purpose.
+    updated, sub_ass_fixed = re.subn(
+        r"^([ \t]*)sub-ass-override[ \t]*=[ \t]*force[ \t]*$",
+        lambda m: m.group(1) + "sub-ass-override".ljust(26) + "= scale",
+        updated,
+        flags=re.MULTILINE,
+    )
+
     # Update cache-pause in [protocol.https] to prevent streaming buffer stalls
     updated, cache_pause_fixed = re.subn(
         r"^([ \t]*)cache-pause([ \t]*)=[ \t]*yes\b[^\r\n]*$",
@@ -2659,6 +2669,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
         detail = "repaired mpv.conf options (renames / GPU-API safety)"
         if border_fixed:
             detail += f" — border → no ({border_fixed})"
+        if sub_ass_fixed:
+            detail += " — sub-ass-override force → scale"
         if font_fixed and preferred_font:
             detail += f" — font → {preferred_font}"
         if hwdec_fixed:
