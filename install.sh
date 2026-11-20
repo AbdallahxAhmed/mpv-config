@@ -11,14 +11,48 @@ DATA_DIR="${XDG_DATA_HOME:-${HOME}/.local/share}/mpv-config"
 VENV_DIR="${DATA_DIR}/venv"
 BIN_DIR="${HOME}/.local/bin"
 
+# >>> output wrappers (constitution Principle V; tests extract this block)
+# All user-facing output goes through these wrappers. Gum renders it when it
+# is installed; until then (a fresh machine) the wrappers fall back to ANSI
+# colour on a terminal and to plain text otherwise (pipes, logs, NO_COLOR).
+# gum always reads /dev/null: under `curl | bash` stdin is this script, and
+# a child that read it would swallow the rest of install.sh.
+_has_gum() {
+    command -v gum >/dev/null 2>&1
+}
+
+# _styled_echo <info|warn|error|dim> <message...>: one styled line on stdout.
+# Callers add >&2 exactly where the plain output went to stderr before.
+_styled_echo() {
+    local style=$1
+    shift
+    local message="$*" sgr
+    local -a gum_args
+    case "${style}" in
+        warn) sgr="33" gum_args=(--foreground 3) ;;
+        error) sgr="1;31" gum_args=(--foreground 1 --bold --border rounded --border-foreground 1 --padding "0 1") ;;
+        dim) sgr="2" gum_args=(--faint) ;;
+        *) sgr="36" gum_args=(--foreground 6) ;;
+    esac
+    if _has_gum && gum style "${gum_args[@]}" "${message}" </dev/null 2>/dev/null; then
+        return 0
+    fi
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+        printf '\033[%sm%s\033[0m\n' "${sgr}" "${message}"
+    else
+        printf '%s\n' "${message}"
+    fi
+}
+
 die() {
-    echo "error: $*" >&2
+    _styled_echo error "error: $*" >&2
     exit 1
 }
+# <<< output wrappers
 
 ensure_git() {
     command -v git >/dev/null 2>&1 && return 0
-    echo "git not found — installing it automatically..."
+    _styled_echo warn "git not found — installing it automatically..."
     if command -v apt-get >/dev/null 2>&1; then
         sudo apt-get install -y git
     elif command -v dnf >/dev/null 2>&1; then
@@ -37,10 +71,10 @@ if [ -f "pyproject.toml" ] && [ -d "src/mpv_config" ]; then
 else
     ensure_git || die "git is required to fetch the repository, and installing it automatically failed."
     if [ -d "${TARGET_DIR}/.git" ]; then
-        echo "Updating existing repository at ${TARGET_DIR}..."
+        _styled_echo info "Updating existing repository at ${TARGET_DIR}..."
         git -C "${TARGET_DIR}" pull --ff-only --quiet
     else
-        echo "Cloning repository to ${TARGET_DIR}..."
+        _styled_echo info "Cloning repository to ${TARGET_DIR}..."
         git clone --quiet "${REPO_URL}" "${TARGET_DIR}"
     fi
 fi
@@ -58,14 +92,14 @@ done
 "${PYTHON_BIN}" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' ||
     die "Python 3.10 or newer is required (found: $("${PYTHON_BIN}" --version 2>&1))."
 
-echo "Bootstrapping mpv-config..."
+_styled_echo info "Bootstrapping mpv-config..."
 VENV_PYTHON="${VENV_DIR}/bin/python"
 USE_UV=""
 # Debian/Ubuntu ship Python without ensurepip unless python3-venv is
 # installed (PEP 668). uv can create the venv without it, so fall back to
 # uv (installed automatically via its official installer) before dying.
 if ! "${PYTHON_BIN}" -m ensurepip --version >/dev/null 2>&1; then
-    echo "ensurepip unavailable (Debian/Ubuntu: python3-venv missing) — falling back to uv..."
+    _styled_echo warn "ensurepip unavailable (Debian/Ubuntu: python3-venv missing) — falling back to uv..."
     if command -v uv >/dev/null 2>&1; then
         USE_UV=1
     elif /bin/sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'; then
@@ -78,7 +112,7 @@ if ! "${PYTHON_BIN}" -m ensurepip --version >/dev/null 2>&1; then
 fi
 
 if [ ! -x "${VENV_PYTHON}" ]; then
-    echo "Creating virtual environment at ${VENV_DIR}..."
+    _styled_echo info "Creating virtual environment at ${VENV_DIR}..."
     rm -rf "${VENV_DIR}"
     mkdir -p "${DATA_DIR}"
     if [ -n "${USE_UV}" ]; then
@@ -88,7 +122,7 @@ if [ ! -x "${VENV_PYTHON}" ]; then
         }
     else
         "${PYTHON_BIN}" -m venv "${VENV_DIR}" || {
-            echo "venv creation failed — trying Debian/Ubuntu python3-venv..."
+            _styled_echo warn "venv creation failed — trying Debian/Ubuntu python3-venv..."
             if command -v apt-get >/dev/null 2>&1 && sudo apt-get install -y python3-venv; then
                 rm -rf "${VENV_DIR}"
                 "${PYTHON_BIN}" -m venv "${VENV_DIR}"
@@ -125,11 +159,11 @@ mkdir -p "${BIN_DIR}"
 if [ -L "${BIN_DIR}/mpv-config" ] || [ ! -e "${BIN_DIR}/mpv-config" ]; then
     ln -sfn "${VENV_DIR}/bin/mpv-config" "${BIN_DIR}/mpv-config"
 else
-    echo "note: ${BIN_DIR}/mpv-config already exists and is not a symlink; left unchanged." >&2
+    _styled_echo dim "note: ${BIN_DIR}/mpv-config already exists and is not a symlink; left unchanged." >&2
 fi
 case ":${PATH}:" in
     *":${BIN_DIR}:"*) ;;
-    *) echo "note: ${BIN_DIR} is not on your PATH; add it to run 'mpv-config' directly." >&2 ;;
+    *) _styled_echo dim "note: ${BIN_DIR} is not on your PATH; add it to run 'mpv-config' directly." >&2 ;;
 esac
 
 # curl | bash feeds this script through a pipe, and the exec'd Python would
