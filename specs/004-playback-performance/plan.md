@@ -203,6 +203,13 @@ template now carries a comment above each line saying so.
 
 ### Change 3 — Add Wayland `display-fps-override` Conditional Profile (LINUX ONLY)
 
+> **Superseded 2026-11-20.** The profile below pinned 143.981 on every 140–148 Hz
+> Wayland panel and, because `display-fps` reports an active override, never
+> released it. It is replaced by `scripts/display_fps_guard.lua`: the deployer
+> detects the active mode (`kscreen-doctor`, then `xrandr`) and passes it via
+> `script-opts-append`; the script pins the compositor-reported rate only while it
+> matches that mode, and re-checks on every file and display move.
+
 **File**: `config/mpv.conf.template`
 **Position**: between `[anime]` and `[protocol.file]` (before the
 streaming profiles).

@@ -366,26 +366,25 @@ def _detect_display_fps(env):
                 except ValueError:
                     pass
         elif env.os == "linux":
-            try:
-                res = subprocess.run(
-                    ["xrandr", "--current"], capture_output=True, text=True, timeout=2
-                )
+            # (command, regex for the ACTIVE mode, marked with "*"). On Wayland
+            # xrandr only sees XWayland's synthetic modes, so the compositor's
+            # own tool goes first there.
+            probes = [
+                (["xrandr", "--current"], r"\b(\d+(?:\.\d+)?)(?:\s*\*|\*)"),
+                (["kscreen-doctor", "-o"], r"@(\d+(?:\.\d+)?)\*"),
+            ]
+            if getattr(env, "display", None) == "wayland":
+                probes.reverse()
+            for cmd, pattern in probes:
+                try:
+                    res = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+                except Exception:
+                    continue
                 if res.returncode == 0:
-                    match = re.search(r"\b(\d+(?:\.\d+)?)(?:\s*\*|\*)", res.stdout)
+                    plain = re.sub(r"\x1b\[[0-9;]*m", "", res.stdout)
+                    match = re.search(pattern, plain)
                     if match:
                         return match.group(1)
-            except Exception:
-                pass
-            try:
-                res = subprocess.run(
-                    ["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=2
-                )
-                if res.returncode == 0:
-                    match = re.search(r"@(\d+(?:\.\d+)?)", res.stdout)
-                    if match:
-                        return match.group(1)
-            except Exception:
-                pass
     except Exception:
         pass
     return None
@@ -473,8 +472,15 @@ def _patch_mpv_conf(
     dither_value = dither_depth
     if dither_depth == "auto":
         dither_value = _detect_dither_depth(env) or "auto"
+    # The Wayland refresh-rate pin (scripts/display_fps_guard.lua) only acts
+    # while the compositor reports the mode detected here.
+    wayland = env.os == "linux" and getattr(env, "display", None) == "wayland"
+    display_fps = _detect_display_fps(env) if (wayland or audit_log) else None
+    try:
+        pin_fps = f"{float(display_fps):g}" if wayland and display_fps else ""
+    except ValueError:
+        pin_fps = ""
     if audit_log:
-        display_fps = _detect_display_fps(env)
         detail = display_fps or "unknown"
         audit_log.record_note("display_fps_detected", f"detected_display_fps={detail}")
         if display_mode == "auto":
@@ -514,6 +520,7 @@ def _patch_mpv_conf(
         "{{VIDEO_SYNC}}": display_settings["video_sync"],
         "{{INTERPOLATION}}": display_settings["interpolation"],
         "{{DITHER_DEPTH}}": str(dither_value),
+        "{{DETECTED_DISPLAY_FPS}}": pin_fps or "0",
     }
     gpu_context = defaults.get("gpu_context", "")
     base_hwdec = defaults.get("hwdec", "auto")
@@ -571,6 +578,7 @@ def _patch_mpv_conf(
         {
             "GPU_CONTEXT": gpu_context,
             "D3D11_FLIP": display_settings["d3d11_flip"] if env.os == "windows" else "",
+            "WAYLAND_FPS_PIN": pin_fps,
         },
     )
     # Adapt to the actually-installed mpv: a below-0.40 distro build (e.g.

@@ -257,10 +257,9 @@ class TestAuditPatches(unittest.TestCase):
             "profile-cond              = (p.path or \"\"):lower():match('anime') ~= nil or (p.path or \"\"):lower():match('donghua') ~= nil or (p.path or \"\"):lower():match('cartoon') ~= nil",
             content,
         )
-        self.assertIn(
-            'profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148',
-            content,
-        )
+        # No condition reads display-fps any more: with an override active mpv
+        # reports the override there, so such a condition latched itself on.
+        self.assertNotIn('p["display-fps"]', content)
 
     def test_template_streaming_inherits_sync(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -285,16 +284,20 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("tscale                    = linear", live_action)
         self.assertIn("video-timing-offset       = 0.01", live_action)
 
-        anime = content.split("\n[anime]\n")[1].split("\n[wayland-144hz-fix]\n")[0]
+        anime = content.split("\n[anime]\n")[1].split("\n[protocol.file]\n")[0]
         self.assertIn("tscale                    = linear", anime)
         self.assertIn("video-timing-offset       = 0.01", anime)
 
-        wayland = content.split("\n[wayland-144hz-fix]\n")[1].split("\n[protocol.file]\n")[0]
-        self.assertIn('(p["display-fps"] or 0) > 140', wayland)
-        # --override-display-fps was renamed to --display-fps-override in
-        # mpv 0.37; the old name only emits a deprecation warning now.
-        self.assertIn("display-fps-override      = 143.981", wayland)
-        self.assertIn("profile-restore           = copy", wayland)
+        # The latching [wayland-144hz-fix] profile (fixed 143.981 on any
+        # 140-148 Hz panel) is replaced by scripts/display_fps_guard.lua, fed
+        # the mode detected at deploy time (audit 2026-11-20, finding 1.3).
+        self.assertNotIn("[wayland-144hz-fix]", content)
+        self.assertNotIn("143.981", content)
+        pin = content.split("{{#if WAYLAND_FPS_PIN}}\n")[1].split("{{/if}}")[0]
+        self.assertIn(
+            "script-opts-append        = display_fps_guard-detected_fps={{DETECTED_DISPLAY_FPS}}",
+            pin,
+        )
 
     def test_input_conf_dynaudnorm_and_limiter(self):
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

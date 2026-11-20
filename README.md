@@ -429,6 +429,7 @@ mpv-config download --watch
 | `scripts/sub_backdrop.lua` | Subtitle backdrop toggle with bilingual OSD |
 | `scripts/profile_picker.lua` | Offline anime auto-detection, Anime4K A+A default activation, and preset persistence |
 | `scripts/smart_motion.lua` | 144Hz display-resample and interpolation management |
+| `scripts/display_fps_guard.lua` | Wayland: pins `display-fps-override` to the compositor's rate, only for the mode detected at install |
 | `scripts/keyboard_layout.lua` | Silent native async Win32 launcher for the Arabic AHK helper |
 | `scripts/help_overlay.lua` | ASS vector keybinding cheat sheet on `?` / `F9` |
 | `scripts/player-toolbar.lua` | Stable Volume toolbar button and codec-prioritized quality switching (AV1 > VP9 > H.264) |

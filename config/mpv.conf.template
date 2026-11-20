@@ -45,8 +45,17 @@ hwdec                     = {{HWDEC}}
 # ─── Display sync — fixed 144Hz, UI stays at 144Hz always ────────────
 # mpv aligns video frames to vblank, audio resamples to match.
 # NO display-fps-override on Windows/X11 — mpv's measurement converges to 143.984Hz accurately.
-# Static override was the root cause of the 282Hz estimation bug (Wayland uses wayland-144hz-fix profile).
+# Static override was the root cause of the 282Hz estimation bug (Wayland: see below).
 video-sync                = {{VIDEO_SYNC}}
+{{#if WAYLAND_FPS_PIN}}
+# Wayland refresh-rate pin. KDE Plasma's presentation feedback makes mpv's
+# *estimated* rate wander (126.5 Hz measured on a 143.98 Hz panel).
+# scripts/display_fps_guard.lua pins display-fps-override to the rate the
+# compositor reports, only while it matches the mode detected at deploy time
+# ({{DETECTED_DISPLAY_FPS}} Hz), and re-checks on every file and display move.
+# An override of your own in mpv.conf.user always wins.
+script-opts-append        = display_fps_guard-detected_fps={{DETECTED_DISPLAY_FPS}}
+{{/if}}
 video-output-levels       = full
 
 # ─── Cache — local files don't need 500MB ────────────────────────────
@@ -213,17 +222,6 @@ tscale                    = linear
 # Only used with video-sync=audio (VRR mode). Ignored under display-resample
 # (mpv manual, --video-timing-offset).
 video-timing-offset       = 0.01
-
-# ── Wayland Refresh Rate Stabilization ────────────────────────
-# KDE Plasma 6.6.4 Wayland provides unstable presentation feedback,
-# causing mpv's estimated refresh rate to wander. This forces mpv
-# to trust the specified rate for display-resample calculations.
-# Re-evaluate after KDE Plasma 7 or when compositor timing improves.
-[wayland-144hz-fix]
-profile-desc              = "Fix unstable display-resample on KDE Wayland 144Hz"
-profile-cond              = (p["display-fps"] or 0) > 140 and (p["display-fps"] or 0) < 148 and ((type(p["current-gpu-context"]) == "string" and p["current-gpu-context"]:find("wayland") ~= nil) or (type(p["options/gpu-context"]) == "string" and p["options/gpu-context"]:find("wayland") ~= nil) or (type(p["options/gpu-context"]) == "table" and table.concat(p["options/gpu-context"], ","):find("wayland") ~= nil))
-display-fps-override      = 143.981
-profile-restore           = copy
 
 #######################################################################################
 # Auto-selection — simple fast substring match

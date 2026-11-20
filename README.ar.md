@@ -414,6 +414,7 @@ mpv-config download --watch
 | `scripts/sub_backdrop.lua` | مبدّل خلفية الترجمة مع OSD ثنائي اللغة |
 | `scripts/profile_picker.lua` | كشف تلقائي دون اتصال عن الأنمي، تفعيل وضع Anime4K A+A الافتراضي، وحفظ الوضع المختار |
 | `scripts/smart_motion.lua` | إدارة إعادة أخذ العينات على تردد العرض وسلاسة الحركة لشاشات 144Hz |
+| `scripts/display_fps_guard.lua` | على Wayland: يثبّت `display-fps-override` على تردد الشاشة الذي يبلّغ عنه المؤلّف، فقط للوضع المكتشف عند التثبيت |
 | `scripts/keyboard_layout.lua` | مشغّل صامت غير متزامن عبر Win32 الأصلي لمساعد AutoHotkey العربي |
 | `scripts/help_overlay.lua` | لوحة مرجع المفاتيح المرسومة بنواقل ASS على `?` / `F9` |
 | `scripts/player-toolbar.lua` | زر «الصوت الثابت» في شريط الأدوات وتبديل الجودة بحسب أولوية الترميز (AV1 > VP9 > H.264) |

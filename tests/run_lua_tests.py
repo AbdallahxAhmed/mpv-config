@@ -27,6 +27,7 @@ suites = [
     "test_help_overlay.lua",
     "test_keyboard_layout.lua",
     "test_fast_close.lua",
+    "test_display_fps_guard.lua",
 ]
 
 all_passed = True

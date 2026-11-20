@@ -310,6 +310,7 @@ def verify(config_dir, env):
         "evafast",
         "pause-when-minimize",
         "smart_motion",
+        "display_fps_guard",
         "profile_picker",
         "sub_sanitizer",
         "fast_close",
