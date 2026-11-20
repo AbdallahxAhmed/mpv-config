@@ -94,12 +94,18 @@ test('unknown entities are stripped', function()
     eq('', ss.decode_entities('&unknown;'))
 end)
 
-test('raw HTML tags are stripped, ASS blocks and hard spaces stay', function()
+test('SRT keeps the tags mpv renders and strips stray ones', function()
     local _, ss = load_script()
-    eq('{\\i1}text{\\i0} a\\hb', ss.sanitize_content('{\\i1}<i>text</i>{\\i0} a\\hb'))
-    eq('shout', ss.sanitize_content('<b>shout</b>'))
-    eq('line', ss.sanitize_content('<font size="42">line</font>'))
-    eq('quiet', ss.sanitize_content('<span style="x">quiet</span>'))
+    eq('<i>lean</i> <b>shout</b> <u>u</u> <s>s</s>', ss.sanitize_content('<i>lean</i> <b>shout</b> <u>u</u> <s>s</s>', 'srt'))
+    eq('<font color="#ffff00">line</font>', ss.sanitize_content('<font color="#ffff00">line</font>', 'srt'))
+    eq('quiet yellow', ss.sanitize_content('<span style="x">quiet</span> <c.yellow>yellow</c>', 'srt'))
+    eq('<I>caps</I>', ss.sanitize_content('<I>caps</I>', 'srt'))
+end)
+
+test('ASS dialogue: tags libass would show are stripped, blocks and \\h stay', function()
+    local _, ss = load_script()
+    local head = 'Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,'
+    eq(head .. '{\\i1}text{\\i0} a\\hb', ss.sanitize_content(head .. '{\\i1}<i>text</i>{\\i0} a\\hb', 'ass'))
 end)
 
 test('clean content is left untouched', function()
@@ -107,6 +113,61 @@ test('clean content is left untouched', function()
     eq('Dialogue: plain line', ss.sanitize_content('Dialogue: plain line'))
     eq('00:00:05,000 --> 00:00:08,000', ss.sanitize_content('00:00:05,000 --> 00:00:08,000'))
     eq('{\\\an8}top text', ss.sanitize_content('{\\\an8}top text'))
+end)
+
+test('entity names are matched case-insensitively, hex with X too', function()
+    local _, ss = load_script()
+    eq(RLM .. 'A', ss.decode_entities('&#X200F;A'))
+    eq(RLM .. 'B', ss.decode_entities('&RLM;B'))
+    eq(NBSP .. 'C', ss.decode_entities('&Nbsp;C'))
+    eq('&', ss.decode_entities('&AMP;'))
+end)
+
+test('double-encoded entities decode fully', function()
+    local _, ss = load_script()
+    eq(RLM .. 'x', ss.decode_entities('&amp;rlm;x'))
+    eq(NBSP, ss.decode_entities('&amp;nbsp;'))
+    eq(RLM, ss.decode_entities('&amp;#8207;'))
+    eq('&', ss.decode_entities('&amp;amp;'))
+end)
+
+test('a missing ";" is accepted for common names only', function()
+    local _, ss = load_script()
+    eq('a' .. NBSP .. ' b', ss.decode_entities('a&nbsp b'))
+    eq('x' .. RLM, ss.decode_entities('x&rlm'))
+    eq(RLM .. ' y', ss.decode_entities('&#8207 y'))
+    eq('R&D and AT&T', ss.decode_entities('R&D and AT&T'))
+    eq('&nbspX', ss.decode_entities('&nbspX'))     -- not a separate word: left alone
+    eq('&hellip', ss.decode_entities('&hellip'))   -- rare names need their ";"
+end)
+
+local SAMPLE_ASS = table.concat({
+    '[Script Info]',
+    'Title: Tom &amp; Jerry; the &rlm; stays in headers',
+    'PlayResX: 1280',
+    '',
+    '[V4+ Styles]',
+    'Style: Sign,DejaVu Serif,60,&H0000FFFF,&H000000FF,&H00400000,&H00000000,-1,0,0,0,100,100,0,0,1,3,0,7,0,0,0,1',
+    '',
+    '[Events]',
+    'Dialogue: 1,0:00:00.00,0:00:05.00,Sign,,0,0,0,,{\\pos(200,130)\\frz12\\c&H0000FF&}OPEN 24H',
+    'Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,&rlm;مرحباً&nbsp;بك{\\i1}!{\\i0}\\h&#x200F;',
+    'Comment: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,&rlm;kept as written',
+    '',
+}, '\r\n')
+
+test('ASS: only Dialogue text changes; headers, styles, comments, tags stay', function()
+    local _, ss = load_script()
+    local out = ss.sanitize_content(SAMPLE_ASS, 'ass')
+    local before, after = {}, {}
+    for line in SAMPLE_ASS:gmatch('[^\n]*\n') do before[#before + 1] = line end
+    for line in out:gmatch('[^\n]*\n') do after[#after + 1] = line end
+    eq(#before, #after)
+    for i = 1, #before do
+        if i ~= 10 then eq(before[i], after[i]) end
+    end
+    eq('Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,' .. RLM .. 'مرحباً' .. NBSP
+        .. 'بك{\\i1}!{\\i0}\\h' .. RLM .. '\r\n', after[10])
 end)
 
 test('the trigger fires on entities and stray tags, not on honest text', function()
@@ -117,6 +178,10 @@ test('the trigger fires on entities and stray tags, not on honest text', functio
     eq(false, ss.looks_unsanitized('AT&T costs 5$'))
     eq(false, ss.looks_unsanitized('plain dialogue'))
     eq(false, ss.looks_unsanitized('a < b and c > d'))
+    eq(true, ss.looks_unsanitized('&RLM;x'))
+    eq(true, ss.looks_unsanitized('&#X200F;x'))
+    eq(true, ss.looks_unsanitized('a&nbsp b'))
+    eq(false, ss.looks_unsanitized('R&D'))
 end)
 
 -- ── track orchestration ───────────────────────────────────────────────

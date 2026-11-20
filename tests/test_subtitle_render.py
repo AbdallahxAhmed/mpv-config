@@ -9,6 +9,7 @@ Skipped where mpv is not installed (CI only installs it for the Lua job).
 """
 
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -58,8 +59,8 @@ def render_config_dir(root, env=None):
     return config
 
 
-def render_frame(config_dir, sub_file, out_dir, *extra):
-    """Render one frame with subtitles to a PNG; return the sha256 of its pixels."""
+def render_frame(config_dir, sub_file, out_dir, *extra, frames=1, env=None):
+    """Render frames with subtitles to PNGs; return the sha256 of the last one."""
     out_dir = Path(out_dir)
     subprocess.run(
         [
@@ -75,7 +76,7 @@ def render_frame(config_dir, sub_file, out_dir, *extra):
             "--vo=image",
             "--vo-image-format=png",
             f"--vo-image-outdir={out_dir}",
-            "--frames=1",
+            f"--frames={frames}",
             f"--sub-file={sub_file}",
             *extra,
             "av://lavfi:color=c=0x505060:s=1280x720:d=2",
@@ -83,11 +84,12 @@ def render_frame(config_dir, sub_file, out_dir, *extra):
         capture_output=True,
         timeout=60,
         check=False,
+        env=env,
     )
-    frames = sorted(out_dir.glob("*.png"))
-    if not frames:
+    rendered = sorted(out_dir.glob("*.png"))
+    if not rendered:
         raise AssertionError(f"mpv rendered no frame into {out_dir}")
-    return hashlib.sha256(frames[0].read_bytes()).hexdigest()
+    return hashlib.sha256(rendered[-1].read_bytes()).hexdigest()
 
 
 @unittest.skipUnless(MPV, "mpv is not installed")
@@ -112,6 +114,38 @@ class AssRenderUnchangedTests(unittest.TestCase):
         authored = self.frame("authored", "--sub-ass-override=no")
         forced = self.frame("forced", "--sub-ass-override=force")
         self.assertNotEqual(authored, forced)
+
+
+SANITIZER = Path(__file__).resolve().parent.parent / "scripts" / "sub_sanitizer.lua"
+CLEANED_ASS = (
+    SAMPLE_ASS.replace("&rlm;", "\u200f").replace("&nbsp;", "\u00a0").replace("&#x200F;", "\u200f")
+)
+
+
+@unittest.skipUnless(MPV, "mpv is not installed")
+class SanitizedAssRenderTests(unittest.TestCase):
+    """After the sanitizer swaps in its cleaned track, only the entities differ."""
+
+    def test_the_cleaned_track_renders_like_a_hand_cleaned_file(self):
+        with tempfile.TemporaryDirectory(prefix="mpv-sanitized-render-") as tmp:
+            root = Path(tmp)
+            config = render_config_dir(root)
+            (root / "sample.ass").write_text(SAMPLE_ASS, encoding="utf-8")
+            (root / "expected.ass").write_text(CLEANED_ASS, encoding="utf-8")
+            (root / "tmp").mkdir()
+            env = dict(os.environ, TMPDIR=str(root / "tmp"), TEMP=str(root / "tmp"))
+            sanitized = render_frame(
+                config,
+                root / "sample.ass",
+                root / "sanitized",
+                f"--script={SANITIZER}",
+                frames=20,
+                env=env,
+            )
+            expected = render_frame(config, root / "expected.ass", root / "expected", frames=20)
+            cleaned_files = list((root / "tmp").glob("*.sanitized.ass"))
+        self.assertTrue(cleaned_files, "the sanitizer did not produce a cleaned track")
+        self.assertEqual(expected, sanitized)
 
 
 ARABIC_SRT = "1\n00:00:00,000 --> 00:00:02,000\nمرحباً بك يا صديقي، كيف حالك؟\n"

@@ -10,8 +10,11 @@
 -- ffmpeg (same contract the autosubsync script uses), cleaned, written to
 -- a new file, and selected with sub-add — the original track stays
 -- available. Entities decode to their real Unicode (RTL marks survive as
--- U+200F/U+200E so bidi keeps working); unknown entities and stray HTML
--- tags are stripped; `{\...}` ASS override blocks and `\h` are untouched.
+-- U+200F/U+200E so bidi keeps working), case-insensitively, through double
+-- encoding (`&amp;rlm;`) and a missing ";" on common names; unknown `&x;`
+-- entities and stray tags are stripped. Only subtitle text is touched: SRT
+-- cue text (keeping the <i> <b> <u> <s> <font> tags mpv renders) and the Text
+-- field of ASS Dialogue lines outside `{\...}` blocks; `\h` stays.
 --
 -- Options (script-opts/sub_sanitizer.conf):
 --   enabled=yes            set to no to disable the automatic pass
@@ -37,6 +40,7 @@ local state = { processed = {} }
 
 -- Decode to real characters, never delete the marks: `&rlm;` is a bidi
 -- control the author wanted (U+200F), so it becomes the actual codepoint.
+-- Names are matched case-insensitively (`&RLM;`, `&Nbsp;` occur in the wild).
 local NAMED_ENTITIES = {
     rlm = "\226\128\143",   -- U+200F RIGHT-TO-LEFT MARK
     lrm = "\226\128\142",   -- U+200E LEFT-TO-RIGHT MARK
@@ -48,7 +52,24 @@ local NAMED_ENTITIES = {
     apos = "'",
     lt = "<",
     gt = ">",
+    hellip = "\226\128\166", -- …
+    ndash = "\226\128\147",  -- –
+    mdash = "\226\128\148",  -- —
+    laquo = "\194\171",      -- «
+    raquo = "\194\187",      -- »
+    lsquo = "\226\128\152", rsquo = "\226\128\153",
+    ldquo = "\226\128\156", rdquo = "\226\128\157",
 }
+
+-- Broken converters drop the closing ";" of these; elsewhere a bare "&name"
+-- is ordinary text ("R&D", "AT&T") and is left alone.
+local SEMICOLON_OPTIONAL = {
+    nbsp = true, rlm = true, lrm = true, amp = true, lt = true, gt = true, quot = true,
+}
+
+-- SRT tags mpv itself renders; anything else is stray markup. libass shows
+-- every <tag> in ASS text verbatim, so ASS keeps none.
+local SRT_TAGS = { i = true, b = true, u = true, s = true, font = true }
 
 -- mpv's LuaJIT lacks the utf8 library; emit the byte sequence directly.
 local function utf8_encode(cp)
@@ -69,42 +90,100 @@ local function utf8_encode(cp)
         128 + (cp % 64))
 end
 
-local function decode_entities(text)
-    text = text:gsub("&#x([%x]+);", function(hex)
-        local cp = tonumber(hex, 16)
-        if cp and cp > 0 and cp < 0x110000 then return utf8_encode(cp) end
-        return ""  -- out-of-range codepoint: rendering garbage
+local function codepoint(cp)
+    if cp and cp > 0 and cp < 0x110000 then return utf8_encode(cp) end
+    return ""  -- out-of-range codepoint: rendering garbage
+end
+
+local function decode_once(text)
+    text = text:gsub("&#[xX](%x+);?", function(hex) return codepoint(tonumber(hex, 16)) end)
+    text = text:gsub("&#(%d+);?", function(dec) return codepoint(tonumber(dec)) end)
+    text = text:gsub("&(%a%w*)(;?)", function(name, semi)
+        local key = name:lower()
+        local value = NAMED_ENTITIES[key]
+        if value and (semi == ";" or SEMICOLON_OPTIONAL[key]) then return value end
+        if semi == ";" then return "" end  -- unknown entity: renders as garbage
+        return nil                         -- not an entity: keep the text
     end)
-    text = text:gsub("&#(%d+);", function(dec)
-        local cp = tonumber(dec)
-        if cp and cp > 0 and cp < 0x110000 then return utf8_encode(cp) end
-        return ""
-    end)
-    text = text:gsub("&([%a%d]+);", function(name)
-        return NAMED_ENTITIES[name]  -- unknown names fall through
-    end)
-    -- whatever the table did not know would render as garbage anyway
-    text = text:gsub("&[%a%d]+;", "")
     return text
 end
 
-local function strip_html_tags(text)
-    -- Any `<name ...>...</name>` construct is stray HTML: libass shows it
-    -- verbatim. Dialogue like "a < b and c > d" keeps its space after the
-    -- angle bracket and never matches; `{\...}` ASS blocks contain no `<>`.
-    return (text:gsub("</?%a+[^>\r\n]*>", ""))
+-- Double-encoded entities (`&amp;rlm;`) need a second pass; three is plenty.
+local function decode_entities(text)
+    for _ = 1, 3 do
+        local decoded = decode_once(text)
+        if decoded == text then break end
+        text = decoded
+    end
+    return text
 end
 
-local function sanitize_content(content)
-    return strip_html_tags(decode_entities(content))
+local function strip_tags(text, keep)
+    return (text:gsub("<(/?)(%a[%w%.%-]*)([^>\r\n]*)>", function(_, name)
+        if keep and keep[name:lower()] then return nil end
+        return ""
+    end))
 end
 
+local function clean_text(text, keep)
+    return strip_tags(decode_entities(text), keep)
+end
+
+-- ASS: only the Text field of Dialogue lines, and only outside `{...}`
+-- override blocks. Headers, styles, comments and tags stay byte-identical.
+local DIALOGUE = "^(Dialogue:" .. string.rep("[^,]*,", 9) .. ")(.*)$"
+
+local function clean_ass_text(text)
+    local out, pos = {}, 1
+    while true do
+        local s, e = text:find("{[^}]*}", pos)
+        if not s then
+            out[#out + 1] = clean_text(text:sub(pos))
+            break
+        end
+        out[#out + 1] = clean_text(text:sub(pos, s - 1))
+        out[#out + 1] = text:sub(s, e)
+        pos = e + 1
+    end
+    return table.concat(out)
+end
+
+local function each_line(content, fn)
+    local out = {}
+    for line in content:gmatch("[^\n]*\n?") do
+        if line ~= "" then
+            local body, eol = line:match("^(.-)(\r?\n?)$")
+            out[#out + 1] = fn(body) .. eol
+        end
+    end
+    return table.concat(out)
+end
+
+local function sanitize_content(content, ext)
+    if ext == "ass" then
+        return each_line(content, function(line)
+            local head, text = line:match(DIALOGUE)
+            if not head then return line end
+            return head .. clean_ass_text(text)
+        end)
+    end
+    -- SRT: cue numbers and timing lines are not text
+    return each_line(content, function(line)
+        if line:match("^%s*%d+%s*$") or line:find("-->", 1, true) then return line end
+        return clean_text(line, SRT_TAGS)
+    end)
+end
+
+-- sub-text is plain text: mpv already turned the SRT tags it supports into
+-- styling, so any tag still visible here is one it shows verbatim.
 local function looks_unsanitized(text)
     if type(text) ~= "string" then return false end
-    if text:find("&%a+;") then return true end
-    if text:find("&#%d+;") then return true end
-    if text:find("&#x%x+;") then return true end
-    return text:find("</?%a+[^>\r\n]*>") ~= nil
+    if text:find("&#[xX]%x") or text:find("&#%d") then return true end
+    for name, semi in text:gmatch("&(%a%w*)(;?)") do
+        local key = name:lower()
+        if semi == ";" or (SEMICOLON_OPTIONAL[key] and NAMED_ENTITIES[key]) then return true end
+    end
+    return text:find("</?%a[%w%.%-]*[^>\r\n]*>") ~= nil
 end
 
 -- ── track handling ────────────────────────────────────────────────────
@@ -232,7 +311,7 @@ local function sanitize_track(track)
     end
     if not content then return false end
 
-    local cleaned = sanitize_content(content)
+    local cleaned = sanitize_content(content, ext)
     if cleaned == content then
         msg.info("sub_sanitizer: track is already clean")
         return false
