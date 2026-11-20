@@ -771,6 +771,51 @@ def _patch_stream_quality_conf(path, quality):
     return True
 
 
+def _smart_motion_conf_enabled(path):
+    """True unless smart_motion.conf says enabled=no/false (the script default is on)."""
+    enabled = True
+    with open(path, "r", encoding="utf-8") as stream:
+        for line in stream:
+            match = re.match(r"^\s*enabled\s*=\s*(\S*)", line)
+            if match:
+                enabled = match.group(1).strip().lower() not in ("no", "false", "0")
+    return enabled
+
+
+def _seed_smart_motion_conf(path, display_mode, fresh):
+    """Keep smart_motion.lua from undoing the VRR display mode.
+
+    VRR mode renders video-sync=audio / interpolation=no into mpv.conf, but
+    scripts/smart_motion.lua sets video-sync=display-resample and interpolation
+    at runtime on local files. A freshly deployed smart_motion.conf is therefore
+    written with enabled=no (comments kept). An existing file is the user's own
+    (script-opts are preserved), so it is only warned about.
+    Returns True when the file was rewritten.
+    """
+    if display_mode != "vrr" or not os.path.isfile(path):
+        return False
+    if not fresh:
+        if _smart_motion_conf_enabled(path):
+            ui.warn(
+                "VRR display mode: the existing script-opts/smart_motion.conf has "
+                "smart_motion enabled, which switches video-sync back to display-resample. "
+                "Set enabled=no in it to keep video-sync=audio."
+            )
+        return False
+    with open(path, "r", encoding="utf-8") as stream:
+        lines = stream.read().splitlines()
+    replaced = False
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*enabled\s*=", line):
+            lines[i] = "enabled=no"
+            replaced = True
+    if not replaced:
+        lines.append("enabled=no")
+    with open(path, "w", encoding="utf-8") as stream:
+        stream.write("\n".join(lines) + "\n")
+    return True
+
+
 def _resolve_autosubsync_paths(env):
     """Resolve full paths for ffmpeg, ffsubsync, and alass for the current platform."""
     defaults = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {})
@@ -1224,6 +1269,14 @@ def deploy(
                 ):
                     shutil.copy2(src, dst)
                     newly_managed.append("script-opts/" + name)
+        # VRR mode: a fresh smart_motion.conf is seeded disabled so the script
+        # cannot switch video-sync=audio back to display-resample at runtime.
+        if _seed_smart_motion_conf(
+            os.path.join(opts_dst, "smart_motion.conf"),
+            display_mode,
+            fresh="script-opts/smart_motion.conf" in newly_managed,
+        ):
+            ui.info("VRR display mode: smart_motion disabled (smart_motion.conf enabled=no).")
         # The Anime4K mode the anime profile uses. A fresh install gets the
         # mode that was chosen at install time; an existing file is the
         # user's own choice (they can change it inside mpv) and is kept.

@@ -167,9 +167,8 @@ sharpen                   = 0
 #   interpolation=no
 # The deployer's VRR display mode (--display-mode vrr) writes exactly these
 # values (video-sync=audio, interpolation=no), so no manual edit is needed.
-# Caveat: scripts/smart_motion.lua re-sets video-sync=display-resample and
-# interpolation at runtime on local files; disable it (smart_motion.conf
-# enabled=no) for VRR to take effect. See specs/004 open items.
+# It also seeds script-opts/smart_motion.conf with enabled=no, so
+# scripts/smart_motion.lua cannot switch video-sync back at runtime.
 [live-action]
 profile-desc              = "Live-action: clean native playback"
 profile-restore           = copy-equal
