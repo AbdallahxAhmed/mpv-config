@@ -28,7 +28,23 @@ local state = {
     current_path = nil,
     last_applied = nil,
     settle_timer = nil,
+    -- video-sync as configured (mpv.conf + mpv.conf.user) or last set by hand.
+    -- smart_motion only manages video-sync while this is display-resample: a
+    -- user's audio / display-vdrop / VRR choice is never overwritten.
+    base_sync = mp.get_property and mp.get_property("options/video-sync") or nil,
+    -- values smart_motion wrote itself; change notifications arrive late, so
+    -- one for our own write must not be mistaken for a hand change
+    sync_written = {},
 }
+state.base_sync = state.base_sync or "display-resample"
+
+-- May smart_motion set video-sync now? Only when the base is display-resample
+-- and nothing else (a user profile in mpv.conf.user, say) changed it since.
+local function sync_is_ours()
+    if state.base_sync ~= "display-resample" then return false end
+    local current = mp.get_property("video-sync")
+    return current == nil or current == "display-resample" or state.sync_written[current] == true
+end
 
 -- Checks whether a path is a network stream (YouTube, Twitch, HTTP/HTTPS, etc.)
 local function is_network_stream(path)
@@ -143,7 +159,8 @@ local function apply_profile(profile)
     if same_profile(profile, state.last_applied) then return end
     state.applying_change = true
 
-    if profile.video_sync then
+    if profile.video_sync and sync_is_ours() then
+        state.sync_written[profile.video_sync] = true
         mp.set_property("video-sync", profile.video_sync)
     end
     if profile.interpolation ~= nil then
@@ -179,6 +196,17 @@ mp.observe_property("interpolation", "bool", function(_, val)
     if not state.applying_change and state.last_applied and val ~= nil and val ~= state.last_applied.interpolation then
         on_user_tweak("interpolation")
     end
+end)
+
+-- A video-sync change we did not make (by hand, or a profile of the user's)
+-- becomes the new base and is respected from then on, across files.
+mp.observe_property("video-sync", "string", function(_, val)
+    if not val or val == state.base_sync then return end
+    -- a late echo of our own write (stream_web_parity's audio) is not the user;
+    -- display-resample is always accepted: it is the value smart_motion manages
+    if val ~= "display-resample" and state.sync_written[val] then return end
+    state.base_sync = val
+    msg.info(string.format("Smart Motion: video-sync set to %s outside smart_motion; respecting it", val))
 end)
 
 mp.observe_property("tscale", "string", function(_, val)

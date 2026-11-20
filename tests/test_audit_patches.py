@@ -282,6 +282,11 @@ class TestAuditPatches(unittest.TestCase):
 
         live_action = content.split("\n[live-action]\n")[1].split("\n[anime]\n")[0]
         self.assertIn("tscale                    = linear", live_action)
+        # The profile tscale is only the value before smart_motion starts (or
+        # when it is disabled); the template must say so where it is set.
+        for profile in ("live-action", "anime"):
+            block = content.split(f"\n[{profile}]\n")[1].split("\n[")[0]
+            self.assertIn("# tscale until scripts/smart_motion.lua takes over", block)
         self.assertIn("video-timing-offset       = 0.01", live_action)
 
         anime = content.split("\n[anime]\n")[1].split("\n[protocol.file]\n")[0]

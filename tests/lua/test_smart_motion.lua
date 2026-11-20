@@ -199,4 +199,73 @@ test('dedupe: a new file re-applies even an identical decision', function()
     eq(3, #h.sets)
 end)
 
+-- ── the user's video-sync wins (2026-11-20 audit, finding 1.4) ─────────
+
+-- props as mpv.conf + mpv.conf.user left them when the script loads
+local function load_with(props)
+    local h = create_harness()
+    for k, v in pairs(props) do h.props[k] = v end
+    dofile(SCRIPT)
+    return h, _G.smart_motion
+end
+
+local function count_sets(h, key)
+    local n = 0
+    for _, k in ipairs(h.sets) do if k == key then n = n + 1 end end
+    return n
+end
+
+test('user_sync: video-sync from mpv.conf.user is never overwritten', function()
+    for _, configured in ipairs({'audio', 'display-vdrop', 'display-resample-vdrop'}) do
+        local h, sm = load_with({['options/video-sync'] = configured, ['video-sync'] = configured})
+        sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+        eq(0, count_sets(h, 'video-sync'))
+        eq(configured, h.props['video-sync'])
+        eq(1, count_sets(h, 'tscale'))  -- the rest of the automation still runs
+    end
+end)
+
+test('user_sync: a hand change during playback holds for later files too', function()
+    local h, sm = load_with({['options/video-sync'] = 'display-resample', ['video-sync'] = 'display-resample'})
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+    h.props['video-sync'] = 'display-vdrop'
+    h.observers['video-sync'](nil, 'display-vdrop')
+    h.sets = {}
+    h.props['vid'] = 1
+    h.props['display-fps'] = 143.981
+    h.props['container-fps'] = 23.976
+    h.props['path'] = '/videos/next.mkv'
+    h.events['file-loaded']()
+    h.timeouts[#h.timeouts].fn()
+    eq(0, count_sets(h, 'video-sync'))
+    eq('display-vdrop', h.props['video-sync'])
+end)
+
+test('user_sync: switching back to display-resample by hand hands control back', function()
+    local h, sm = load_with({['options/video-sync'] = 'audio', ['video-sync'] = 'audio'})
+    h.props['video-sync'] = 'display-resample'
+    h.observers['video-sync'](nil, 'display-resample')
+    sm.options.stream_web_parity = true
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 30.0, true))
+    eq('audio', h.props['video-sync'])  -- managed again: stream parity applies
+end)
+
+test('user_sync: a profile of the user that changed video-sync is left alone', function()
+    local h, sm = load_with({['options/video-sync'] = 'display-resample', ['video-sync'] = 'audio'})
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false))
+    eq(0, count_sets(h, 'video-sync'))
+    eq('audio', h.props['video-sync'])
+end)
+
+test('user_sync: the late echo of our own write is not a hand change', function()
+    local h, sm = load_with({['options/video-sync'] = 'display-resample', ['video-sync'] = 'display-resample'})
+    sm.options.stream_web_parity = true
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 30.0, true))   -- writes audio
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 23.976, false)) -- writes display-resample
+    h.observers['video-sync'](nil, 'audio')                              -- arrives late
+    eq('display-resample', sm.state.base_sync)
+    sm.apply_profile(sm.evaluate_motion_profile(143.981, 30.0, true))
+    eq('audio', h.props['video-sync'])
+end)
+
 print(string.format("All %d smart_motion Lua tests passed successfully!", total))

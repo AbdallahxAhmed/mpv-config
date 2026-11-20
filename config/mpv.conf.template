@@ -192,6 +192,9 @@ deband-range              = 16
 deband-grain              = 0
 sharpen                   = 0
 interpolation             = {{INTERPOLATION}}
+# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file and
+# sets its default_tscale (script-opts/smart_motion.conf, oversample). This is
+# the value in effect when smart_motion is disabled (enabled=no, e.g. VRR mode).
 tscale                    = linear
 # Only used with video-sync=audio (VRR mode). Ignored under display-resample
 # (mpv manual, --video-timing-offset).
@@ -218,6 +221,9 @@ deband-threshold          = 48
 deband-range              = 20
 deband-grain              = 32
 interpolation             = {{INTERPOLATION}}
+# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file and
+# sets its default_tscale (script-opts/smart_motion.conf, oversample). This is
+# the value in effect when smart_motion is disabled (enabled=no, e.g. VRR mode).
 tscale                    = linear
 # Only used with video-sync=audio (VRR mode). Ignored under display-resample
 # (mpv manual, --video-timing-offset).
