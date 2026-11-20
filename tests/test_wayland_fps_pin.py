@@ -80,6 +80,55 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("[wayland-144hz-fix]", text)
 
 
+class UpdateKeepsDetectedRateTests(unittest.TestCase):
+    """mpv-config update with the monitor off keeps the previous refresh rate."""
+
+    def regenerate(self, old_pin, detected, env=None):
+        env = env or _env()
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "mpv"
+            config.mkdir()
+            with (
+                mock.patch.object(deployer, "_resolve_preferred_font", return_value="Tahoma"),
+                mock.patch.object(deployer, "_detect_display_fps") as detect,
+                mock.patch.object(deployer, "ui") as ui,
+            ):
+                # the previous update ran with the monitor on and found old_pin
+                detect.return_value = old_pin
+                old = deployer._render_mpv_conf_text(
+                    env, deployer.MPV_PROFILE_DEFAULT, deployer._infer_mpv_conf_choices("", env)
+                )
+                (config / "mpv.conf").write_text(old, encoding="utf-8")
+                detect.reset_mock()
+                detect.return_value = detected
+                deployer._regenerate_mpv_conf(config, env, Path(tmp))
+                new = (config / "mpv.conf").read_text(encoding="utf-8")
+            return new, ui.warn.call_args_list, detect.call_count
+
+    def test_monitor_off_keeps_the_previous_rate_and_warns_once(self):
+        new, warnings, probes = self.regenerate("143.98", None)
+        self.assertIn(PIN_LINE + "143.98\n", new)
+        self.assertEqual(1, len(warnings))
+        self.assertIn("143.98 Hz", warnings[0].args[0])
+        self.assertEqual(1, probes)  # detected once, not once per trial render
+
+    def test_a_detected_rate_replaces_the_old_one_silently(self):
+        new, warnings, _ = self.regenerate("143.98", "119.88")
+        self.assertIn(PIN_LINE + "119.88\n", new)
+        self.assertNotIn(PIN_LINE + "143.98", new)
+        self.assertEqual([], warnings)
+
+    def test_nothing_to_keep_means_no_pin_and_no_warning(self):
+        new, warnings, _ = self.regenerate(None, None)
+        self.assertNotIn("display_fps_guard", new)
+        self.assertEqual([], warnings)
+
+    def test_x11_never_gets_a_pin(self):
+        new, warnings, probes = self.regenerate("143.98", None, env=_env(display="x11"))
+        self.assertNotIn("display_fps_guard", new)
+        self.assertEqual(0, probes)
+
+
 KSCREEN = (
     "\x1b[01;32mOutput: \x1b[0;0m1 DP-2 enabled connected\n"
     "\tModes:  1:1920x1080@60.00  2:1920x1080@143.98*!  3:1920x1080@119.88\n"

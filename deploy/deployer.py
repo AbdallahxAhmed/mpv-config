@@ -472,6 +472,11 @@ _SANITIZED_OPTION_MARKER = (
 )
 
 
+# "probe the display" marker for _patch_mpv_conf's display_fps argument
+# (None already means "probed, nothing found").
+_DETECT = object()
+
+
 def _sanitize_mpv_conf_for_mpv_version(content, mpv_version):
     """Comment out options newer than the installed mpv.
 
@@ -509,8 +514,13 @@ def _patch_mpv_conf(
     display_mode="fixed",
     dither_depth="auto",
     audit_log=None,
+    display_fps=_DETECT,
 ):
-    """Patch mpv.conf.template with profile-aware + platform-required values."""
+    """Patch mpv.conf.template with profile-aware + platform-required values.
+
+    ``display_fps`` lets a caller that already resolved the refresh rate pass
+    it (or None) instead of probing the display again.
+    """
     preferred_font = _resolve_preferred_font(env)
     linux_visual_tuning = (
         _get_linux_visual_tuning_block(preferred_font) if env.os == "linux" else ""
@@ -538,7 +548,8 @@ def _patch_mpv_conf(
     # The Wayland refresh-rate pin (scripts/display_fps_guard.lua) only acts
     # while the compositor reports the mode detected here.
     wayland = env.os == "linux" and getattr(env, "display", None) == "wayland"
-    display_fps = _detect_display_fps(env) if (wayland or audit_log) else None
+    if display_fps is _DETECT:
+        display_fps = _detect_display_fps(env) if (wayland or audit_log) else None
     try:
         pin_fps = f"{float(display_fps):g}" if wayland and display_fps else ""
     except ValueError:
@@ -3180,7 +3191,36 @@ def _infer_mpv_conf_choices(text, env):
     }
 
 
-def _render_mpv_conf_text(env, mpv_profile, choices):
+_PREVIOUS_PIN = re.compile(
+    r"(?m)^[ \t]*script-opts-append[ \t]*=[ \t]*display_fps_guard-detected_fps=([0-9]+(?:\.[0-9]+)?)"
+)
+
+
+def _resolve_update_display_fps(env, old_text):
+    """Detect the refresh rate once for an update; keep the old one if none is found.
+
+    With the monitor off (or unplugged) KWin reports no outputs, and the
+    regenerated mpv.conf would lose the Wayland refresh-rate pin until the next
+    update with the screen on. The rate the previous mpv.conf was rendered with
+    is kept instead, with a warning.
+    """
+    if not (env.os == "linux" and getattr(env, "display", None) == "wayland"):
+        return None
+    detected = _detect_display_fps(env)
+    if detected:
+        return detected
+    match = _PREVIOUS_PIN.search(old_text)
+    previous = match.group(1) if match and float(match.group(1)) > 0 else None
+    if previous:
+        ui.warn(
+            "No display was detected (monitor off?). Keeping the previously detected "
+            f"refresh rate, {previous} Hz, for the Wayland refresh-rate pin; run "
+            "`mpv-config update` again with the monitor on to re-detect it."
+        )
+    return previous
+
+
+def _render_mpv_conf_text(env, mpv_profile, choices, display_fps=_DETECT):
     """What a fresh install writes: the rendered template plus the mpv.conf
     migrations deploy() runs right after it (e.g. the Linux font rewrite)."""
     selected, defaults = _resolve_mpv_profile(env, mpv_profile)
@@ -3192,6 +3232,7 @@ def _render_mpv_conf_text(env, mpv_profile, choices):
             env,
             selected,
             defaults,
+            display_fps=display_fps,
             **choices,
         )
         _migrate_mpv_conf(str(dest), env=env)
@@ -3227,12 +3268,13 @@ def _regenerate_mpv_conf(config_dir, env, backup_dir, audit_log=None):
         return None
     old_text = conf.read_text(encoding="utf-8")
     choices = _infer_mpv_conf_choices(old_text, env)
+    display_fps = _resolve_update_display_fps(env, old_text)
     old_base = _mpv_conf_base_options(old_text)
     old_stack = {k: old_base[k] for k in _VIDEO_STACK_KEYS if k in old_base}
     profiles = [MPV_PROFILE_DEFAULT] + sorted(set(MPV_EXPERIENCE_PROFILES) - {MPV_PROFILE_DEFAULT})
     new_text = None
     for profile in profiles:
-        text = _render_mpv_conf_text(env, profile, choices)
+        text = _render_mpv_conf_text(env, profile, choices, display_fps=display_fps)
         base = _mpv_conf_base_options(text)
         if {k: base[k] for k in _VIDEO_STACK_KEYS if k in base} == old_stack:
             new_text = text
