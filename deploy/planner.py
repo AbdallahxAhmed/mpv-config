@@ -126,8 +126,8 @@ def build_install_plan(env: "Environment", dep_actions=None) -> List[PlanEntry]:
     return plan
 
 
-def build_update_plan(env: "Environment") -> List[PlanEntry]:
-    """Build a plan for the update-scripts-only operation."""
+def build_update_plan(env: "Environment", keep_conf: bool = False) -> List[PlanEntry]:
+    """Build a plan for the update operation (assets, plus mpv.conf unless keep_conf)."""
     plan: List[PlanEntry] = []
 
     for script in SCRIPTS:
@@ -161,6 +161,18 @@ def build_update_plan(env: "Environment") -> List[PlanEntry]:
                 "deploy",
                 os.path.join(env.config_dir, rel_path),
                 detail,
+            )
+        )
+    mpv_conf = os.path.join(env.config_dir, "mpv.conf")
+    if keep_conf:
+        plan.append(PlanEntry("file", "skip", mpv_conf, "kept as it is (--keep-conf)"))
+    else:
+        plan.append(
+            PlanEntry(
+                "file",
+                "deploy",
+                mpv_conf,
+                "regenerate from template (old copy in the backup; mpv.conf.user untouched)",
             )
         )
 

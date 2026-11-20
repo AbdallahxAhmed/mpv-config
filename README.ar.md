@@ -352,7 +352,8 @@ mpv-config verify
 ### 3. إدارة النشر
 ```bash
 mpv-config status             # إصدارات السكربتات/الشيدرات المثبتة وآخر جلسة مثبّت
-mpv-config update             # تحديث السكربتات والشيدرات؛ إعداداتك محفوظة (مع دعم --anime-preset <MODE>)
+mpv-config update             # تحديث السكربتات والشيدرات وإعادة توليد mpv.conf من القالب (مع نسخة احتياطية،
+                              # ولا يُمس mpv.conf.user)؛ --keep-conf يُبقي mpv.conf كما هو؛ --anime-preset <MODE>
 mpv-config rollback           # استرجاع أحدث نسخة احتياطية (تُلتقط لقطة للإعداد الحالي أولاً)
 mpv-config rollback <backup>  # استرجاع مجلد mpv.backup.* محدد من نسخ هذا الإعداد
 mpv-config sync-deps          # تحديث yt-dlp وffmpeg وalass وffsubsync

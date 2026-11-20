@@ -1435,13 +1435,13 @@ def deploy(
     return results
 
 
-def _migrate_deployed_configs(config_dir, env, audit_log=None):
+def _migrate_deployed_configs(config_dir, env, audit_log=None, skip=()):
     """Run the deployed-config repair migrations, returning result rows.
 
-    Shared by deploy() and cmd_update(): the update path swaps assets only
-    and preserves mpv.conf/input.conf/script-opts verbatim, so without
-    these migrations an old install stays broken even after the templates
-    are fixed - and `mpv-config update` is the standing refresh recipe.
+    Shared by deploy() and cmd_update(): configs that are kept verbatim
+    (input.conf, script-opts, and mpv.conf on install or with --keep-conf)
+    stay broken after a template fix unless these migrations repair them.
+    ``skip`` names migrations not to run (a just-regenerated mpv.conf).
     """
     migration_targets = (
         (
@@ -1529,6 +1529,8 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None):
     )
     results = []
     for migration_name, migration_path, migrate_fn in migration_targets:
+        if migration_name in skip:
+            continue
         try:
             if migrate_fn(migration_path):
                 results.append(
@@ -3029,6 +3031,171 @@ def cmd_verify(args):
     return 0
 
 
+# ── mpv.conf regeneration on update ──────────────────────────────────────
+# `update` used to keep mpv.conf verbatim, so template fixes never reached an
+# existing install. Personal settings live in mpv.conf.user (included at the
+# end of the template), so mpv.conf is now re-rendered from the template with
+# the install-time choices read back from the old file. Lines of the old file
+# the new one lacks are reported and saved next to the backup, never dropped
+# silently. --keep-conf restores the old behaviour.
+
+MPV_CONF_NOT_IN_TEMPLATE = "mpv.conf.lines-not-in-template.txt"
+_VIDEO_STACK_KEYS = ("vo", "gpu-api", "gpu-context", "hwdec")
+
+
+def _mpv_conf_option_lines(text):
+    """Return (section, normalized "key=value", original line) for each option line."""
+    section = ""
+    lines = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            continue
+        key, sep, value = line.partition("=")
+        normalized = f"{key.strip()}={value.strip()}" if sep else line
+        lines.append((section, normalized, raw.rstrip()))
+    return lines
+
+
+def _mpv_conf_base_options(text):
+    """Top-level options (outside a named profile), unquoted, last value wins."""
+    options = {}
+    for section, normalized, _raw in _mpv_conf_option_lines(text):
+        if section in ("", "default"):
+            key, _, value = normalized.partition("=")
+            options[key] = value.strip().strip('"')
+    return options
+
+
+def _infer_mpv_conf_choices(text, env):
+    """Read the install-time choices back out of a rendered mpv.conf."""
+    base = _mpv_conf_base_options(text)
+    anime_shaders = None
+    for section, normalized, _raw in _mpv_conf_option_lines(text):
+        key, _, value = normalized.partition("=")
+        if section == "anime" and key == "glsl-shaders":
+            anime_shaders = value.strip().strip('"')
+    shader_sep = PLATFORM_REQUIRED_DEFAULTS.get(env.platform_key, {}).get("shader_sep", ";")
+    anime_preset = next(
+        (p for p in ANIME4K_CHAINS if _resolve_anime_chain(p, shader_sep) == anime_shaders),
+        _DEPLOY_DEFAULTS["anime_preset"],
+    )
+    scalers = (base.get("scale"), base.get("cscale"), base.get("dscale"))
+    scaler_tier = next(
+        (t for t, v in SCALER_TIERS.items() if (v["scale"], v["cscale"], v["dscale"]) == scalers),
+        _DEPLOY_DEFAULTS["scaler_tier"],
+    )
+    dither_depth = base.get("dither-depth", "auto")
+    return {
+        "anime_preset": anime_preset,
+        "scaler_tier": scaler_tier,
+        "display_mode": "vrr" if base.get("video-sync") == "audio" else "fixed",
+        "dither_depth": dither_depth if dither_depth in ("auto", "8", "10") else "auto",
+    }
+
+
+def _render_mpv_conf_text(env, mpv_profile, choices):
+    """What a fresh install writes: the rendered template plus the mpv.conf
+    migrations deploy() runs right after it (e.g. the Linux font rewrite)."""
+    selected, defaults = _resolve_mpv_profile(env, mpv_profile)
+    with tempfile.TemporaryDirectory(prefix="mpv-conf-render-") as tmp:
+        dest = Path(tmp) / "mpv.conf"
+        _patch_mpv_conf(
+            str(REPO_ROOT / "config" / "mpv.conf.template"),
+            str(dest),
+            env,
+            selected,
+            defaults,
+            **choices,
+        )
+        _migrate_mpv_conf(str(dest), env=env)
+        return dest.read_text(encoding="utf-8")
+
+
+def _atomic_replace_text(path, text):
+    """Write text to path via a sibling temp file, keeping the old file mode."""
+    path = Path(path)
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(text)
+        tmp.chmod(mode)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _regenerate_mpv_conf(config_dir, env, backup_dir, audit_log=None):
+    """Re-render mpv.conf from the template; return the old lines it no longer has.
+
+    The install-time choices (Anime4K preset, scaler tier, display mode,
+    dither depth, and the mpv profile that picked vo/gpu-api/hwdec) are read
+    back from the old file so a VRR or "quality" install stays one. Returns
+    None when there is no mpv.conf, else (foreign_lines, report_path or None).
+    """
+    conf = Path(config_dir) / "mpv.conf"
+    if not conf.is_file():
+        return None
+    old_text = conf.read_text(encoding="utf-8")
+    choices = _infer_mpv_conf_choices(old_text, env)
+    old_base = _mpv_conf_base_options(old_text)
+    old_stack = {k: old_base[k] for k in _VIDEO_STACK_KEYS if k in old_base}
+    profiles = [MPV_PROFILE_DEFAULT] + sorted(set(MPV_EXPERIENCE_PROFILES) - {MPV_PROFILE_DEFAULT})
+    new_text = None
+    for profile in profiles:
+        text = _render_mpv_conf_text(env, profile, choices)
+        base = _mpv_conf_base_options(text)
+        if {k: base[k] for k in _VIDEO_STACK_KEYS if k in base} == old_stack:
+            new_text = text
+            break
+        new_text = new_text or text  # fall back to the default profile's rendering
+
+    new_keys = {(s, n) for s, n, _raw in _mpv_conf_option_lines(new_text)}
+    foreign = [raw for s, n, raw in _mpv_conf_option_lines(old_text) if (s, n) not in new_keys]
+    report = None
+    if foreign:
+        report = Path(backup_dir) / MPV_CONF_NOT_IN_TEMPLATE
+        report.write_text(
+            "# Lines of the previous mpv.conf that the regenerated one does not contain.\n"
+            "# Personal settings belong in mpv.conf.user; copy any you want to keep there.\n"
+            + "\n".join(foreign)
+            + "\n",
+            encoding="utf-8",
+        )
+    if new_text != old_text:
+        _atomic_replace_text(conf, new_text)
+    if audit_log:
+        audit_log.record_file(
+            str(conf),
+            "modify",
+            "ok",
+            f"regenerated from template; {len(foreign)} line(s) not carried over"
+            + (f", listed in {report}" if report else ""),
+        )
+    return foreign, report
+
+
+def _report_mpv_conf_regeneration(result, backup_dir, limit=40):
+    foreign, report = result
+    ui.success(f"mpv.conf regenerated from the template (previous copy in {backup_dir}).")
+    if not foreign:
+        return
+    ui.warn(
+        f"{len(foreign)} line(s) of your previous mpv.conf are not in the regenerated one. "
+        f"They are saved in {report}; move any you want to keep into mpv.conf.user:"
+    )
+    for line in foreign[:limit]:
+        ui.info(f"  {line}")
+    if len(foreign) > limit:
+        ui.info(f"  ... and {len(foreign) - limit} more (see {report})")
+
+
 def cmd_update(args):
     """Update only assets after complete fetch, keeping a recoverable backup."""
     ui.banner()
@@ -3037,7 +3204,8 @@ def cmd_update(args):
         stages += [("fetch", "Download scripts & shaders"), ("deploy", "Apply update")]
     ui.outline(stages)
     env = detect()
-    plan = build_update_plan(env)
+    keep_conf = bool(getattr(args, "keep_conf", False))
+    plan = build_update_plan(env, keep_conf=keep_conf)
     display_plan(plan, "Update Plan")
     if args.dry_run:
         ui.info("[DRY RUN] No downloads, audit writes, staging, or replacements.")
@@ -3066,11 +3234,28 @@ def cmd_update(args):
             "ok",
             "assets and manifest committed; personal configuration preserved",
         )
-        # The update path preserves mpv.conf/input.conf/script-opts
+        regenerated = None
+        if not keep_conf:
+            backup_dir = backup
+            if not (backup_dir and Path(backup_dir).is_dir()):
+                backup_dir = backup_existing(config_dir, audit_log=audit_log)
+            if backup_dir:
+                regenerated = _regenerate_mpv_conf(config_dir, env, backup_dir, audit_log)
+                if regenerated is not None:
+                    _report_mpv_conf_regeneration(regenerated, backup_dir)
+            else:
+                ui.warn("No backup could be made; mpv.conf was kept as it is.")
+        # input.conf/script-opts (and mpv.conf with --keep-conf) are kept
         # verbatim, so the repair migrations run here too - `mpv-config
         # update` is the standing refresh recipe and must reach deployed
-        # configs just like a full install does.
-        migration_results = _migrate_deployed_configs(config_dir, env, audit_log)
+        # configs just like a full install does. A just-regenerated mpv.conf
+        # is already current and is not migrated again.
+        migration_results = _migrate_deployed_configs(
+            config_dir,
+            env,
+            audit_log,
+            skip=("migrate-mpv-conf",) if regenerated is not None else (),
+        )
         for row in migration_results:
             if row["status"] == "warn":
                 ui.warn("%s: %s" % (row["name"], row["detail"]))
@@ -3089,7 +3274,10 @@ def cmd_update(args):
             ui.info(f"Anime4K mode updated to: {args.anime_preset}")
         audit_log.complete_session("completed")
         ui.panel(
-            "Update complete. Personal configuration was preserved.",
+            "Update complete. mpv.conf was regenerated from the template; "
+            "mpv.conf.user and script-opts were preserved."
+            if regenerated is not None
+            else "Update complete. Personal configuration was preserved.",
             title="Success",
             style="green",
         )
@@ -3520,6 +3708,14 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="preview changes without modifying files"
+    )
+    parser.add_argument(
+        "--keep-conf",
+        action="store_true",
+        help=(
+            "with --update: keep the existing mpv.conf instead of regenerating it from "
+            "the template (mpv.conf.user is never touched either way)"
+        ),
     )
     parser.add_argument(
         "--yes",

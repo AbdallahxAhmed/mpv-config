@@ -370,7 +370,8 @@ mpv-config verify
 ### 3. Manage the Deployment
 ```bash
 mpv-config status             # installed script/shader versions and the last installer session
-mpv-config update             # refresh scripts and shaders; personal config preserved (or pass --anime-preset <MODE>)
+mpv-config update             # refresh scripts and shaders, regenerate mpv.conf from the template (backup kept,
+                              # mpv.conf.user untouched); --keep-conf keeps mpv.conf; --anime-preset <MODE>
 mpv-config rollback           # restore the newest backup (the current config is snapshotted first)
 mpv-config rollback <backup>  # restore a specific one of this config's mpv.backup.* folders
 mpv-config sync-deps          # update yt-dlp, ffmpeg, alass and ffsubsync
