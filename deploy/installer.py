@@ -2069,13 +2069,50 @@ def _unblock_path(path):
         pass
 
 
+def _sync_ffsubsync_cli():
+    """Install or upgrade the ffsubsync CLI with uv tool, falling back to pipx.
+
+    ffsubsync is a CLI tool (constitution Principle III, Category A), so pip
+    is never used for it: not ``python -m pip`` and not a bare ``pip``.
+    Without uv and pipx nothing is installed and the user is told what to add.
+    """
+    has_uv = bool(shutil.which("uv"))
+    has_pipx = bool(shutil.which("pipx"))
+    installed = False
+    if has_uv:
+        ui.step("Installing/upgrading ffsubsync via uv tool...")
+        installed = _run(["uv", "tool", "install", "--upgrade", "ffsubsync"], check=False)
+    if not installed and has_pipx:
+        ui.step("Installing/upgrading ffsubsync via pipx...")
+        # `pipx upgrade` fails when the package is not installed yet; then install it.
+        installed = _run(["pipx", "upgrade", "ffsubsync"], check=False) or _run(
+            ["pipx", "install", "ffsubsync"], check=False
+        )
+
+    if not has_uv and not has_pipx:
+        ui.warn(
+            "ffsubsync: neither uv nor pipx is installed, so ffsubsync was not "
+            "installed or upgraded. Install uv (https://docs.astral.sh/uv/) or "
+            "pipx with your package manager, then re-run sync-deps."
+        )
+        if shutil.which("ffsubsync"):
+            return {"name": "ffsubsync", "status": "ok", "detail": "not upgraded: no uv/pipx"}
+        return {"name": "ffsubsync", "status": "skipped", "detail": "uv/pipx not found"}
+
+    if installed or shutil.which("ffsubsync"):
+        ui.success("ffsubsync: verified")
+        return {"name": "ffsubsync", "status": "ok"}
+    ui.warn("ffsubsync: could not install via uv tool or pipx")
+    return {"name": "ffsubsync", "status": "skipped", "detail": "uv/pipx failed"}
+
+
 def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, audit_log=None):
     """
     Automated Dependency Suite Pipeline (Self-Healing Fetcher):
       - yt-dlp: latest 64-bit Windows binary from yt-dlp/yt-dlp
       - ffmpeg-full: latest release archive (ffmpeg.exe, ffprobe.exe, ffplay.exe)
       - alass: latest release (alass.exe) from kaegi/alass
-      - ffsubsync: pip/uv installation/upgrade
+      - ffsubsync: uv tool, then pipx (never pip — it is a CLI tool)
       - Unblock files on Windows
       - Update ytdl_hook.conf with localized path
     """
@@ -2233,36 +2270,12 @@ def sync_dependencies(env=None, target_dir=None, force=False, dry_run=False, aud
             results.append({"name": "alass", "status": "failed", "detail": str(e)})
 
     # 4. ffsubsync
-    ui.step("Checking ffsubsync (Python/pip/uv)...")
+    ui.step("Checking ffsubsync (uv tool / pipx)...")
     if dry_run:
         results.append({"name": "ffsubsync", "status": "skipped", "detail": "dry-run"})
     else:
         try:
-            installed_ffsubsync = False
-            if shutil.which("uv"):
-                ui.step("Installing/upgrading ffsubsync via uv tool...")
-                installed_ffsubsync = _run(
-                    ["uv", "tool", "install", "--upgrade", "ffsubsync"], check=False
-                )
-            if not installed_ffsubsync and shutil.which("python"):
-                ui.step("Installing/upgrading ffsubsync via python -m pip...")
-                installed_ffsubsync = _run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "ffsubsync"], check=False
-                )
-            if not installed_ffsubsync and shutil.which("pip"):
-                ui.step("Installing/upgrading ffsubsync via pip...")
-                installed_ffsubsync = _run(
-                    ["pip", "install", "--upgrade", "ffsubsync"], check=False
-                )
-
-            if installed_ffsubsync or shutil.which("ffsubsync"):
-                ui.success("ffsubsync: verified")
-                results.append({"name": "ffsubsync", "status": "ok"})
-            else:
-                ui.warn("ffsubsync: could not automatically install via pip/uv")
-                results.append(
-                    {"name": "ffsubsync", "status": "skipped", "detail": "pip/uv failed"}
-                )
+            results.append(_sync_ffsubsync_cli())
         except Exception as e:
             ui.warn(f"ffsubsync install notice: {e}")
             results.append({"name": "ffsubsync", "status": "failed", "detail": str(e)})
