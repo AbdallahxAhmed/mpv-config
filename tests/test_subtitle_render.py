@@ -148,6 +148,68 @@ class SanitizedAssRenderTests(unittest.TestCase):
         self.assertEqual(expected, sanitized)
 
 
+PROBE_LUA = """
+mp.add_timeout(1.0, function()
+  local text = mp.get_property("sub-text") or ""
+  io.stderr:write("SUBTEXT|" .. (mp.get_property("current-tracks/sub/title") or "-") .. "|"
+    .. text:gsub(".", function(c) return string.format("%02x", c:byte()) end) .. "\\n")
+  mp.command("quit")
+end)
+"""
+LINE = "&rlm;مرحباً بك&nbsp;يا صديقي"
+SHOWN = "\u200fمرحباً بك\u00a0يا صديقي"
+
+
+@unittest.skipUnless(MPV, "mpv is not installed")
+class SanitizerEncodingTests(unittest.TestCase):
+    """What mpv actually shows after the sanitizer cleaned a legacy-encoded file."""
+
+    def shown(self, encoded):
+        with tempfile.TemporaryDirectory(prefix="mpv-sanitizer-enc-") as tmp:
+            root = Path(tmp)
+            (root / "tmp").mkdir()
+            sub = root / "arabic.srt"
+            sub.write_bytes(encoded)
+            probe = root / "probe.lua"
+            probe.write_text(PROBE_LUA, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    MPV,
+                    "--no-config",
+                    "--load-scripts=no",
+                    f"--script={SANITIZER}",
+                    f"--script={probe}",
+                    "--no-audio",
+                    "--ao=null",
+                    "--vo=null",
+                    "--no-terminal",
+                    "--idle=no",
+                    f"--sub-file={sub}",
+                    "av://lavfi:color=s=320x240:d=3",
+                ],
+                capture_output=True,
+                timeout=60,
+                check=False,
+                env=dict(os.environ, TMPDIR=str(root / "tmp"), TEMP=str(root / "tmp")),
+            )
+        line = next(out for out in proc.stderr.splitlines() if out.startswith(b"SUBTEXT|"))
+        _, title, hexed = line.split(b"|", 2)
+        return title.decode(), bytes.fromhex(hexed.decode()).decode("utf-8", "replace")
+
+    def cue(self, text):
+        return f"1\n00:00:00,000 --> 00:00:05,000\n{text}\n"
+
+    def test_windows_1256_is_shown_correctly_after_cleaning(self):
+        title, text = self.shown(self.cue(LINE).encode("cp1256"))
+        self.assertTrue(title.endswith("[cleaned]"), title)
+        self.assertEqual(SHOWN, text)
+
+    def test_utf16_is_shown_correctly_after_cleaning(self):
+        title, text = self.shown(self.cue(LINE).encode("utf-16"))
+        self.assertTrue(title.endswith("[cleaned]"), title)
+        self.assertEqual(SHOWN, text)
+
+
 ARABIC_SRT = "1\n00:00:00,000 --> 00:00:02,000\nمرحباً بك يا صديقي، كيف حالك؟\n"
 
 

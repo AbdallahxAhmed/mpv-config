@@ -186,6 +186,130 @@ local function looks_unsanitized(text)
     return text:find("</?%a[%w%.%-]*[^>\r\n]*>") ~= nil
 end
 
+-- ── encodings ─────────────────────────────────────────────────────────
+-- Entities decode to UTF-8 bytes, so they may only be written into UTF-8.
+-- A Windows-1256 file is decoded, cleaned and encoded back to 1256 (it has
+-- RLM 0xFE, LRM 0xFD, NBSP 0xA0); UTF-16 is converted to UTF-8; any other
+-- legacy encoding is left alone rather than turned into mixed garbage.
+
+-- Windows-1256 bytes 0x80..0xFF -> Unicode (generated from Python's codec).
+local CP1256 = {
+    0x20AC, 0x067E, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+    0x02C6, 0x2030, 0x0679, 0x2039, 0x0152, 0x0686, 0x0698, 0x0688,
+    0x06AF, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+    0x06A9, 0x2122, 0x0691, 0x203A, 0x0153, 0x200C, 0x200D, 0x06BA,
+    0x00A0, 0x060C, 0x00A2, 0x00A3, 0x00A4, 0x00A5, 0x00A6, 0x00A7,
+    0x00A8, 0x00A9, 0x06BE, 0x00AB, 0x00AC, 0x00AD, 0x00AE, 0x00AF,
+    0x00B0, 0x00B1, 0x00B2, 0x00B3, 0x00B4, 0x00B5, 0x00B6, 0x00B7,
+    0x00B8, 0x00B9, 0x061B, 0x00BB, 0x00BC, 0x00BD, 0x00BE, 0x061F,
+    0x06C1, 0x0621, 0x0622, 0x0623, 0x0624, 0x0625, 0x0626, 0x0627,
+    0x0628, 0x0629, 0x062A, 0x062B, 0x062C, 0x062D, 0x062E, 0x062F,
+    0x0630, 0x0631, 0x0632, 0x0633, 0x0634, 0x0635, 0x0636, 0x00D7,
+    0x0637, 0x0638, 0x0639, 0x063A, 0x0640, 0x0641, 0x0642, 0x0643,
+    0x00E0, 0x0644, 0x00E2, 0x0645, 0x0646, 0x0647, 0x0648, 0x00E7,
+    0x00E8, 0x00E9, 0x00EA, 0x00EB, 0x0649, 0x064A, 0x00EE, 0x00EF,
+    0x064B, 0x064C, 0x064D, 0x064E, 0x00F4, 0x064F, 0x0650, 0x00F7,
+    0x0651, 0x00F9, 0x0652, 0x00FB, 0x00FC, 0x200E, 0x200F, 0x06D2,
+}
+local CP1256_REVERSE, CP1256_ARABIC = {}, {}
+for i, cp in ipairs(CP1256) do
+    CP1256_REVERSE[cp] = 0x7F + i
+    CP1256_ARABIC[0x7F + i] = cp >= 0x0600 and cp <= 0x06FF
+end
+
+local function utf8_codepoints(s)
+    local cps = {}
+    for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        local b1, n = ch:byte(1), #ch
+        local cp
+        if n == 1 then cp = b1
+        elseif n == 2 then cp = (b1 % 32) * 64 + ch:byte(2) % 64
+        elseif n == 3 then cp = (b1 % 16) * 4096 + (ch:byte(2) % 64) * 64 + ch:byte(3) % 64
+        else cp = (b1 % 8) * 262144 + (ch:byte(2) % 64) * 4096 + (ch:byte(3) % 64) * 64 + ch:byte(4) % 64 end
+        cps[#cps + 1] = cp
+    end
+    return cps
+end
+
+local function is_utf8(s)
+    local i, n = 1, #s
+    while i <= n do
+        local c = s:byte(i)
+        local len = c < 0x80 and 1 or (c >= 0xC2 and c <= 0xDF) and 2
+            or (c >= 0xE0 and c <= 0xEF) and 3 or (c >= 0xF0 and c <= 0xF4) and 4 or nil
+        if not len or i + len - 1 > n then return false end
+        for k = i + 1, i + len - 1 do
+            local cc = s:byte(k)
+            if cc < 0x80 or cc > 0xBF then return false end
+        end
+        i = i + len
+    end
+    return true
+end
+
+local function utf16_to_utf8(s, big_endian)
+    local out, i = {}, 3  -- skip the BOM
+    local function unit(k)
+        local a, b = s:byte(k, k + 1)
+        if not b then return nil end
+        return big_endian and a * 256 + b or b * 256 + a
+    end
+    while i <= #s - 1 do
+        local u = unit(i)
+        i = i + 2
+        if u >= 0xD800 and u <= 0xDBFF then
+            local lo = unit(i)
+            if lo and lo >= 0xDC00 and lo <= 0xDFFF then
+                u = 0x10000 + (u - 0xD800) * 1024 + (lo - 0xDC00)
+                i = i + 2
+            end
+        end
+        out[#out + 1] = utf8_encode(u)
+    end
+    return table.concat(out)
+end
+
+local function cp1256_to_utf8(s)
+    return (s:gsub("[\128-\255]", function(c) return utf8_encode(CP1256[c:byte() - 0x7F]) end))
+end
+
+local function utf8_to_cp1256(s)
+    local out = {}
+    for _, cp in ipairs(utf8_codepoints(s)) do
+        if cp < 0x80 then out[#out + 1] = string.char(cp)
+        else out[#out + 1] = string.char(CP1256_REVERSE[cp] or 0x3F) end  -- "?" if not in 1256
+    end
+    return table.concat(out)
+end
+
+local function looks_cp1256(s)
+    local high, arabic = 0, 0
+    for c in s:gmatch("[\128-\255]") do
+        high = high + 1
+        if CP1256_ARABIC[c:byte()] then arabic = arabic + 1 end
+    end
+    return arabic >= 4 and arabic * 2 >= high
+end
+
+-- "utf-8", "utf-16le", "utf-16be", "cp1256", or nil for an unknown legacy encoding.
+local function detect_encoding(content)
+    local b1, b2 = content:byte(1, 2)
+    if b1 == 0xFF and b2 == 0xFE then return "utf-16le" end
+    if b1 == 0xFE and b2 == 0xFF then return "utf-16be" end
+    if is_utf8(content) then return "utf-8" end
+    local codepage = (mp.get_property("sub-codepage") or ""):lower()
+    if codepage:find("1256", 1, true) or looks_cp1256(content) then return "cp1256" end
+    return nil
+end
+
+-- Decode to UTF-8 for cleaning; returns text and the function that writes it back.
+local function to_utf8(content, encoding)
+    if encoding == "utf-16le" then return utf16_to_utf8(content, false), nil end
+    if encoding == "utf-16be" then return utf16_to_utf8(content, true), nil end
+    if encoding == "cp1256" then return cp1256_to_utf8(content), utf8_to_cp1256 end
+    return content, nil
+end
+
 -- ── track handling ────────────────────────────────────────────────────
 
 local codec_ext_map = { subrip = "srt", ass = "ass", ssa = "ass" }
@@ -311,11 +435,18 @@ local function sanitize_track(track)
     end
     if not content then return false end
 
-    local cleaned = sanitize_content(content, ext)
-    if cleaned == content then
+    local encoding = detect_encoding(content)
+    if not encoding then
+        msg.info("sub_sanitizer: unknown legacy text encoding; track left as it is")
+        return false
+    end
+    local text, write_back = to_utf8(content, encoding)
+    local cleaned = sanitize_content(text, ext)
+    if cleaned == text then
         msg.info("sub_sanitizer: track is already clean")
         return false
     end
+    if write_back then cleaned = write_back(cleaned) end
 
     local out_path = output_path(ext)
     if not write_file(out_path, cleaned) then
@@ -343,6 +474,8 @@ mp.register_script_message("sub-sanitize", function()
 end)
 
 _G.sub_sanitizer = {
+    detect_encoding = detect_encoding,
+    is_utf8 = is_utf8,
     decode_entities = decode_entities,
     sanitize_content = sanitize_content,
     looks_unsanitized = looks_unsanitized,

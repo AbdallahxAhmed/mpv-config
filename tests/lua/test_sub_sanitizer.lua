@@ -302,4 +302,77 @@ test('the manual sanitize message force-processes the current track', function()
     eq(1, added)
 end)
 
+-- ── encodings (2026-11-20 audit): never write UTF-8 into a legacy file ──
+
+local function sanitized_output(h)
+    for _, cmd in ipairs(h.commands) do
+        if cmd[1] == 'sub-add' then return read_file(cmd[2]) end
+    end
+    return nil
+end
+
+local function run_external(name, bytes, props)
+    local h, ss = load_script()
+    for k, v in pairs(props or {}) do h.props[k] = v end
+    local source = write_temp(name, bytes)
+    h.props['current-tracks/sub'] = {
+        id = 1, external = true, ['external-filename'] = source, codec = 'subrip',
+    }
+    h.messages['sub-sanitize']()
+    return sanitized_output(h), ss
+end
+
+local CUE = '1\r\n00:00:01,000 --> 00:00:03,000\r\n'
+-- مرحبا in Windows-1256
+local CP1256_MARHABA = '\227\209\205\200\199'
+
+local function utf16le(utf8)
+    local _, ss = load_script()
+    local out = {'\255\254'}
+    for ch in utf8:gmatch('[%z\1-\127\194-\244][\128-\191]*') do
+        local cp = ch:byte(1)
+        if #ch == 2 then cp = (cp % 32) * 64 + ch:byte(2) % 64 end
+        out[#out + 1] = string.char(cp % 256, math.floor(cp / 256))
+    end
+    return table.concat(out)
+end
+
+test('encoding detection: BOMs, UTF-8, Windows-1256, unknown legacy', function()
+    local h, ss = load_script()
+    eq('utf-16le', ss.detect_encoding('\255\254a\0'))
+    eq('utf-16be', ss.detect_encoding('\254\255\0a'))
+    eq('utf-8', ss.detect_encoding('\239\187\191&rlm;مرحبا'))
+    eq('utf-8', ss.detect_encoding('plain'))
+    eq('cp1256', ss.detect_encoding('&rlm;' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA))
+    eq(nil, ss.detect_encoding('caf\233 &rlm;'))  -- Latin-1, not Arabic
+    h.props['sub-codepage'] = '+cp1256'
+    eq('cp1256', ss.detect_encoding('caf\233'))
+end)
+
+test('Windows-1256: entities are written back as 1256 bytes, Arabic untouched', function()
+    local out = run_external('w1256.srt', CUE .. '&rlm;' .. CP1256_MARHABA .. '&nbsp;x\r\n')
+    eq(CUE .. '\254' .. CP1256_MARHABA .. '\160x\r\n', out)
+end)
+
+test('Windows-1256: numeric entities map to 1256, unrepresentable ones to "?"', function()
+    local out, ss = run_external('w1256n.srt', CUE .. CP1256_MARHABA .. '&#1604;&#x1F600;\r\n')
+    eq(CUE .. CP1256_MARHABA .. '\225?\r\n', out)
+    eq(false, ss.is_utf8(out))
+end)
+
+test('UTF-16 with a BOM is converted to UTF-8 and cleaned', function()
+    local out = run_external('u16.srt', utf16le(CUE .. '&rlm;مرحبا\r\n'))
+    eq(CUE .. RLM .. 'مرحبا\r\n', out)
+end)
+
+test('a UTF-8 BOM is kept', function()
+    local out = run_external('bom.srt', '\239\187\191' .. CUE .. '&rlm;x\r\n')
+    eq('\239\187\191' .. CUE .. RLM .. 'x\r\n', out)
+end)
+
+test('an unknown legacy encoding is left alone, not turned into mixed garbage', function()
+    local out = run_external('latin1.srt', CUE .. 'caf\233 &rlm;\r\n')
+    eq(nil, out)
+end)
+
 print('Sub sanitizer tests passed: ' .. total)
