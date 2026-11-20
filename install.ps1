@@ -1,5 +1,6 @@
-# Bootstrap mpv-config on Windows: fetch the repository, install the CLI for the
-# current user, then run `mpv-config install`.
+# Bootstrap mpv-config on Windows: fetch the repository, install the CLI into a
+# private virtual environment (never into the system Python), then run
+# `mpv-config install`. Mirrors install.sh.
 #   irm https://raw.githubusercontent.com/AbdallahxAhmed/mpv-config/main/install.ps1 | iex
 # Extra arguments reach the deployer when the script is invoked as a script block:
 #   & ([scriptblock]::Create((irm .../install.ps1))) --dry-run
@@ -9,6 +10,11 @@
 $ErrorActionPreference = "Stop"
 $RepoUrl = "https://github.com/AbdallahxAhmed/mpv-config.git"
 $TargetDir = Join-Path $HOME ".mpv-config-deploy"
+$DataRoot = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME "AppData\Local" }
+$DataDir = Join-Path $DataRoot "mpv-config"
+$VenvDir = Join-Path $DataDir "venv"
+$VenvPython = Join-Path $VenvDir "Scripts\python.exe"
+$BinDir = Join-Path $DataDir "bin"
 $ForwardedArgs = @($args)
 
 function Invoke-Native {
@@ -118,24 +124,67 @@ if ((Test-Path "pyproject.toml") -and (Test-Path "src/mpv_config")) {
 Set-Location $TargetDir
 
 Write-Host "Bootstrapping mpv-config (quiet; details are shown only on failure)..."
-# --quiet keeps the ~25 'Requirement already satisfied' / uninstall lines out
-# of the console; on failure the captured output is reprinted for diagnosis.
+# The CLI lives in a private virtual environment, like install.sh does on
+# Linux/macOS: pip runs only inside it, never against the system Python
+# (constitution Principle III).
+if (-not (Test-Path $VenvPython)) {
+    Write-Host "Creating virtual environment at $VenvDir..."
+    if (Test-Path $VenvDir) {
+        Remove-Item -Recurse -Force $VenvDir
+    }
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    $venvOutput = Invoke-Native { & $PyExe @PyArgs -m venv $VenvDir 2>&1 }
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $VenvPython)) {
+        $venvOutput | Write-Host
+        if (Test-Path $VenvDir) {
+            Remove-Item -Recurse -Force $VenvDir
+        }
+        throw "Could not create a virtual environment at $VenvDir (exit code $LASTEXITCODE)."
+    }
+}
+
+# A venv left without pip (e.g. an interrupted earlier run): seed pip into it
+# instead of failing on "No module named pip".
+Invoke-Native { & $VenvPython -m pip --version *> $null }
+if ($LASTEXITCODE -ne 0) {
+    Invoke-Native { & $VenvPython -m ensurepip --upgrade *> $null }
+    if ($LASTEXITCODE -ne 0) {
+        throw "The virtual environment at $VenvDir has no pip; remove it and re-run."
+    }
+}
+
+# Editable, so the CLI always finds this checkout: deploy/ and config/ are not
+# packaged. --quiet keeps the ~25 'Requirement already satisfied' lines out of
+# the console; on failure the captured output is reprinted for diagnosis.
 $pipOutput = Invoke-Native {
-    & $PyExe @PyArgs -m pip install --user --quiet --editable . `
-        --no-warn-script-location --disable-pip-version-check 2>&1
+    & $VenvPython -m pip install --quiet --editable . --disable-pip-version-check 2>&1
 }
 if ($LASTEXITCODE -ne 0) {
     $pipOutput | Write-Host
     throw "pip install failed with exit code $LASTEXITCODE"
 }
 
-$UserScripts = Invoke-Native {
-    & $PyExe @PyArgs -c "import site, os; print(os.path.join(site.USER_BASE, 'Scripts'))" 2>$null
+# Put `mpv-config` on PATH through a small .cmd shim next to the renderer in
+# %LOCALAPPDATA%\mpv-config\bin (install.sh links ~/.local/bin instead). A
+# .cmd needs no symlink privilege; it finds the venv relative to itself, so it
+# holds no absolute (possibly non-ASCII) path. An unrelated file is left alone.
+$Shim = Join-Path $BinDir "mpv-config.cmd"
+$ShimMarker = "rem mpv-config venv shim"
+$ownShim = (-not (Test-Path $Shim)) -or ((Get-Content -Raw $Shim) -match [regex]::Escape($ShimMarker))
+if ($ownShim) {
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+    Set-Content -Path $Shim -Encoding ASCII -Value @(
+        "@echo off",
+        $ShimMarker,
+        '"%~dp0..\venv\Scripts\mpv-config.exe" %*'
+    )
+} else {
+    Write-Host "note: $Shim already exists and was not created by mpv-config; left unchanged."
 }
-if ($UserScripts -and -not ($env:PATH -split ';' -contains $UserScripts)) {
-    Write-Host "note: $UserScripts is not on your PATH; add it to run 'mpv-config' directly."
+if (-not ($env:PATH -split ';' -contains $BinDir)) {
+    Write-Host "note: $BinDir is not on your PATH; add it to run 'mpv-config' directly."
 }
-Invoke-Native { & $PyExe @PyArgs -m mpv_config install @ForwardedArgs }
+Invoke-Native { & $VenvPython -m mpv_config install @ForwardedArgs }
 # No `exit` here: under `irm | iex` it would close the user's PowerShell window.
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "mpv-config install exited with code $LASTEXITCODE."

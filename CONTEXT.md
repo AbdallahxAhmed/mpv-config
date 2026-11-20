@@ -183,8 +183,10 @@ overlays everything. Vendored patches always win.
 ## 7. How the installer works
 
 ### Bootstrap scripts
-- `install.ps1` (Windows): clone/update `~\.mpv-config-deploy` →
-  `pip install --user --quiet --editable .` → `python -m mpv_config install`.
+- `install.ps1` (Windows): clone/update `~\.mpv-config-deploy` → private
+  venv at `%LOCALAPPDATA%\mpv-config\venv` → `pip install --quiet --editable .`
+  inside it → `mpv-config.cmd` shim in `%LOCALAPPDATA%\mpv-config\bin` →
+  `python -m mpv_config install` with the venv Python.
 - `install.sh` (Linux/macOS): same, but into a private venv at
   `~/.local/share/mpv-config/venv` (PEP 668-safe; falls back to uv when
   ensurepip is missing), then a `~/.local/bin/mpv-config` symlink.

@@ -216,8 +216,8 @@ def _patch_keyboard_layout_conf(template_path, dest_path, env):
     """Write the command line that starts the keyboard-layout guard.
 
     The guard lives in the installed package, so the interpreter that has
-    it is the one running the deployer (a venv on Linux, the --user
-    install on Windows).
+    it is the one running the deployer (the private venv that install.sh /
+    install.ps1 create).
     """
     with open(template_path, "r", encoding="utf-8") as stream:
         content = stream.read()
