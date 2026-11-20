@@ -88,7 +88,7 @@ class FreshDeployWithWindowsInterpreterTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("layout_guard", conf)
-        self.assertIn("\ncommand=\n", conf)
+        self.assertNotIn("command=", conf)
 
 
 class AutosubsyncHealingWindowsPathTests(unittest.TestCase):

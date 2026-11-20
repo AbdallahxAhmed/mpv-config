@@ -16,8 +16,11 @@ local msg = require 'mp.msg'
 local options = require 'mp.options'
 
 local o = {
-    enabled = true,
     ahk = true,
+    -- Retired with the Python keyboard hook (mpv_config.layout_guard, removed
+    -- in 78a66e8). Still declared so existing keyboard_layout.conf files that
+    -- carry them parse without "unknown key" errors; they do nothing.
+    enabled = false,
     command = "",
     log = "",
 }
@@ -93,14 +96,6 @@ local function start_guard()
             return true
         end
     end
-
-    -- 2. Legacy guard command check (for safety / backwards compatibility)
-    if not o.enabled or o.command == "" then return false end
-    if not o.command:find("guard") then
-        msg.warn("keyboard layout: the configured command does not look like the guard")
-        return false
-    end
-    msg.info("keyboard layout: legacy python hook retired; using AHK and layout twins")
     return false
 end
 

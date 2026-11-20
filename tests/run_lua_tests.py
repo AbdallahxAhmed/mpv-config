@@ -13,22 +13,11 @@ else:
     # override for exotic installs. Same suites run on both platforms.
     MPV = os.environ.get("MPV_BINARY") or shutil.which("mpv") or "/usr/bin/mpv"
 
-suites = [
-    "test_stream_policy.lua",
-    "test_ytdl_hook.lua",
-    "test_player_toolbar.lua",
-    "test_caption_menu.lua",
-    "test_smart_paste.lua",
-    "test_sub_backdrop.lua",
-    "test_thumbfast.lua",
-    "test_smart_motion.lua",
-    "test_profile_picker.lua",
-    "test_sub_sanitizer.lua",
-    "test_help_overlay.lua",
-    "test_keyboard_layout.lua",
-    "test_fast_close.lua",
-    "test_display_fps_guard.lua",
-]
+# Every suite in tests/lua is run: a new test_*.lua is picked up without
+# editing this file, so CI cannot silently skip one.
+suites = sorted(path.name for path in (ROOT / "tests" / "lua").glob("test_*.lua"))
+if not suites:
+    sys.exit("no Lua suites found in tests/lua")
 
 all_passed = True
 
@@ -67,7 +56,16 @@ end
 
     try:
         proc = subprocess.run(
-            [MPV, "--no-config", "--load-scripts=no", "--idle=yes", f"--script={temp_path}"],
+            [
+                MPV,
+                "--no-config",
+                "--load-scripts=no",
+                "--idle=yes",
+                "--vo=null",
+                "--ao=null",
+                "--no-audio",
+                f"--script={temp_path}",
+            ],
             capture_output=True,
             text=True,
             timeout=15,

@@ -55,23 +55,24 @@ end
 test('the script loads and exposes its options', function()
     local h, kl = load_script()
     assert(kl, "the script must expose itself")
-    eq(true, kl.options.enabled)
-    eq("", kl.options.command)
+    eq(true, kl.options.ahk)
 end)
 
-test('nothing is started when the guard is not configured', function()
+test('nothing is started off Windows', function()
     local h, kl = load_script()
-    -- no command configured -> no spawn, no error
-    kl.start()
+    eq(false, kl.start())
+    eq(0, #h.async_commands)
     eq(0, #h.warnings)
 end)
 
-test('a command that is not the guard is refused', function()
+test('the retired guard keys of an old keyboard_layout.conf do nothing', function()
     local h, kl = load_script()
-    kl.options.command = "rm -rf /"
-    kl.start()
-    eq(1, #h.warnings)
-    assert(h.warnings[1]:find("guard", 1, true))
+    kl.options.enabled = true
+    kl.options.command = '"python" -m mpv_config.layout_guard'
+    eq(false, kl.start())
+    eq(0, #h.async_commands)
+    eq(0, #h.warnings)
+    eq(0, #h.infos)
 end)
 
 test('AHK helper is started via silent native subprocess on Windows', function()

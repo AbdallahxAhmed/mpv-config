@@ -70,8 +70,10 @@ class TestSubBackdropToggle(unittest.TestCase):
         self.assertIn('"sub_backdrop",', self.verifier)
 
     def test_lua_suite_registered(self):
+        # run_lua_tests.py runs every tests/lua/test_*.lua it finds
         harness = (ROOT / "tests" / "run_lua_tests.py").read_text(encoding="utf-8")
-        self.assertIn('"test_sub_backdrop.lua"', harness)
+        self.assertIn('glob("test_*.lua")', harness)
+        self.assertTrue((ROOT / "tests" / "lua" / "test_sub_backdrop.lua").is_file())
 
     def test_quick_reference_documented_b(self):
         self.assertIn(

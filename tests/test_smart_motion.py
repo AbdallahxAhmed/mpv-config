@@ -44,8 +44,10 @@ class TestSmartMotion(unittest.TestCase):
         self.assertIn('"smart_motion.conf"', self.verifier_content)
 
     def test_lua_test_suite_registered(self):
+        # run_lua_tests.py runs every tests/lua/test_*.lua it finds
         harness = (ROOT / "tests" / "run_lua_tests.py").read_text(encoding="utf-8")
-        self.assertIn('"test_smart_motion.lua"', harness)
+        self.assertIn('glob("test_*.lua")', harness)
+        self.assertTrue((ROOT / "tests" / "lua" / "test_smart_motion.lua").is_file())
 
 
 if __name__ == "__main__":

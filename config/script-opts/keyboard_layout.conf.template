@@ -9,6 +9,3 @@
 # with pure config and zero runtime processes.
 #
 ahk=yes
-enabled=no
-command=
-log=

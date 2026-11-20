@@ -266,7 +266,7 @@ each one. None has been exercised by a real run; see the note in *Method*.
    `autosubsync overwrite_old_sub=yes` overwrites your original subtitles.
 8. **No `LICENSE` file** at the repository root, while vendored scripts carry
    MPL-2.0 and BSD-2-Clause terms.
-9. `test.sh` is a spinner demo, not a test runner.
+9. ~~`test.sh` is a spinner demo, not a test runner.~~ Removed 2026-11-20.
 10. `README.md` still presents hardware-specific numbers as general results.
 11. `setup.py` imports `uuid` without using it.
 
