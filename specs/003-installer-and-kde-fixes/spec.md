@@ -1,13 +1,121 @@
 # Feature Specification: Installer & KDE Fixes
 
-**Feature Branch**: `002-installer-and-kde-fixes`
+**Feature Branch**: `003-installer-and-kde-fixes`
 **Created**: 2026-04-25
-**Status**: Draft
+**Status**: Partially superseded — installer design replaced; see [As-built](#as-built-2026-11-19)
 **Input**: Fix installer crashes, dependency classification violations, and KDE Plasma 6.6.4 window behavior issues
+
+## As-built (2026-11-19)
+
+The installer design in this spec was replaced. This section describes
+the code as it stands. Sections below marked **Superseded** are kept for
+history; each says what replaced it.
+
+### Installer and Python dependencies
+
+- **Entry point**: [`src/mpv_config/cli/main.py`](../../src/mpv_config/cli/main.py),
+  exposed as the `mpv-config` command (`pyproject.toml`
+  `[project.scripts]`: `mpv_config.cli.main:main`). `mpv-config install`
+  locates the repository checkout and runs `python -m deploy.deployer
+  install …` as a subprocess. There is no `setup.py`.
+- **Python dependencies**: [`pyproject.toml`](../../pyproject.toml)
+  declares `rich`, `pycryptodomex`, `curl_cffi` and `yt-dlp`. `yt-dlp`
+  is both a CLI tool (installed per platform from `SYSTEM_DEPS`, below)
+  and a Python library (imported by `src/mpv_config/downloaders/generic.py`
+  and `tools/core/registry.py`).
+- **Linux/macOS bootstrap**: [`install.sh`](../../install.sh) always
+  creates a venv at `${XDG_DATA_HOME:-~/.local/share}/mpv-config/venv`.
+  If `ensurepip` is missing (Debian/Ubuntu without `python3-venv`), it
+  uses `uv venv`, installing uv with its official installer if needed.
+  It installs the checkout into the venv in editable mode (venv `pip` or
+  `uv pip`), symlinks `~/.local/bin/mpv-config`, and execs
+  `python -m mpv_config install`. It never installs into the system
+  Python and never tries a system `python-rich` package.
+- **Windows bootstrap**: `install.ps1` installs missing prerequisites
+  with winget and then runs `pip install --user --editable .` into the
+  user site of the system Python, not a venv (see Open items, O5).
+- **UI fallback**: `deploy/ui.py` imports Rich and falls back to ANSI
+  output when Rich is missing (lines 32–43). `_print(text="", **kwargs)`
+  is at `deploy/ui.py:129`.
+
+### System dependencies — [`deploy/registry.py`](../../deploy/registry.py) `SYSTEM_DEPS`
+
+| Tool | Windows | Arch | Ubuntu | Fedora | macOS |
+|------|---------|------|--------|--------|-------|
+| mpv | GitHub release asset (`zhongfly/mpv-winbuild`, fallback `shinchiro/mpv-winbuild-cmake`) | pacman | PPA `ppa:ubuntuhandbook1/mpv` | dnf | brew |
+| yt-dlp | direct URL `yt-dlp.exe` (7-day refresh) | pacman | GitHub binary `yt-dlp_linux` → `~/.local/bin` (7-day refresh) | same as Ubuntu | brew |
+| ffmpeg | GitHub release zip (`BtbN/FFmpeg-Builds`) | pacman | apt | dnf | brew |
+| python | winget | pacman | apt | dnf | brew |
+| aria2 *(added)* | winget | pacman | apt | dnf | brew |
+| ffsubsync | `uv tool` | AUR `python-ffsubsync` (fallback `ffsubsync`), then `uv tool` | `uv tool` | `uv tool` | `uv tool` |
+| alass | GitHub release zip | AUR `alass-bin` (fallback `alass`), then GitHub binary | GitHub binary | GitHub binary | – |
+| uv *(added)* | GitHub release zip | OS package manager, then the official installer script | same | same | same (brew) |
+| autohotkey *(added)* | GitHub release zip | – | – | – | – |
+
+- `gum` is **not** in the registry, and `install.sh` does not use it.
+- winget remains only for `python` and `aria2` on Windows.
+- AUR builds use `paru` or `yay`. Arch entries prefer the CachyOS
+  optimized repos (`prefer_optimized_repo`).
+- `deploy/installer.py` `_install_one` / `_uninstall_one` handle 15
+  methods: `pacman`, `apt`, `dnf`, `brew`, `winget`, `aur`, `manual`,
+  `ppa`, `pipx`, `uv`, `uv_tool`, `direct_url`, `github_asset`,
+  `github_release_file`, `github_release_zip`.
+- [`deploy/installer.py::sync_dependencies`](../../deploy/installer.py)
+  (the `sync-deps` subcommand, `deploy/deployer.py::cmd_sync_deps`)
+  refreshes yt-dlp, ffmpeg, alass and ffsubsync (and AutoHotkey on
+  Windows) into a tools directory. Its ffsubsync step runs on every OS
+  and tries `uv tool install --upgrade`, then `python -m pip install`,
+  then bare `pip install` (see O1).
+
+### KDE window behaviour
+
+- **Close**: `config/input.conf.template:156` binds
+  `CLOSE_WIN set window-minimized yes ; quit`; lines 157–158 bind `q` and
+  `Q` the same way (`quit` / `quit-watch-later`).
+  [`scripts/fast_close.lua`](../../scripts/fast_close.lua) on Linux
+  minimizes the window on `shutdown` and overrides the `quit` /
+  `quit-watch-later` bindings to minimize first. This hides the visible
+  freeze while the Vulkan / libplacebo / Wayland teardown completes.
+  Covered by `tests/lua/test_fast_close.lua`.
+- **Fullscreen**: handled by mpv's own Wayland backend (see User Story 4).
+  The `native-fs = no` line that `deploy/deployer.py` writes on Linux
+  through `{{NATIVE_FS}}` has no effect there (see O3).
+- **Window sizing helpers**: `geometry=50%x50%`, `autofit-larger=90%x90%`
+  and `autofit-smaller=30%x30%` come from
+  `deploy/deployer.py::_get_linux_visual_tuning_block` (lines 169–172),
+  substituted into `{{LINUX_VISUAL_TUNING}}` (see O4).
+
+### Open items (code bugs — to be fixed in a separate change)
+
+- **O1** — `sync_dependencies` falls back to `python -m pip install` and
+  bare `pip install` for ffsubsync (`deploy/installer.py:2248-2256`).
+  This violates the constitution's rule that pip is never used for CLI
+  tools (Principle III, Category A).
+- **O2** — `install.sh` prints with raw `echo` and has no Gum wrappers,
+  which violates Principle V (Aesthetic CLI UX).
+- **O3** — the `native-fs` line on Linux is a no-op (`--native-fs` is
+  macOS-only per the mpv manual) and should be removed from the Linux
+  output (`{{NATIVE_FS}}` in `config/mpv.conf.template`,
+  `deploy/deployer.py:473`).
+
+Additional findings from this update (not in the original list):
+
+- **O4** — the window sizing helpers (and the Linux OSD/subtitle styling)
+  are literal config lines inside `deploy/deployer.py`
+  (`_get_linux_visual_tuning_block`), not text in a config template.
+  This conflicts with SC-006 and with Principle I ("the deploy package
+  … MUST NOT embed configuration literals").
+- **O5** — `install.ps1` runs `pip install --user` against the system
+  Python. Principle III allows pip only inside the isolated venv.
 
 ## User Scenarios & Testing
 
 ### User Story 1 — Installer Crash-Free Boot (Priority: P1)
+
+> **Superseded (2026-11-19)**: the `setup.py` Rich bootstrap (scenarios 2–3) was replaced by
+> `install.sh`, which always installs the project and its `pyproject.toml`
+> dependencies into a venv before `mpv-config install` runs. Scenario 1
+> (no `TypeError`) is covered by the `_print` default at `deploy/ui.py:129`.
 
 A user runs `python setup.py --install` on a fresh Arch Linux machine
 where Rich is not yet installed. The installer detects the environment,
@@ -44,6 +152,12 @@ detection and display the installation plan without any `TypeError`.
 ---
 
 ### User Story 2 — Safe Dependency Installation (Priority: P1)
+
+> **As-built (2026-11-19)**: scenarios 1 and 4 hold. Scenario 2: the AUR package is
+> `python-ffsubsync` (fallback `ffsubsync`), with a `uv tool` fallback.
+> Scenario 3 is **Superseded** (Rich comes from the venv, not
+> `python-rich`). Scenario 5: Ubuntu gets the yt-dlp GitHub binary, not
+> apt. "`pip` is never invoked outside a venv" is not met: see O1 and O5.
 
 A user runs `python setup.py --install` on Arch Linux. The installer
 installs `mpv`, `yt-dlp`, `ffmpeg`, `ffsubsync`, and `alass` via the
@@ -91,6 +205,10 @@ that `pip` is never invoked outside a venv, and that
 
 ### User Story 3 — mpv Window Close on KDE (Priority: P2)
 
+> **As-built (2026-11-19)**: implemented as `CLOSE_WIN set window-minimized yes ; quit`
+> plus matching `q`/`Q` bindings and `scripts/fast_close.lua` (see
+> As-built). The 1-second target was not re-measured in this update.
+
 A user clicks the X button (title bar close) on KDE Plasma 6.6.4.
 mpv quits immediately, matching the instant-close behavior on Windows.
 
@@ -119,6 +237,13 @@ click the X button. The mpv process should terminate within 1 second.
 ---
 
 ### User Story 4 — Fullscreen Button State Sync on KDE (Priority: P2)
+
+> **Status (2026-11-19): met by mpv's Wayland backend, no repo code needed.**
+> The only change made for this story was `native-fs = no` on Linux.
+> The mpv manual marks `--native-fs` as "(macOS only)", so it has no
+> effect on Linux (removal tracked as O3). In a manual test on KDE
+> Plasma Wayland (2026-11-19), mpv's `fullscreen` property and the uosc
+> fullscreen icon both followed KWin-initiated fullscreen changes.
 
 When the user toggles fullscreen via the uosc playback bar button,
 KDE Plasma's window manager and mpv's internal fullscreen flag stay
@@ -160,13 +285,20 @@ reflect the actual window state.
 - **Rich partially installed**: Rich is importable but corrupted
   (e.g. missing submodules). The bootstrap should detect this and
   attempt reinstallation.
+  *Superseded:* there is no Rich bootstrap; Rich comes from the venv
+  install, and `deploy/ui.py` only falls back to ANSI on `ImportError`.
 - **No AUR helper on Arch**: If neither `paru` nor `yay` is
   installed, the installer must print a clear message for AUR-only
   packages (ffsubsync, alass) and skip them gracefully.
+  *As-built:* `paru` or `yay` is used; without either, ffsubsync falls
+  back to `uv tool` and alass to its GitHub release binary.
 - **Venv already exists but is stale**: If
   `~/.local/share/mpv-config/venv` exists from a previous run but
   Rich is not importable inside it, the installer must recreate the
   venv — not crash.
+  *Superseded:* `install.sh` recreates the venv when `bin/python` is
+  missing and seeds pip (or switches to uv) when pip is missing; it does
+  not test Rich specifically.
 - **mpv started with `--no-border` on KDE**: Fullscreen behavior
   may differ when the title bar is hidden. Config must handle both
   `border=yes` and `border=no` window states.
@@ -184,13 +316,19 @@ reflect the actual window state.
   must be callable without `TypeError` from all existing call sites
   in `setup.py`, `deploy/installer.py`, `deploy/detector.py`, and
   all other `deploy/*.py` modules.
+  *As-built:* `_print(text="", **kwargs)` at `deploy/ui.py:129`;
+  `setup.py` no longer exists.
 
-- **FR-002**: `setup.py` MUST catch `ImportError` on `rich` at the
+- **FR-002** — *Superseded: replaced by `install.sh` installing Rich
+  into the venv from `pyproject.toml`; `deploy/ui.py` falls back to ANSI
+  on `ImportError`.* `setup.py` MUST catch `ImportError` on `rich` at the
   very top of its execution — before importing `deploy.ui` or any
   other module that transitively imports Rich. If Rich is missing,
   it MUST fall back to plain `print()` for bootstrap messages only.
 
-- **FR-003**: Once Rich is available (either already installed or
+- **FR-003** — *Superseded: no `os.execv` re-exec; `install.sh` execs
+  the venv's `python -m mpv_config install` once dependencies are in
+  place.* Once Rich is available (either already installed or
   freshly bootstrapped), `setup.py` MUST re-exec itself via
   `os.execv` so the Rich-enabled code path runs from the start —
   no manual user action required.
@@ -202,17 +340,28 @@ reflect the actual window state.
   - **Category A**: `mpv`, `yt-dlp`, `ffmpeg`, `ffsubsync`, `alass`,
     `gum`, `python`
   - **Category B**: `rich` (and only `rich` at this time)
+  - *Superseded (gum): `gum` is not in `SYSTEM_DEPS` and is not used by
+    `install.sh`.* *As-built: Category B is now `rich`, `pycryptodomex`,
+    `curl_cffi` and `yt-dlp` (`pyproject.toml`); `aria2`, `uv` and
+    `autohotkey` were added to Category A.*
 
 - **FR-005**: For Category A tools on Arch Linux:
   - `mpv`, `yt-dlp`, `ffmpeg` → `pacman`
   - `ffsubsync`, `alass` → `paru` (AUR)
   - pip MUST NOT be used for any Category A tool.
+  - *As-built:* the ffsubsync AUR package is `python-ffsubsync`, with a
+    `uv tool` fallback. pip is still used in `sync_dependencies` (O1).
 
 - **FR-006**: For Category A tools on Ubuntu/Debian:
   - `yt-dlp` → `apt` (not pip)
   - All other tools → `apt` as currently configured.
+  - *As-built:* yt-dlp is the GitHub `yt-dlp_linux` binary; mpv comes
+    from a PPA; ffsubsync via `uv tool`; alass via GitHub binary.
 
-- **FR-007**: For Category B (currently `rich` only):
+- **FR-007** — *Superseded: replaced by `install.sh`, which always
+  creates the venv and installs all Python dependencies into it; no
+  system `python-rich` / `python3-rich` attempt and no re-exec.* For
+  Category B (currently `rich` only):
   - First attempt: system package manager (`python-rich` on Arch,
     `python3-rich` on Debian).
   - Fallback: create venv at `~/.local/share/mpv-config/venv`,
@@ -222,6 +371,8 @@ reflect the actual window state.
 - **FR-008**: The flag `--break-system-packages` MUST NOT appear
   anywhere in the codebase — not in `registry.py`, not in
   `installer.py`, not in any subprocess call.
+  *As-built:* met in code; the only occurrence is the ban itself in
+  `.specify/memory/constitution.md`.
 
 **Problem Set 2 — mpv Window Behavior on KDE Plasma 6.6.4**
 
@@ -230,31 +381,40 @@ reflect the actual window state.
   KDE Plasma. Any relevant `mpv.conf` options (e.g.,
   `input-default-bindings`, `input-terminal`, window-related
   properties) MUST be evaluated and configured.
+  *As-built:* `CLOSE_WIN set window-minimized yes ; quit`, `q`/`Q`
+  bindings, and `scripts/fast_close.lua`.
 
 - **FR-010**: The mpv configuration MUST address fullscreen state
   synchronization between mpv's internal `fullscreen` property and
   KDE Plasma's WM-level fullscreen. This may involve `input.conf`
   bindings, `mpv.conf` options, or Lua script hooks — all within
   the `config/` directory.
+  *As-built:* met by mpv's Wayland backend (manual test 2026-11-19);
+  the `native-fs = no` line is a no-op on Linux (O3).
 
 - **FR-011**: Window resize/snap behavior is OUT OF SCOPE for mpv
   configuration changes. This is a KDE compositor feature, not an
   mpv feature. The spec documents this boundary explicitly. Only
   `geometry` and `autofit` options may be documented as reasonable
   helpers, but the snap preview itself cannot be controlled by mpv.
+  *As-built:* the helpers are in `deploy/deployer.py` (O4).
 
 ### Key Entities
 
 - **Dependency Registry** (`deploy/registry.py`): The single source
   of truth mapping each third-party tool to its install method per
   platform. Must be restructured to enforce Category A vs B.
+  *As-built:* see the `SYSTEM_DEPS` table under As-built.
 
-- **Bootstrap Sequence** (`setup.py` top-level): The entry point
+- **Bootstrap Sequence** — *Superseded: replaced by `install.sh` /
+  `install.ps1` and the `mpv-config` entry point
+  (`src/mpv_config/cli/main.py`).* (`setup.py` top-level): The entry point
   that must handle the Rich-not-yet-installed race condition before
   any UI-dependent code runs.
 
 - **UI Module** (`deploy/ui.py`): The centralized output interface.
   Must have consistent method signatures across all public functions.
+  `_print` is at `deploy/ui.py:129`.
 
 - **mpv Config Templates** (`config/mpv.conf.template`,
   `config/input.conf.template`): User-facing configuration that
@@ -264,28 +424,38 @@ reflect the actual window state.
 
 ### Measurable Outcomes
 
-- **SC-001**: Running `python setup.py --install` on a clean Arch
+- **SC-001** — *Superseded: the equivalent is running `install.sh` on
+  a clean Arch system; not re-measured in this update.* Running
+  `python setup.py --install` on a clean Arch
   Linux system with Rich NOT pre-installed completes successfully
   without any `TypeError`, `ImportError`, or unhandled exception.
 
 - **SC-002**: After a full install on Arch Linux, the command
   `pip list --user` does NOT show `yt-dlp`, `ffsubsync`, or any
   other Category A tool installed via pip.
+  *As-built:* the install path does not pip-install Category A tools
+  (ffsubsync uses `uv tool`), but `sync-deps` can (O1). Not re-measured.
 
 - **SC-003**: Searching the entire codebase for
   `--break-system-packages` returns zero results.
+  *As-built:* met for code; the only hit is the ban in the constitution.
 
 - **SC-004**: On KDE Plasma 6.6.4, clicking the mpv window's X
   button terminates the process within 1 second — matching Windows
-  behavior.
+  behavior. *Not re-measured in this update.*
 
 - **SC-005**: On KDE Plasma 6.6.4, toggling fullscreen via the uosc
   button and via the KDE title bar button both leave the uosc
   fullscreen icon in the correct state.
+  *Met (manual test, KDE Plasma Wayland, 2026-11-19)* — by mpv's
+  Wayland backend, with no repo code.
 
-- **SC-006**: All changes for Problem Set 2 reside exclusively in
-  `config/` — zero modifications to `deploy/` or root-level scripts
-  for KDE window fixes.
+- **SC-006**: KDE/Wayland behaviour is expressed in config templates;
+  `deploy/deployer.py` only fills template placeholders per platform
+  (the same way `{{VIDEO_SYNC}}` and `{{INTERPOLATION}}` work).
+  *Status:* partly met. `{{NATIVE_FS}}` is a per-platform placeholder
+  fill, but the window sizing helpers are literal config text inside
+  `deploy/deployer.py` (O4).
 
 ## Scope Boundary: Window Resize Snap
 
@@ -310,14 +480,18 @@ controlled by the desktop environment.
 - The target Linux environment is KDE Plasma 6.6.4 on CachyOS
   (Arch-based) with Wayland as the display server.
 - `paru` is the available AUR helper on the target Arch system.
+  *As-built:* `yay` is also accepted.
 - The `rich` Python library is the only Category B dependency at
   this time. If future `deploy/` code adds new Python library
   imports, they follow the same Category B rules.
+  *As-built:* no longer true — see `pyproject.toml`.
 - mpv version is recent enough to support all referenced config
   options (0.37+ recommended).
 - The existing `uosc.conf` fullscreen button configuration
   (`fullscreen` shorthand in `controls=`) uses mpv's internal
   `fullscreen` property and may not automatically reflect WM-level
   fullscreen changes — this needs investigation during planning.
+  *Resolved (2026-11-19):* mpv's Wayland backend keeps `fullscreen` in
+  sync with KWin; the uosc icon follows it.
 - Changes to `config/` are boundary-compliant: no automation logic
   will be placed in config files (Constitution Principle I).

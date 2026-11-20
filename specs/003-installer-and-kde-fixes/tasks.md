@@ -2,8 +2,12 @@
 
 **Input**: Design documents from `specs/003-installer-and-kde-fixes/`
 **Prerequisites**: plan.md (required), spec.md (required for user stories)
+**Status (2026-11-19)**: Partially superseded — installer design replaced; see
+[spec.md — As-built](spec.md#as-built-2026-11-19). Ticked: T001, T006, T008.
+Superseded: T002, T003, T005. Open: T004 (partial), T007 (no-op), T009.
 
-**Tests**: Not requested — no test tasks included.
+**Tests**: Not requested — no test tasks included. (As-built: related
+tests exist, e.g. `tests/lua/test_fast_close.lua`, `tests/test_dep_actions.py`.)
 
 **Organization**: Tasks ordered by dependency; what unblocks others comes first.
 
@@ -18,7 +22,7 @@
 
 **Purpose**: Fix the `TypeError` that blocks ALL installer operations
 
-- [ ] T001 [US1] Fix `_print()` signature in deploy/ui.py — change line 76 from `def _print(text, **kwargs)` to `def _print(text="", **kwargs)` so bare `_print()` calls (line 273) emit an empty line instead of crashing
+- [x] T001 [US1] Fix `_print()` signature in deploy/ui.py — *done: now `deploy/ui.py:129`; bare `_print()` calls at 892, 914, 921, 929, 1027.* Change line 76 from `def _print(text, **kwargs)` to `def _print(text="", **kwargs)` so bare `_print()` calls (line 273) emit an empty line instead of crashing
 
   **File**: `deploy/ui.py`
   **Changes**: Line 76 only — make `text` parameter optional with default `""`
@@ -38,7 +42,7 @@
 
 **Independent Test**: Run `python setup.py --install` on a system where Rich is NOT installed. The installer must print plain-text bootstrap messages, install Rich, re-exec, and proceed with styled output.
 
-- [ ] T002 [US1] Add Rich ImportError guard to setup.py — insert `_bootstrap_rich()` function and `try: import rich / except ImportError` block between `sys.path.insert` (line 31) and the `from deploy import ui` statement (line 33). All existing `from deploy import ...` lines (33–44) move AFTER the guard. The guard must use only plain `print()` — no `ui.*` calls.
+- [ ] T002 [US1] **Superseded** — *replaced by `install.sh` installing Rich into the venv from `pyproject.toml`; no `setup.py`, `_bootstrap_rich()` or `os.execv` re-exec.* Add Rich ImportError guard to setup.py — insert `_bootstrap_rich()` function and `try: import rich / except ImportError` block between `sys.path.insert` (line 31) and the `from deploy import ui` statement (line 33). All existing `from deploy import ...` lines (33–44) move AFTER the guard. The guard must use only plain `print()` — no `ui.*` calls.
 
   **File**: `setup.py`
   **Changes**: Replace lines 29–44 with the bootstrap guard block from plan.md Section 2
@@ -56,7 +60,7 @@
 
 **Independent Test**: Run `grep -r "break-system" .` → zero results. Run full install on Arch → verify `pip list --user` does NOT show yt-dlp or ffsubsync.
 
-- [ ] T003 [P] [US2] Rewrite SYSTEM_DEPS in deploy/registry.py — replace lines 156–196 with the full updated dict from plan.md Section 3.1. Key changes: yt-dlp on ubuntu changes from `pip` to `apt`; ffsubsync on arch changes from `pip+break-system-packages` to `aur`; ffsubsync gets per-platform entries instead of `"all": pip`; Fedora `dnf` entries added for all tools.
+- [ ] T003 [P] [US2] **Superseded** — *replaced by the current `SYSTEM_DEPS` (GitHub release files on Windows instead of winget, mpv PPA / yt-dlp GitHub binary on Ubuntu, ffsubsync via `uv tool`, aria2/uv/autohotkey added, no gum). Of the acceptance list, "no `"method": "pip"`", "no `break-system-packages`" and "per-platform entries" hold; "Fedora/dnf for yt-dlp and ffsubsync" does not.* Rewrite SYSTEM_DEPS in deploy/registry.py — replace lines 156–196 with the full updated dict from plan.md Section 3.1. Key changes: yt-dlp on ubuntu changes from `pip` to `apt`; ffsubsync on arch changes from `pip+break-system-packages` to `aur`; ffsubsync gets per-platform entries instead of `"all": pip`; Fedora `dnf` entries added for all tools.
 
   **File**: `deploy/registry.py`
   **Changes**: Lines 156–196 — full replacement of `SYSTEM_DEPS` dict
@@ -66,7 +70,7 @@
   - Every Category A tool has explicit per-platform entries (no `"all": pip` fallback)
   - Fedora/dnf entries present for mpv, yt-dlp, ffmpeg, python, ffsubsync
 
-- [ ] T004 [P] [US2] Remove all pip machinery from deploy/installer.py — delete `_get_pip_args()` (lines 36–94), the `elif method == "pip":` branch in `_install_one()` (lines 121–138), the `elif method == "pip":` branch in `_uninstall_one()` (lines 223–228), `_prepare_ffsubsync_build()` (lines 163–202), and `FFSUBSYNC_SETUPTOOLS_PIN` (line 15). Add `elif method == "dnf":` handlers to both `_install_one` and `_uninstall_one`.
+- [ ] T004 [P] [US2] *Partial: `_get_pip_args`, `_prepare_ffsubsync_build` and `FFSUBSYNC_SETUPTOOLS_PIN` removed; `dnf` handlers added. Not done: `sync_dependencies` still runs `python -m pip` / bare `pip` for ffsubsync (O1); `_install_one` now handles 15 methods.* Remove all pip machinery from deploy/installer.py — delete `_get_pip_args()` (lines 36–94), the `elif method == "pip":` branch in `_install_one()` (lines 121–138), the `elif method == "pip":` branch in `_uninstall_one()` (lines 223–228), `_prepare_ffsubsync_build()` (lines 163–202), and `FFSUBSYNC_SETUPTOOLS_PIN` (line 15). Add `elif method == "dnf":` handlers to both `_install_one` and `_uninstall_one`.
 
   **File**: `deploy/installer.py`
   **Changes**:
@@ -83,7 +87,7 @@
   - `_uninstall_one` handles methods: pacman, apt, dnf, brew, winget, aur, manual
   - No reference to `FFSUBSYNC_SETUPTOOLS_PIN` or `_prepare_ffsubsync_build`
 
-- [ ] T005 [US2] Replace bare pip calls in install.sh — delete lines 196–197 (system-wide `pip install` of setuptools/wheel/rich) and replace with system-package-first logic from plan.md Section 3.6. Try `pacman -S python-rich` / `apt install python3-rich` / `brew install python-rich`. If all fail, print a dim message that `setup.py` will handle venv fallback.
+- [ ] T005 [US2] **Superseded** — *`install.sh` was rewritten to always create the venv and install with the venv's pip / `uv pip`; no system `python-rich` attempt, no Gum wrappers (raw `echo` is O2).* Replace bare pip calls in install.sh — delete lines 196–197 (system-wide `pip install` of setuptools/wheel/rich) and replace with system-package-first logic from plan.md Section 3.6. Try `pacman -S python-rich` / `apt install python3-rich` / `brew install python-rich`. If all fail, print a dim message that `setup.py` will handle venv fallback.
 
   **File**: `install.sh`
   **Changes**: Replace lines 196–198 with the system-pkg-first block from plan.md Section 3.6
@@ -103,7 +107,7 @@
 
 **Independent Test**: Open mpv on KDE, play any file, click the X button. The process should terminate within 1 second.
 
-- [ ] T006 [P] [US3] Add CLOSE_WIN quit binding to config/input.conf.template — add `CLOSE_WIN quit` after line 104 (after the F8 night-mode binding, before the end-of-settings comment). Include a comment explaining this is the WM close-button pseudo-key.
+- [x] T006 [P] [US3] *Done in modified form: `config/input.conf.template:156` is `CLOSE_WIN set window-minimized yes ; quit` (placed after the F10 sharpen binding), plus `q`/`Q` at lines 157–158 and `scripts/fast_close.lua`.* Add CLOSE_WIN quit binding to config/input.conf.template — add `CLOSE_WIN quit` after line 104 (after the F8 night-mode binding, before the end-of-settings comment). Include a comment explaining this is the WM close-button pseudo-key.
 
   **File**: `config/input.conf.template`
   **Changes**: Insert after line 104:
@@ -125,7 +129,7 @@
 
 **Independent Test**: Toggle fullscreen via uosc button, then via KDE title bar. The uosc icon must always reflect the actual state.
 
-- [ ] T007 [P] [US4] Add native-fs and geometry options to config/mpv.conf.template — add `native-fs = no` after the `force-window` line (after line 20). Add geometry/autofit lines to the `{{LINUX_VISUAL_TUNING}}` injection point documentation.
+- [ ] T007 [P] [US4] *Not effective: `native-fs = no` is written on Linux via `{{#if NATIVE_FS}}` (template lines 19–23, before `force-window`; there is no `fs = yes` line), but `--native-fs` is macOS-only per the mpv manual. US4 is met by mpv's Wayland backend (manual test 2026-11-19); removing the line is O3.* Add native-fs and geometry options to config/mpv.conf.template — add `native-fs = no` after the `force-window` line (after line 20). Add geometry/autofit lines to the `{{LINUX_VISUAL_TUNING}}` injection point documentation.
 
   **File**: `config/mpv.conf.template`
   **Changes**: Insert after line 20 (`force-window = immediate`):
@@ -142,7 +146,7 @@
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T008 Document KDE window snap as out of scope in specs/003-installer-and-kde-fixes/plan.md — verify Section 4.3 (scope boundary) is present and complete. Add geometry/autofit convenience options to `{{LINUX_VISUAL_TUNING}}` expansion in deploy/deployer.py if not already there.
+- [x] T008 *Done: plan.md Section 4.3 present; geometry/autofit in `deploy/deployer.py::_get_linux_visual_tuning_block` (lines 169–172). Note: these are config literals in `deploy/` (O4).* Document KDE window snap as out of scope in specs/003-installer-and-kde-fixes/plan.md — verify Section 4.3 (scope boundary) is present and complete. Add geometry/autofit convenience options to `{{LINUX_VISUAL_TUNING}}` expansion in deploy/deployer.py if not already there.
 
   **Files**: `specs/003-installer-and-kde-fixes/plan.md` (verify), `deploy/deployer.py` (add geometry/autofit to LINUX_VISUAL_TUNING expansion)
   **Changes**: In `deploy/deployer.py`, locate the `LINUX_VISUAL_TUNING` template variable expansion and add:
@@ -156,13 +160,25 @@
   - These are NOT presented as "window snap fixes" — they are convenience sizing helpers
   - No changes to Windows deploys
 
-- [ ] T009 Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
+- [ ] T009 *Not met: `grep -r "break-system" .` hits `.specify/memory/constitution.md:119` (the ban itself); `"method": "pip"` → 0; constitution Principles III and V are not satisfied (O1, O2, O5).* Final codebase validation — run `grep -r "break-system" .` and confirm zero results. Run `grep -r '"method": "pip"' deploy/` and confirm zero results. Verify all constitution principles are satisfied per the compliance table in plan.md.
 
   **Files**: entire codebase (read-only scan)
   **Acceptance**:
   - `grep -r "break-system" .` → 0 results (excluding spec.md which documents the old behavior)
   - `grep -r '"method": "pip"' deploy/` → 0 results
   - All 7 constitution principles pass (see plan.md compliance table)
+
+---
+
+## Open items (code bugs — separate change)
+
+Tracked in [spec.md — Open items](spec.md#open-items-code-bugs--to-be-fixed-in-a-separate-change):
+
+- [ ] O1 Remove the `python -m pip` / bare `pip` ffsubsync fallback from `deploy/installer.py::sync_dependencies` (constitution: no pip for CLI tools)
+- [ ] O2 Replace raw `echo` in `install.sh` with Gum wrappers and an ANSI fallback (Principle V)
+- [ ] O3 Remove the no-op `native-fs` line from the Linux output (`{{NATIVE_FS}}`, `deploy/deployer.py:473`)
+- [ ] O4 Move the window sizing helpers out of `deploy/deployer.py` into a config template (Principle I) — found in this update
+- [ ] O5 Stop `install.ps1` from running `pip install --user` against the system Python (Principle III) — found in this update
 
 ---
 

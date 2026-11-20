@@ -2,10 +2,28 @@
 
 **Branch**: `003-installer-and-kde-fixes` | **Date**: 2026-04-25
 **Spec**: `specs/003-installer-and-kde-fixes/spec.md`
+**Status**: Partially superseded — installer design replaced; see
+[spec.md — As-built](spec.md#as-built-2026-11-19)
+
+**Code as built**: [`src/mpv_config/cli/main.py`](../../src/mpv_config/cli/main.py) (entry point) ·
+[`pyproject.toml`](../../pyproject.toml) (Python deps) ·
+[`install.sh`](../../install.sh) (venv bootstrap) ·
+[`deploy/registry.py`](../../deploy/registry.py) (`SYSTEM_DEPS`) ·
+[`deploy/installer.py`](../../deploy/installer.py) (`_install_one`, `sync_dependencies`) ·
+[`deploy/ui.py`](../../deploy/ui.py) (`_print`, line 129) ·
+[`scripts/fast_close.lua`](../../scripts/fast_close.lua) ·
+[`config/input.conf.template`](../../config/input.conf.template) (`CLOSE_WIN`, line 156)
+
+Line numbers in the sections below are from 2026-04-25 and are
+historical unless an As-built note gives the current location.
 
 ---
 
 ## SECTION 1 — `_print()` fix
+
+> **As-built (2026-11-19)**: done. `_print(text="", **kwargs)` is now at `deploy/ui.py:129`;
+> bare `_print()` calls are at lines 892, 914, 921, 929 and 1027. The
+> call-site table below is historical.
 
 ### Root cause
 
@@ -78,6 +96,11 @@ line 273 which relies on the default being added above.
 ---
 
 ## SECTION 2 — Rich bootstrap guard
+
+> **Superseded (2026-11-19)**: `setup.py`, `_bootstrap_rich()` and the `os.execv` re-exec
+> were never kept. Replaced by `install.sh`, which always creates the venv
+> and installs the project with its `pyproject.toml` dependencies
+> (including Rich) before running `python -m mpv_config install`.
 
 ### Exact location in `setup.py`
 
@@ -226,6 +249,12 @@ from deploy.planner import (
 
 ### 3.1  `deploy/registry.py` — updated `SYSTEM_DEPS`
 
+> **Superseded (2026-11-19)**: the winget-based Windows entries and the dict below were
+> replaced by the current `SYSTEM_DEPS`: GitHub release files on Windows
+> (winget only for `python` and `aria2`), mpv PPA and yt-dlp GitHub binary
+> on Ubuntu, ffsubsync via `uv tool`, and `aria2` / `uv` / `autohotkey`
+> added. See the table in spec.md As-built.
+
 Replace lines 156–196 entirely:
 
 ```python
@@ -282,6 +311,9 @@ SYSTEM_DEPS = {
 
 ### 3.2  Lines containing `--break-system-packages` — DELETE
 
+> **As-built (2026-11-19)**: done. No code contains the flag; the only occurrence is the
+> ban in `.specify/memory/constitution.md`.
+
 | File | Line | Content | Action |
 |------|------|---------|--------|
 | `deploy/registry.py` | 188 | `"arch": {"method": "pip", "pkg": "ffsubsync", "flags": ["--user", "--break-system-packages"]}` | Replace with `{"method": "aur", "pkg": "ffsubsync"}` |
@@ -290,12 +322,21 @@ That is the **only** occurrence in the codebase (confirmed via grep).
 
 ### 3.3  Lines using `method: "pip"` for Category A tools — DELETE
 
+> **As-built (2026-11-19)**: no `"method": "pip"` remains. Ubuntu yt-dlp became the GitHub
+> binary (not apt); ffsubsync became AUR + `uv tool`.
+
 | File | Line | Current | Replacement |
 |------|------|---------|-------------|
 | `deploy/registry.py` | 167 | `"ubuntu": {"method": "pip", "pkg": "yt-dlp"}` | `"ubuntu": {"method": "apt", "pkg": "yt-dlp"}` |
 | `deploy/registry.py` | 187 | `"all": {"method": "pip", "pkg": "ffsubsync"}` | **Delete** this `"all"` fallback; add per-platform entries instead |
 
 ### 3.4  `deploy/installer.py` — remove `_get_pip_args` and pip code path
+
+> **As-built (2026-11-19)**: partly done. `_get_pip_args`, `_prepare_ffsubsync_build` and
+> `FFSUBSYNC_SETUPTOOLS_PIN` are gone, and `dnf` handlers exist. But
+> `sync_dependencies` still falls back to `python -m pip` and bare `pip`
+> for ffsubsync (open item O1), and a `pipx` method exists. `_install_one`
+> now handles 15 methods (listed in spec.md As-built).
 
 After the registry changes above, no Category A dependency uses
 `method: "pip"` on any platform. The entire pip install machinery in
@@ -325,6 +366,10 @@ elif method == "dnf":
 
 ### 3.5  Category B (rich) — handled in `setup.py` bootstrap
 
+> **Superseded (2026-11-19)**: Rich (with `pycryptodomex`, `curl_cffi`, `yt-dlp`) is a
+> `pyproject.toml` dependency installed into the venv by `install.sh`. No
+> system `python-rich` attempt and no `_bootstrap_rich()`.
+
 Rich is the only Category B dependency. Its installation is fully
 handled by the `_bootstrap_rich()` function in Section 2. The strategy:
 
@@ -339,6 +384,11 @@ Rich does **not** appear in `SYSTEM_DEPS` — it is not a CLI executable
 and is not managed by `install_deps()`.
 
 ### 3.6  `install.sh` — fix bare pip calls
+
+> **Superseded (2026-11-19)**: `install.sh` was rewritten: it always creates the venv and
+> installs with the venv's pip or `uv pip`. There is no system-package-first
+> Rich step and no `_gum_spin` / `_styled_echo` wrappers (Gum is unused;
+> raw `echo` is open item O2).
 
 Lines 196–197 currently run system-wide pip. Replace with:
 
@@ -368,6 +418,10 @@ build-from-source.
 
 ### 3.7  Decision tree summary
 
+> **Superseded (2026-11-19)**: the Windows → winget branch and the Category B branch
+> (system `python-rich` first, venv fallback, re-exec) are replaced. See
+> the `SYSTEM_DEPS` table and the install flow in spec.md As-built.
+
 ```
 Category A tool needed?
 ├─ Arch Linux
@@ -395,6 +449,12 @@ Category B library needed (rich)?
 
 ### 4.1  `config/input.conf.template` — window close binding
 
+> **As-built (2026-11-19)**: the binding is `CLOSE_WIN set window-minimized yes ; quit`
+> (`config/input.conf.template:156`), with `q` / `Q` bound the same way
+> (lines 157–158). `scripts/fast_close.lua` also minimizes on `shutdown`
+> on Linux and overrides `quit` / `quit-watch-later`. Minimizing first
+> hides the Wayland / libplacebo teardown freeze.
+
 Add these two lines at the end of the "useful shortcuts" section
 (after line 104, before line 106):
 
@@ -415,6 +475,14 @@ handles this natively. On KDE Wayland/X11, explicitly binding it to
 > Window close comes through as `CLOSE_WIN`.
 
 ### 4.2  `config/mpv.conf.template` — fullscreen fix
+
+> **As-built (2026-11-19)**: `native-fs` is written only on Linux, through
+> `{{#if NATIVE_FS}}` (template lines 19–23, set by `deploy/deployer.py:473`).
+> The mpv manual marks `--native-fs` as "(macOS only)", so the rationale
+> below is invalid and the line is a no-op (open item O3). User Story 4 is
+> met by mpv's Wayland backend (manual test 2026-11-19). The geometry /
+> autofit helpers are in `deploy/deployer.py::_get_linux_visual_tuning_block`
+> (lines 169–172), as literal config text (open item O4).
 
 Add the following block after the `force-window` line (after current
 line 20), inside the general settings section:
@@ -469,6 +537,15 @@ autofit-smaller         = 30%x30%
 
 ## Constitution compliance check
 
+> **As-built (2026-11-19)**: status against `.specify/memory/constitution.md`:
+> - **I**: partly met — geometry helpers are config literals in
+>   `deploy/deployer.py` (O4).
+> - **III**: not met — pip in `sync_dependencies` (O1) and `install.ps1`
+>   `pip install --user` (O5).
+> - **V**: not met — `install.sh` uses raw `echo` (O2).
+> - The constitution's Category C text still describes a `setup.py`
+>   `os.execv` re-exec that no longer exists (constitution not changed here).
+
 | Principle | Status | Notes |
 |-----------|--------|-------|
 | I. Boundary Separation | ✅ | KDE fixes in `config/` only; bootstrap in `setup.py` only |
@@ -482,6 +559,12 @@ autofit-smaller         = 30%x30%
 ---
 
 ## Files modified (complete list)
+
+> **As-built (2026-11-19)**: the `setup.py` row is **Superseded** (no `setup.py`).
+> `install.sh` was rewritten rather than patched. Files not in this list
+> that carry the as-built design: `src/mpv_config/cli/main.py`,
+> `pyproject.toml`, `install.ps1`, `scripts/fast_close.lua`,
+> `config/script-opts/*`.
 
 | File | Changes |
 |------|---------|
