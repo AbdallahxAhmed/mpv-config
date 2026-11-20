@@ -406,14 +406,17 @@ local function find_ffmpeg()
     return "ffmpeg"  -- last resort: whatever PATH provides
 end
 
-local function extract_track(track, ext, key)
+-- Asynchronous: ffmpeg reads the whole container to reach an interleaved
+-- subtitle stream, which must not hold up this script (or compete with
+-- playback on a slow disk). playback_only lets mpv kill it on file change.
+local function extract_track(track, ext, key, done)
     local video = mp.get_property("path")
-    if not video then return nil end
+    if not video then return done(nil) end
     local raw = utils.join_path(temp_dir(),
         "mpv-sub-sanitizer-" .. PID .. "-" .. short_hash(key) .. "-extract." .. ext)
-    local ret = mp.command_native({
+    local cmd = {
         name = "subprocess",
-        playback_only = false,
+        playback_only = true,
         capture_stdout = true,
         capture_stderr = true,
         args = {
@@ -422,15 +425,27 @@ local function extract_track(track, ext, key)
             "-map", "0:" .. tostring(track["ff-index"] or track.id),
             "-f", ext, raw,
         },
-    })
-    if type(ret) ~= "table" or ret.status ~= 0 or not utils.file_info(raw) then
-        msg.warn("sub_sanitizer: ffmpeg extraction failed: "
-            .. tostring(type(ret) == "table" and ret.stderr or ret))
-        return nil
+    }
+    local function finish(success, ret)
+        local content
+        if success and type(ret) == "table" and ret.status == 0 and utils.file_info(raw) then
+            content = read_file(raw)
+        else
+            msg.warn("sub_sanitizer: ffmpeg extraction failed: "
+                .. tostring(type(ret) == "table" and (ret.stderr or ret.error_string) or ret))
+        end
+        os.remove(raw)
+        if mp.get_property("path") ~= video then
+            msg.info("sub_sanitizer: the file changed during extraction; result dropped")
+            return
+        end
+        done(content)
     end
-    local content = read_file(raw)
-    os.remove(raw)
-    return content
+    if mp.command_native_async then
+        mp.command_native_async(cmd, finish)
+    else
+        finish(true, mp.command_native(cmd))
+    end
 end
 
 local function output_path(track, ext, key)
@@ -454,31 +469,8 @@ local function track_key(track)
     return "embedded:" .. path .. ":" .. tostring(track["ff-index"] or track.id)
 end
 
-local function sanitize_track(track)
-    if type(track) ~= "table" then return false end
-    local key = track_key(track)
-    if state.processed[key] then return false end
-    -- set before the work: sub-text keeps firing while we extract
-    state.processed[key] = true
-
-    local ext = codec_ext_map[track.codec]
-    if not ext then
-        msg.info("sub_sanitizer: unsupported codec: " .. tostring(track.codec))
-        return false
-    end
-
-    local source = track.external and track["external-filename"] or mp.get_property("path")
-    if is_network(source) then
-        msg.info("sub_sanitizer: network subtitle source skipped: " .. tostring(source))
-        return false
-    end
-
-    local content
-    if track.external then
-        content = read_file(track["external-filename"])
-    else
-        content = extract_track(track, ext, key)
-    end
+-- Clean, write and load one track's text (called once extraction is done).
+local function finish_track(track, ext, key, content)
     if not content then return false end
 
     local encoding = detect_encoding(content)
@@ -501,11 +493,42 @@ local function sanitize_track(track)
     end
     if is_temp then temp_files[out_path] = true end
     msg.info("sub_sanitizer: cleaned track written to " .. out_path)
-    mp.commandv("sub-add", out_path, "select", (track.title or "subtitles") .. " [cleaned]")
+    -- the user may have moved to another track while ffmpeg ran: add, don't select
+    local current = mp.get_property_native("current-tracks/sub")
+    local still_current = type(current) == "table" and current.id == track.id
+    mp.commandv("sub-add", out_path, still_current and "select" or "auto",
+        (track.title or "subtitles") .. " [cleaned]")
     if o.remove_original then
         mp.commandv("sub-remove", track.id)
     end
     mp.osd_message("Subtitles sanitized: HTML entities stripped", 2)
+    return true
+end
+
+local function sanitize_track(track)
+    if type(track) ~= "table" then return false end
+    local key = track_key(track)
+    if state.processed[key] then return false end
+    -- set before the work: sub-text keeps firing while we extract
+    state.processed[key] = true
+
+    local ext = codec_ext_map[track.codec]
+    if not ext then
+        msg.info("sub_sanitizer: unsupported codec: " .. tostring(track.codec))
+        return false
+    end
+
+    local source = track.external and track["external-filename"] or mp.get_property("path")
+    if is_network(source) then
+        msg.info("sub_sanitizer: network subtitle source skipped: " .. tostring(source))
+        return false
+    end
+
+    if track.external then
+        finish_track(track, ext, key, read_file(track["external-filename"]))
+    else
+        extract_track(track, ext, key, function(content) finish_track(track, ext, key, content) end)
+    end
     return true
 end
 

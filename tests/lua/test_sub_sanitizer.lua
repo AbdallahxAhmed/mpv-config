@@ -492,4 +492,67 @@ test('temp dir: TEMP, then TMP (Windows), then TMPDIR, then /tmp', function()
     eq('/tmp', ss.temp_dir(env({})))
 end)
 
+-- ── asynchronous extraction (2026-11-20 audit) ─────────────────────────
+
+-- A deferred command_native_async: the test decides when ffmpeg "finishes".
+local function async_harness(body)
+    local h, ss = load_script()
+    h.pending = {}
+    mp.command_native_async = function(t, cb)
+        h.subprocess[#h.subprocess + 1] = t
+        h.pending[#h.pending + 1] = function(ok)
+            local out = t.args[#t.args]
+            if ok then
+                local fh = assert(io.open(out, 'wb'))
+                fh:write(body)
+                fh:close()
+            end
+            cb(ok, {status = ok and 0 or -1, stderr = ''}, nil)
+            return out
+        end
+    end
+    h.props['path'] = write_temp('async.mkv', 'video')
+    h.props['current-tracks/sub'] = { id = 2, external = false, ['ff-index'] = 2, codec = 'subrip' }
+    return h, ss
+end
+
+local ASYNC_BODY = '1\n00:00:01,000 --> 00:00:02,000\n&rlm;x\n'
+
+test('async: extraction does not block and is killed with the file', function()
+    local h, ss = async_harness(ASYNC_BODY)
+    h.observers['sub-text']('sub-text', '&rlm;x')
+    eq(1, #h.subprocess)
+    eq(true, h.subprocess[1].playback_only)
+    eq(0, #added_paths(h))                     -- nothing yet: ffmpeg still running
+    h.observers['sub-text']('sub-text', '&rlm;x again')
+    eq(1, #h.subprocess)                       -- never started twice
+    local raw = h.pending[1](true)
+    eq('select', h.commands[#h.commands][3])
+    eq(false, exists(raw))
+end)
+
+test('async: a result for a file that is no longer playing is dropped', function()
+    local h, ss = async_harness(ASYNC_BODY)
+    h.observers['sub-text']('sub-text', '&rlm;x')
+    h.props['path'] = write_temp('next.mkv', 'other video')
+    local raw = h.pending[1](true)
+    eq(0, #added_paths(h))
+    eq(false, exists(raw))
+end)
+
+test('async: a track the user left meanwhile is added, not selected', function()
+    local h, ss = async_harness(ASYNC_BODY)
+    h.observers['sub-text']('sub-text', '&rlm;x')
+    h.props['current-tracks/sub'] = { id = 3, external = false, codec = 'subrip' }
+    h.pending[1](true)
+    eq('auto', h.commands[#h.commands][3])
+end)
+
+test('async: a failed or killed ffmpeg adds nothing', function()
+    local h, ss = async_harness(ASYNC_BODY)
+    h.observers['sub-text']('sub-text', '&rlm;x')
+    h.pending[1](false)
+    eq(0, #added_paths(h))
+end)
+
 print('Sub sanitizer tests passed: ' .. total)

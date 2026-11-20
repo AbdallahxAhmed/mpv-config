@@ -211,6 +211,70 @@ class SanitizerEncodingTests(unittest.TestCase):
         self.assertTrue(title.endswith("[cleaned]"), title)
         self.assertEqual(SHOWN, text)
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is not installed")
+    def test_an_embedded_track_is_extracted_in_the_background_and_shown_clean(self):
+        with tempfile.TemporaryDirectory(prefix="mpv-sanitizer-mkv-") as tmp:
+            root = Path(tmp)
+            (root / "tmp").mkdir()
+            srt = root / "embedded.srt"
+            srt.write_text(self.cue(LINE), encoding="utf-8")
+            mkv = root / "episode.mkv"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=s=320x240:d=3",
+                    "-i",
+                    str(srt),
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "ultrafast",
+                    "-c:s",
+                    "srt",
+                    str(mkv),
+                ],
+                check=True,
+                timeout=60,
+            )
+            probe = root / "probe.lua"
+            probe.write_text(PROBE_LUA, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    MPV,
+                    "--no-config",
+                    "--load-scripts=no",
+                    f"--script={SANITIZER}",
+                    f"--script={probe}",
+                    "--no-audio",
+                    "--ao=null",
+                    "--vo=null",
+                    "--no-terminal",
+                    "--idle=no",
+                    "--sid=1",
+                    str(mkv),
+                ],
+                capture_output=True,
+                timeout=60,
+                check=False,
+                env=dict(os.environ, TMPDIR=str(root / "tmp"), TEMP=str(root / "tmp")),
+            )
+            leftovers = [p.name for p in (root / "tmp").iterdir()]
+        line = next(out for out in proc.stderr.splitlines() if out.startswith(b"SUBTEXT|"))
+        _, title, hexed = line.split(b"|", 2)
+        self.assertTrue(title.decode().endswith("[cleaned]"), title)
+        self.assertEqual(SHOWN, bytes.fromhex(hexed.decode()).decode("utf-8"))
+        self.assertEqual([], leftovers)
+
 
 ARABIC_SRT = "1\n00:00:00,000 --> 00:00:02,000\nمرحباً بك يا صديقي، كيف حالك؟\n"
 
