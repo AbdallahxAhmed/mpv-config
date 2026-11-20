@@ -2572,33 +2572,20 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
                 "vk-specific gpu-context incompatible with forced opengl",
             )
     # Comment out options REMOVED by newer mpv (they hard-fail parsing
-    # there). Both sub-ass-vsfilter-aspect-compat and
-    # sub-ass-vsfilter-blur-compat were replaced by sub-ass-use-video-data;
-    # when the conf has neither, the canonical replacement is inserted
-    # directly above the first commented line so it lands in the same
-    # (global) options section.
+    # there): sub-ass-vsfilter-aspect-compat and sub-ass-vsfilter-blur-compat
+    # were replaced by sub-ass-use-video-data, whose default (all) is the
+    # VSFilter-compatible behaviour, so nothing is inserted in their place.
     # Version-aware guard: on an mpv OLDER than sub-ass-use-video-data
-    # (e.g. Ubuntu 0.37) the vsfilter options are still valid, and the
-    # replacement does not exist yet — touching them would break parsing.
+    # (e.g. Ubuntu 0.37) the vsfilter options are still valid — touching
+    # them would break parsing.
     sub_ass_floor = _MPV_OPTIONS_ADDED_IN["sub-ass-use-video-data"]
     if mpv_version is None or mpv_version >= sub_ass_floor:
-        already_has_sub_ass_use_video_data = re.search(
-            r"^[ \t]*sub-ass-use-video-data[ \t]*=", updated, re.MULTILINE
-        )
-        updated, removed_sub_ass = re.subn(
+        updated = re.sub(
             r"^[ \t]*sub-ass-vsfilter-(?:aspect|blur)-compat[ \t]*=[^\r\n]*$",
             lambda m: "# removed in newer mpv — was: " + m.group(0).strip(),
             updated,
             flags=re.MULTILINE,
         )
-        if removed_sub_ass and not already_has_sub_ass_use_video_data:
-            updated = re.sub(
-                r"^([ \t]*# removed in newer mpv)",
-                lambda m: "sub-ass-use-video-data = aspect-ratio\n" + m.group(1),
-                updated,
-                count=1,
-                flags=re.MULTILINE,
-            )
     # Restore options the sanitizer previously commented out (marker in
     # _patch_mpv_conf / older runs of this migration) now that the
     # installed mpv actually supports them.
@@ -2619,6 +2606,15 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
                 flags=re.MULTILINE,
             )
             restored_count += counted
+    # The old template's global sub-ass-use-video-data=aspect-ratio goes back
+    # to mpv's default (all). Runs after the restore pass so a line that the
+    # sanitizer commented out on an old mpv is not revived on upgrade.
+    updated = re.sub(
+        r"^[ \t]*sub-ass-use-video-data[ \t]*=[ \t]*aspect-ratio[ \t]*\r?\n?",
+        "",
+        updated,
+        flags=re.MULTILINE,
+    )
     # And strip options the installed mpv cannot parse (no-op when it is
     # already new enough or its version is unknown).
     updated, sanitized_count = _sanitize_mpv_conf_for_mpv_version(updated, mpv_version)

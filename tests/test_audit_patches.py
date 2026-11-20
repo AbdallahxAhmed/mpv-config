@@ -881,13 +881,14 @@ class TestAuditPatches(unittest.TestCase):
                 "# removed in newer mpv — was: sub-ass-vsfilter-aspect-compat = 'no'",
                 new_content,
             )
-            self.assertIn("sub-ass-use-video-data = aspect-ratio", new_content)
+            # The old template's global aspect-ratio goes back to mpv's default.
+            self.assertNotRegex(new_content, r"(?m)^sub-ass-use-video-data[ \t]*=")
 
             # Second run is a no-op.
             self.assertFalse(_migrate_mpv_conf(conf_path))
 
-        # Without the replacement option present, the canonical one is
-        # inserted right above the commented-out line (global section).
+        # Without the replacement option present, nothing is inserted: mpv's
+        # default (all) is the VSFilter-compatible behaviour.
         with tempfile.TemporaryDirectory() as tmpdir:
             conf_path = os.path.join(tmpdir, "mpv.conf")
             old_content = "sub-ass-vsfilter-aspect-compat = 'no'\nosd-font = \"Segoe UI\"\n"
@@ -899,10 +900,10 @@ class TestAuditPatches(unittest.TestCase):
                 new_content = f.read()
 
             self.assertIn(
-                "sub-ass-use-video-data = aspect-ratio\n"
                 "# removed in newer mpv — was: sub-ass-vsfilter-aspect-compat = 'no'",
                 new_content,
             )
+            self.assertNotIn("sub-ass-use-video-data", new_content)
             self.assertIn('osd-font = "Segoe UI"', new_content)
 
     def test_gpu_vendor_scan_optimus_laptop(self):
@@ -1174,7 +1175,7 @@ class TestAuditPatches(unittest.TestCase):
             with open(new_dest, "r", encoding="utf-8") as f:
                 new_content = f.read()
             self.assertRegex(new_content, r"(?m)^clipboard-monitor[ \t]*=")
-            self.assertRegex(new_content, r"(?m)^sub-ass-use-video-data[ \t]*=")
+            self.assertNotRegex(new_content, r"(?m)^sub-ass-use-video-data[ \t]*=")
             self.assertNotIn("beyond installed mpv", new_content)
 
     def test_migrate_mpv_conf_is_version_aware(self):
@@ -1203,8 +1204,8 @@ class TestAuditPatches(unittest.TestCase):
             # idempotent
             self.assertFalse(_migrate_mpv_conf(conf_path, env_old))
 
-            # Upgraded mpv: restore the commented option, retire vsfilter,
-            # insert the canonical replacement.
+            # Upgraded mpv: restore the commented option, retire vsfilter;
+            # nothing replaces it (mpv's default is the right behaviour).
             env_new = Environment(os="linux", distro="ubuntu", mpv_version=(0, 41, 0))
             self.assertTrue(_migrate_mpv_conf(conf_path, env_new))
             with open(conf_path, "r", encoding="utf-8") as f:
@@ -1214,7 +1215,7 @@ class TestAuditPatches(unittest.TestCase):
                 "# removed in newer mpv — was: sub-ass-vsfilter-blur-compat = yes",
                 new_state,
             )
-            self.assertRegex(new_state, r"(?m)^sub-ass-use-video-data[ \t]*= aspect-ratio")
+            self.assertNotRegex(new_state, r"(?m)^sub-ass-use-video-data[ \t]*=")
             self.assertFalse(_migrate_mpv_conf(conf_path, env_new))
 
     def test_install_mpv_latest_single_fast_ppa_flow(self):

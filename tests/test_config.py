@@ -52,7 +52,6 @@ class TestConfig(unittest.TestCase):
             "sub-fix-timing": "yes",
             "sub-ass-override": "scale",
             "sub-ass-force-margins": "yes",
-            "sub-ass-use-video-data": "aspect-ratio",
             "demuxer-mkv-subtitle-preroll": "yes",
         }
 
@@ -194,9 +193,6 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(settings["volume-max"], "200")
 
         for param, expected in self.expected_sub_rules.items():
-            if param == "sub-ass-use-video-data" and param not in settings:
-                self.assertIn("sub-ass-vsfilter-aspect-compat", settings)
-                continue
             self.assertIn(param, settings, f"Active config missing subtitle param: {param}")
             self.assertEqual(
                 settings[param],

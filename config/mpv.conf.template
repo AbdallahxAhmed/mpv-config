@@ -115,7 +115,9 @@ sub-fix-timing = yes
 # manual). mpv's built-in u key switches a badly styled track to force.
 sub-ass-override          = scale
 sub-ass-force-margins = yes
-sub-ass-use-video-data = aspect-ratio
+# sub-ass-use-video-data stays at mpv's default (all): standard ASS needs the
+# video's storage resolution to match VSFilter. aspect-ratio is a per-file
+# workaround for broken scripts (mpv manual), not a global setting.
 demuxer-mkv-subtitle-preroll = yes
 
 # ─── Screenshot ──────────────────────────────────────────────────────

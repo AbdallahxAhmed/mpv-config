@@ -413,5 +413,37 @@ class SubAssOverrideMigrationTests(unittest.TestCase):
                 self.assertEqual(line, self.migrate(line))
 
 
+class VideoDataDefaultTests(unittest.TestCase):
+    """sub-ass-use-video-data is back at mpv's default (all)."""
+
+    TEMPLATE = Path(__file__).resolve().parent.parent / "config" / "mpv.conf.template"
+
+    def migrate(self, text, env=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            conf = Path(tmp) / "mpv.conf"
+            conf.write_text(text, encoding="utf-8")
+            with mock.patch.object(deployer, "ui"):
+                deployer._migrate_mpv_conf(str(conf), env)
+            return conf.read_text(encoding="utf-8")
+
+    def test_the_template_sets_no_global_value(self):
+        text = self.TEMPLATE.read_text(encoding="utf-8")
+        self.assertNotRegex(text, r"(?m)^sub-ass-use-video-data[ \t]*=")
+
+    def test_a_kept_conf_loses_the_old_template_value_only(self):
+        self.assertEqual(
+            "a = 1\nb = 2\n", self.migrate("a = 1\nsub-ass-use-video-data = aspect-ratio\nb = 2\n")
+        )
+        kept = "sub-ass-use-video-data = none\n"
+        self.assertEqual(kept, self.migrate(kept))
+
+    def test_an_old_mpv_upgrade_does_not_revive_it(self):
+        old = Environment(os="linux", distro="ubuntu", mpv_version=(0, 37, 0))
+        new = Environment(os="linux", distro="ubuntu", mpv_version=(0, 41, 0))
+        text = self.migrate("sub-ass-use-video-data = aspect-ratio\nvolume = 100\n", old)
+        text = self.migrate(text, new)
+        self.assertNotRegex(text, r"(?m)^sub-ass-use-video-data[ \t]*=")
+
+
 if __name__ == "__main__":
     unittest.main()
