@@ -31,9 +31,9 @@ Lua suites with `python tests/run_lua_tests.py`; all tests headless.
 
 **Purpose**: line-ending rules and the upstream fixture every suite uses (research R9).
 
-- [ ] T001 [P] Create `.gitattributes` marking `tests/fixtures/uosc-5.13.0/**` as `-text` and `tools/uosc_patches/*.lua` as `eol=lf` (plan C-001/FR-022 risk row)
-- [ ] T002 [P] Download `uosc.zip` for tag `5.13.0`, copy `scripts/uosc/elements/Menu.lua` unmodified to `tests/fixtures/uosc-5.13.0/elements/Menu.lua`, and check SHA-256 `0cbc42afbe72f3f76f069995744de1e772d706445ed7987d1bffaafed50f2f49` and 1831 lines (research R9)
-- [ ] T003 [P] Add uosc's `LICENSE` (LGPL-2.1, tag 5.13.0) as `tests/fixtures/uosc-5.13.0/LICENSE` and a provenance `tests/fixtures/uosc-5.13.0/README.md` (release URL, tag, hash, line count)
+- [X] T001 [P] Create `.gitattributes` marking `tests/fixtures/uosc-5.13.0/**` as `-text` and `tools/uosc_patches/*.lua` as `eol=lf` (plan C-001/FR-022 risk row)
+- [X] T002 [P] Download `uosc.zip` for tag `5.13.0`, copy `scripts/uosc/elements/Menu.lua` unmodified to `tests/fixtures/uosc-5.13.0/elements/Menu.lua`, and check SHA-256 `0cbc42afbe72f3f76f069995744de1e772d706445ed7987d1bffaafed50f2f49` and 1831 lines (research R9)
+- [X] T003 [P] Add uosc's `LICENSE` (LGPL-2.1, tag 5.13.0) as `tests/fixtures/uosc-5.13.0/LICENSE` and a provenance `tests/fixtures/uosc-5.13.0/README.md` (release URL, tag, hash, line count)
 
 ---
 

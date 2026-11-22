@@ -1,0 +1,4 @@
+# Upstream fixtures are byte-exact copies: never convert line endings.
+tests/fixtures/uosc-5.13.0/** -text
+# The uosc patch payload is inserted verbatim into an LF file.
+tools/uosc_patches/*.lua text eol=lf
