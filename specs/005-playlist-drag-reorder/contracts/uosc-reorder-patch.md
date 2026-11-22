@@ -95,16 +95,18 @@ The `--uosc-dir` default reuses `get_default_uosc_dir()` from
 
 ```python
 # deploy/deployer.py
-def _patch_prepared_uosc(prepared: Path, staging: Path, config_dir: Path,
-                         lockfile: dict | None) -> dict:
+def _patch_prepared_uosc(
+    prepared: Path, staging: Path, config_dir: Path, lockfile: dict | None
+) -> dict:
     """One result row: {"name": "uosc-playlist-reorder-patch", "status": ..., "detail": ...}."""
+
 
 # deploy/transaction.py
 def update_assets(config_dir, staging_dir, repo_dir, metadata, prepare_hook=None):
     ...
     prepare_assets(config_dir, staging_dir, repo_dir, prepared)
     if prepare_hook is not None:
-        prepare_hook(prepared)          # return value ignored; prepared is a str
+        prepare_hook(prepared)  # return value ignored; prepared is a str
     manifest = asset_manifest(metadata, staging_dir, repo_dir, prepared)
     ...
 ```
@@ -145,14 +147,18 @@ staged uosc to keep this fixed.
 ```python
 patch_rows = []
 backup = tx.update_assets(
-    config_dir, staging, str(REPO_ROOT), lockfile,
+    config_dir,
+    staging,
+    str(REPO_ROOT),
+    lockfile,
     prepare_hook=lambda p: patch_rows.append(
-        _patch_prepared_uosc(Path(p), Path(staging), Path(config_dir), lockfile)),
+        _patch_prepared_uosc(Path(p), Path(staging), Path(config_dir), lockfile)
+    ),
 )
-for row in patch_rows:     # right after update_assets returns, before the audit log
+for row in patch_rows:  # right after update_assets returns, before the audit log
     if row["status"] != "warn":
         ui.info(f"{row['name']}: {row['detail']}")
-ui.summary(patch_rows)     # the Warnings block is the ONLY place a skipped patch is shown
+ui.summary(patch_rows)  # the Warnings block is the ONLY place a skipped patch is shown
 ```
 
 A skipped patch is shown exactly once, as the Warnings block of that summary. There
