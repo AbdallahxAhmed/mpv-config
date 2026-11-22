@@ -43,9 +43,9 @@ Lua suites with `python tests/run_lua_tests.py`; all tests headless.
 
 **⚠️ CRITICAL**: no User Story 1 work starts before this phase is done.
 
-- [ ] T004 Write the fixture test in `tests/test_patch_uosc_playlist_reorder.py`: SHA-256 and 1831 lines equal the upstream values, no `b"\r"`, `.gitattributes` marks the fixture `-text` (plan Test Strategy "Fixture")
-- [ ] T005 [P] Write the registry pin test (`uosc` `pin == "5.13.0"`) in `tests/test_deploy_uosc_reorder_patch.py`; it must fail first (plan Test Strategy "Registry")
-- [ ] T006 Set the uosc `"pin"` from `None` to `"5.13.0"` in `deploy/registry.py` (C-007); T005 passes
+- [X] T004 Write the fixture test in `tests/test_patch_uosc_playlist_reorder.py`: SHA-256 and 1831 lines equal the upstream values, no `b"\r"`, `.gitattributes` marks the fixture `-text` (plan Test Strategy "Fixture")
+- [X] T005 [P] Write the registry pin test (`uosc` `pin == "5.13.0"`) in `tests/test_deploy_uosc_reorder_patch.py`; it must fail first (plan Test Strategy "Registry")
+- [X] T006 Set the uosc `"pin"` from `None` to `"5.13.0"` in `deploy/registry.py` (C-007); T005 passes
 
 **Checkpoint**: fixture and pin in place; the suites stay green.
 

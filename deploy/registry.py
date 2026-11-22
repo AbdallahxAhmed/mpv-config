@@ -39,7 +39,9 @@ SCRIPTS = [
             "type": "github_release",
             "repo": "tomasklaen/uosc",
             "asset_pattern": "uosc.zip",
-            "pin": None,
+            # Pinned: the playlist-reorder patch (spec 005) is written for these
+            # exact bytes. Bump only after the uosc release check passes (C-009).
+            "pin": "5.13.0",
         },
         "install": {
             "map": {"scripts/uosc/": "scripts/uosc/", "fonts/": "fonts/"},
