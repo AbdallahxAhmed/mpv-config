@@ -66,17 +66,43 @@ and the playing marker on item 5.
 - The playlist changes while a drag is in progress (a file ends and the next
   one starts, an item is added or removed by another script, the playlist is
   shuffled): the drag is cancelled without a move and the menu refreshes.
-- The menu is closed during a drag (Esc, the menu key, or the window losing
-  focus): the drag is cancelled without a move.
+- The menu is closed during a drag (Esc, the menu key, or any other close): the
+  drag is cancelled without a move.
+- The window loses focus during a drag: mpv releases the held button first
+  (measured: release-all sends the button-up), so the drag ends like a release
+  and commits at the visible drop line, under the usual outside-the-menu rule
+  (accepted 2026-11-22). If the `focused` change happens to be processed before
+  that commit (it waits one event-loop turn), the drag is cancelled instead; both
+  outcomes are accepted. When the video output does not report `focused`, only the
+  release rule applies.
 - The menu's search/filter is active: dragging is disabled, because positions
   in a filtered view do not map one-to-one to playlist positions; keyboard and
   button reordering keep their current behaviour.
 - A one-item or empty playlist: no drag handle is shown.
-- The pointer leaves the mpv window while dragging: the drag continues while
-  the button is held and ends (commits) on release, as other drags in mpv do.
+- The pointer leaves the menu but stays inside the mpv window while dragging:
+  the drop line goes to the first or last gap and the list auto-scrolls toward
+  that end.
+- The pointer leaves the mpv window while dragging (pointer left, or its
+  coordinates are outside the window while the button is held): the drag
+  continues, the drop line freezes at its last in-window position, and nothing
+  auto-scrolls. Release there commits to that frozen position when `focused` is
+  reported; when it is not reported, release outside the menu cancels without a
+  move. Esc still cancels (decided 2026-11-21 and 2026-11-22).
+- Esc, or any other menu key, while the button is still held: mpv sends the
+  button-up before the key, so the release's commit waits one event-loop turn;
+  the key (like a menu close or a list update) arrives within it and cancels
+  without a move, and the key itself does nothing else (decided 2026-11-22).
+- A non-menu key (for example Space) while the button is held: mpv sends the
+  button-up first, so the drag commits at the visible drop line, then the key
+  acts as usual. If the playlist changed in between, no move is made.
+- The button release is never reported to mpv (for example, outside the window
+  on some platform): the drag continues and the drop line stays visible, following
+  the pointer back into the window; the next click drops the item there (accepted
+  2026-11-22). If mpv saw the release but uosc did not, the next press cancels the
+  drag instead and acts as a normal click.
 - The playing item is the one being dragged: it keeps playing throughout.
-- Only one of the two patched uosc files still matches its anchors after a uosc
-  change: neither file is modified (FR-024).
+- An anchor of the patch no longer matches after a uosc change: `Menu.lua` is
+  not modified (FR-024).
 
 ## Requirements *(mandatory)*
 
@@ -129,17 +155,23 @@ numbers are not reused.
   a second run on an already patched uosc MUST change nothing. Today
   `deploy/deployer.py` imports and runs only `tools/patch_uosc_timeline_thumb.py`
   and `tools/patch_uosc_topbar.py`, so the new patch must be added there.
-- **FR-024**: Patching MUST be all-or-nothing. The patch MUST patch both uosc
-  files it changes (`elements/Menu.lua` and `lib/menus.lua`) in memory and write
-  them only when both succeed. If either fails (for example an anchor does not
-  match), both files MUST stay untouched and `mpv-config update` MUST print one
-  warning naming the skipped patch. This goes beyond the pattern of
-  `tools/patch_uosc_timeline_thumb.py`, which changes one file.
-  `deploy/transaction.py` does not provide this, so the patch must implement it
-  itself. That module's `replace_items` swaps whole top-level paths
+- **FR-024**: Patching MUST be all-or-nothing. The patch changes one uosc file,
+  `elements/Menu.lua`. `lib/menus.lua` is left untouched, because the drag handle
+  is drawn by `Menu.lua` and is not an item action (decided 2026-11-21; see
+  plan.md). All hunks are applied in memory, and the file is written only when
+  every hunk succeeds, in one atomic replace. If any hunk fails (for example an
+  anchor does not match), or the file does not hash to the pinned upstream
+  bytes, the file MUST stay untouched and `mpv-config update` MUST print one
+  warning naming the skipped patch and exit 0. `deploy/transaction.py` does not
+  provide this, so the patch must implement it itself. That module's `replace_items` swaps whole top-level paths
   (`scripts/`, `fonts/`, ...) one rename at a time. Its docstring says a
-  multi-path update is not globally atomic. The uosc patchers run after
-  `replace_items` has committed and write each deployed file directly.
+  multi-path update is not globally atomic. The reorder patch therefore runs on
+  the staged (prepared) uosc copy before `replace_items`, so the patched file
+  is swapped in with the rest of `scripts/` and the existing rollback covers
+  it. This also holds when nothing new was staged and the prepared copy is the
+  installed one. Today's Timeline and TopBar patchers still run after
+  `replace_items` has committed and write the deployed files directly; this
+  spec does not change them (decided 2026-11-20, see [plan.md](plan.md#design)).
 
 ### Constraints *(stakeholder-mandated; they bound the plan, not the user value)*
 
@@ -232,9 +264,11 @@ release check (breakage would only surface at the next manual bump).
   mpv reports no file reload.
 - **SC-007**: All existing reordering tests (keyboard and buttons) pass unchanged,
   and no menu other than the playlist changes appearance or behaviour.
-- **SC-008**: When any of the uosc patch's anchors does not match, in either
-  file, `mpv-config update` completes successfully, prints one warning naming
-  the skipped patch, and the deployed uosc files are byte-identical to upstream.
+- **SC-008**: When `elements/Menu.lua` does not hash to the pinned upstream
+  bytes, or any of the patch's anchors does not match, `mpv-config update`
+  completes with exit code 0. The skipped patch appears once, in the summary's
+  Warnings block (not under failures). `elements/Menu.lua` is byte-identical to
+  the fetched file.
 - **SC-009**: The release check is tested against a fixture copy of the uosc
   5.13.0 files with one anchor deliberately broken: it fails and its message
   names the uosc version and the broken anchor. Against the unmodified 5.13.0
@@ -242,6 +276,98 @@ release check (breakage would only surface at the next manual bump).
 
 SC-005 and SC-006 (thumbnails) moved to [Deferred to spec 006](#deferred-to-spec-006-playlist-item-thumbnails); the
 numbers are not reused.
+
+## Alternatives Considered
+
+| Alternative | Trade-off | Outcome |
+|---|---|---|
+| **Do nothing**: keep Ctrl+Up/Down/PgUp/PgDn/Home/End and the move buttons | No uosc patch and no new risk. But moving an item ten places still takes ten clicks or presses, and there is no pointer-only way to move an item far (SC-001) | Rejected: the request exists because of this cost |
+| **Wire the old patcher as it is** (`tools/patch_uosc_playlist_drag.py`) into the deployer | Least new code. But it breaks C-001 (unpatch is not byte-exact), FR-008 (it replaces the move buttons), FR-003 (no drop line) and FR-006 (the held-row style hides the playing highlight). It is also 684 lines and adds 200 lines to `Menu.lua` (C-002) | Rejected |
+| **Rework the old patcher** to fix those four defects | Keeps its tests. But each fix touches most of its hunks: its unpatch uses whitespace-tolerant regexes, its action block replaces the buttons, and its live row swapping has to become a drop line. The result is a rewrite that keeps the old size | Rejected in favour of a new, smaller patch (decided 2026-11-20, see Prior work) |
+| **Standalone playlist menu** in a separate mpv script, with no uosc patch | No dependency on uosc anchors. But it duplicates uosc's menu rendering, theming, search and keyboard handling, and leaves two different playlist menus in the player | Rejected: much more code, and an inconsistent UI |
+| **Fork uosc** | Full control. But every upstream release has to be merged by hand, which is a far larger maintenance cost than one pinned patch | Rejected |
+| **Upstream the feature to uosc** | Best long-term outcome, with no patch to maintain. But its timing and acceptance are outside this project's control | Not rejected: it can be pursued in parallel, and the patch is retired if upstream ships it |
+| **Whole-row drag** (the 2026-09-09 design's free drag) | No handle to aim at. But uosc already uses press-and-drag on a row to scroll the menu, so one gesture would mean two things (FR-002, acceptance 3) | Rejected: drag only from the handle |
+| **Live reordering while dragging** (rows swap as the pointer moves, as in the old patcher) | Direct feedback. But it needs either one `playlist-move` per swap, which breaks FR-005's single move and churns the playlist observers, or a local reorder that has to be undone on cancel and re-synced if the playlist changes | Rejected: the list stays still, and a drop line shows the target (FR-003) |
+| **Patch after `replace_items`**, the way the Timeline and TopBar patchers do | Matches existing code. But it writes live files with no rollback, and leaves the manifest hashes describing unpatched bytes | Rejected (FR-024) |
+| **uosc unpinned**, or **pinned without a release check** | Covered under "uosc pinning" | Rejected there |
+
+Thumbnail alternatives (overlays versus ASS, disk versus memory cache, stream
+thumbnail sources) belong to spec 006.
+
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation | Ids |
+|---|---|---|---|
+| A new uosc release changes an anchor | The patch cannot apply after a pin bump | uosc is pinned. The weekly release check names the version and the broken anchor. The pin is only bumped after that check passes | C-007, C-008, C-009, SC-009 |
+| Upstream re-publishes the pinned tag with different bytes | The patch may land on code it was not written for | Before patching, the deploy checks the SHA-256 of `elements/Menu.lua` against the pinned 5.13.0 value (see Security and Privacy). A mismatch skips the patch with one warning and leaves the file as downloaded | C-001, FR-024, SC-008 |
+| A partial write of the patched file | uosc is left half-patched and may error at startup | The patch changes one file. It is written to a temporary file in the same directory and then swapped in with one atomic replace. A failed write leaves the original untouched and becomes one warning | FR-024 |
+| A failure during `replace_items` | Live `scripts/` mixes old and new files | The patched file travels inside the `scripts/` swap, so the existing recovery restores the old directory | FR-024 |
+| A Windows checkout converts line endings (`core.autocrlf`) | The fixtures and the inserted Lua become CRLF. Anchors stop matching, or the patched file gets mixed line endings | `.gitattributes` marks the fixtures `-text` and the payload `eol=lf`. The patcher reads and writes bytes only. A test fails on any `\r` | C-001, FR-022 |
+| The drag code hides the playing marker | The user loses track of the playing item | No hunk touches the highlight code. The held style is drawn on top. Python and Lua tests guard both | FR-006 |
+| Press-and-drag on a row conflicts with drag-to-scroll | Accidental reorders | Drag starts only from the handle, past a 4 px threshold. Elsewhere, rows scroll as today | FR-002 |
+| The button release is lost outside the window, or focus is lost | A drag stays half-held, and a later click commits a move the user never made | When the platform reports the button-up, the session's `cursor:on('primary_up')` handler receives it wherever it happens; the commit waits one event-loop turn so Esc, a close or a list update can cancel it. Outside the menu it commits only when `focused` is reported. If mpv never gets the release, the drag stays visibly active and the next click drops at the visible drop line (accepted). Focus loss while held commits at the visible drop line (accepted). To be checked by hand on KDE Wayland and Windows (quickstart §4 step 6) | FR-007 |
+| The playlist changes mid-drag | A move to a stale index | Any list update cancels the drag with no move | FR-007 |
+| Auto-scroll rendering costs frames | Delayed or dropped frames | Per-frame work happens only while the pointer is in an edge zone during a drag, and SC-003 measures it on both OSes | FR-020, SC-003 |
+| The scheduled release check stops running (GitHub disables scheduled workflows in public repos with no activity for 60 days) or hits the API rate limit | Breakage goes unnoticed until a manual bump | The job also has `workflow_dispatch`, and C-009 requires a passing run before any bump. It sends `GITHUB_TOKEN` to the API | C-008, C-009 |
+| The CI download hangs or trickles | The job burns minutes and reports nothing useful | One 120 s monotonic deadline across all reads, headers included (a socket timeout set to the remaining time before each read, plus a watchdog that closes the socket at the deadline), with step and job timeouts as a backstop. Exit 2 with a message naming the seconds and the URL | C-008 |
+| Someone edits a fixture to make a test pass | The tests stop proving anything about real uosc | A test pins the fixture SHA-256 to the upstream values | SC-009 |
+| The old patcher is left installed | Two drag implementations or conflicting markers | C-006 removes it. A uosc copy carrying any unknown marker is skipped with a warning, not patched over | C-006 |
+
+## Security and Privacy
+
+**Spec 005 (this feature)**
+
+- **Downloaded uosc release, checked before patching.** uosc comes from
+  `api.github.com` and GitHub release downloads over HTTPS, pinned to tag `5.13.0`
+  (C-007). The fetcher's existing archive limits apply: size, member count, and
+  safe member names. Before the patch writes anything, the deploy checks:
+  (1) the SHA-256 of `elements/Menu.lua`, the only file the patch changes,
+  matches the value recorded for upstream 5.13.0
+  (`0cbc42afbe72f3f76f069995744de1e772d706445ed7987d1bffaafed50f2f49`); for an
+  already patched copy, the check runs on the unpatched form; and (2) every anchor
+  matches exactly once. If either check fails, the patch is skipped with one
+  warning and the files are left as downloaded (SC-008). On a pin bump (C-009),
+  the maintainer records the new hashes together with the fixture refresh.
+- **Release check in CI.** It runs with `permissions: contents: read`. It sends
+  `GITHUB_TOKEN` (or `GH_TOKEN`) only to `api.github.com`. It keeps the zip in
+  memory, reads only `elements/Menu.lua`, and never writes, imports or executes
+  anything from it. One 120 s deadline covers all of its downloads.
+- **Untrusted playlist entries.** The drag code passes only integer indices to
+  mpv (`playlist-move`). Titles, paths and URLs are never put into a command,
+  file name or subprocess. No network access is added.
+- **No new data at rest.** The only bytes written are the patched uosc file and
+  the file hashes in the existing `.deploy.lock.json`.
+
+**Spec 006 (thumbnails): requirements carried forward.** These are recorded here
+because the original request included thumbnails. Spec 006 MUST meet them or
+replace them with stronger ones:
+
+- **Requests to YouTube's image servers.** Each YouTube item that needs a
+  thumbnail costs one HTTPS request to YouTube's image host, keyed by the video
+  ID. That request shows Google the user's IP address and the IDs in the
+  playlist, including items the user never plays. Spec 006 MUST:
+  - fetch only for rows that are visible;
+  - fetch each video ID at most once, then serve it from the disk cache;
+  - send no cookies and no referrer, and a generic user agent;
+  - fetch only from the fixed thumbnail host, never from a URL taken from the
+    playlist;
+  - provide an option to turn YouTube thumbnail fetching off, so items fall back
+    to the generic icon.
+
+  Items from other sites never cause a request (FR-018).
+- **The cache shows watch history.** Cached pictures and their file names show
+  what was in the user's playlists. Spec 006 MUST:
+  - keep the cache under mpv's cache directory (`~~cache/`, C-004) in its own
+    subfolder, and state the resolved path for Linux and Windows;
+  - name files by a hash of the source, not by title or path;
+  - enforce a size limit, removing the least recently used first (the working
+    number is 100 MB);
+  - write files atomically, so two mpv instances cannot leave partial images;
+  - document how to clear the cache. Deleting the subfolder is always safe, and
+    `mpv-config uninstall` removes it.
+- **Local frame grabs.** Paths from the playlist reach the frame extractor
+  (`ffmpeg` or `mpv`) only as list arguments, never through a shell.
 
 ## Assumptions
 
