@@ -281,7 +281,7 @@ class TestAuditPatches(unittest.TestCase):
             content = f.read()
 
         live_action = content.split("\n[live-action]\n")[1].split("\n[anime]\n")[0]
-        self.assertIn("tscale                    = linear", live_action)
+        self.assertIn("tscale                    = oversample", live_action)
         # The profile tscale is only the value before smart_motion starts (or
         # when it is disabled); the template must say so where it is set.
         for profile in ("live-action", "anime"):
@@ -290,7 +290,7 @@ class TestAuditPatches(unittest.TestCase):
         self.assertIn("video-timing-offset       = 0.01", live_action)
 
         anime = content.split("\n[anime]\n")[1].split("\n[protocol.file]\n")[0]
-        self.assertIn("tscale                    = linear", anime)
+        self.assertIn("tscale                    = oversample", anime)
         self.assertIn("video-timing-offset       = 0.01", anime)
 
         # The latching [wayland-144hz-fix] profile (fixed 143.981 on any

@@ -206,10 +206,11 @@ deband-range              = 16
 deband-grain              = 0
 sharpen                   = 0
 interpolation             = {{INTERPOLATION}}
-# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file and
-# sets its default_tscale (script-opts/smart_motion.conf, oversample). This is
-# the value in effect when smart_motion is disabled (enabled=no, e.g. VRR mode).
-tscale                    = linear
+# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file, and
+# the value in effect when it is disabled (enabled=no, e.g. VRR mode). Same as its
+# default_tscale (script-opts/smart_motion.conf), so a file never switches scaler
+# mid-play; linear cross-fades and ghost-trails 24/25/30 fps content.
+tscale                    = oversample
 # Only used with video-sync=audio (VRR mode). Ignored under display-resample
 # (mpv manual, --video-timing-offset).
 video-timing-offset       = 0.01
@@ -235,10 +236,11 @@ deband-threshold          = 48
 deband-range              = 20
 deband-grain              = 32
 interpolation             = {{INTERPOLATION}}
-# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file and
-# sets its default_tscale (script-opts/smart_motion.conf, oversample). This is
-# the value in effect when smart_motion is disabled (enabled=no, e.g. VRR mode).
-tscale                    = linear
+# tscale until scripts/smart_motion.lua takes over ~0.25 s into each file, and
+# the value in effect when it is disabled (enabled=no, e.g. VRR mode). Same as its
+# default_tscale (script-opts/smart_motion.conf), so a file never switches scaler
+# mid-play; linear cross-fades and ghost-trails 24/25/30 fps content.
+tscale                    = oversample
 # Only used with video-sync=audio (VRR mode). Ignored under display-resample
 # (mpv manual, --video-timing-offset).
 video-timing-offset       = 0.01
@@ -287,7 +289,7 @@ stream-lavf-o-append      = request_size=10485760
 deband                    = no
 # video-sync comes from the base config ({{VIDEO_SYNC}}); interpolation and
 # tscale come from the active content profile ([live-action] or [anime],
-# tscale=linear); then scripts/smart_motion.lua sets tscale at runtime from
+# tscale=oversample); then scripts/smart_motion.lua sets tscale at runtime from
 # script-opts/smart_motion.conf (default oversample). This profile deliberately
 # does not switch to video-sync=audio.
 # Smooth playback protected by cache-pause=no to prevent buffer freezing stalls.
