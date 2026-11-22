@@ -31,6 +31,7 @@ from deploy import ui_protocol as _proto  # noqa: E402
 
 try:
     from rich.console import Console
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.prompt import Confirm
     from rich.rule import Rule
@@ -624,20 +625,30 @@ class InlineDownloadProgress:
 
 
 def summary(results):
-    """Close a batch of component results: counts plus failing rows only.
+    """Close a batch of component results: counts plus warning and failing rows.
 
     Components announce what they are doing while running (steps, per-item
     lines), so re-listing every row here duplicated the 45-row verification
     table under itself on every deploy. Failing rows stay visible so a
     broken check can never scroll past unnoticed; the complete listing
-    remains with the component that produced the results.
+    remains with the component that produced the results. Rows with status
+    "warn" (a skipped patch, a migration that could not run) are listed
+    under Warnings: they never fail the run (spec 005, plan "Summary warnings").
     """
     ok_count = sum(1 for r in results if r.get("status") == "ok")
     skip_count = sum(1 for r in results if r.get("status") == "skipped")
-    failures = [r for r in results if r.get("status") not in ("ok", "skipped")]
+    warnings = [r for r in results if r.get("status") == "warn"]
+    failures = [r for r in results if r.get("status") not in ("ok", "skipped", "warn")]
     fail_count = len(failures)
 
     if _proto.ACTIVE:
+        for r in warnings:
+            _proto.emit(
+                "log",
+                level="warn",
+                text=_proto.plain(r.get("name", "")),
+                detail=_proto.plain(r.get("detail", "")) or None,
+            )
         _proto.emit(
             "summary",
             succeeded=ok_count,
@@ -651,6 +662,20 @@ def summary(results):
             ],
         )
         return
+
+    if warnings:
+        if _RICH_AVAILABLE:
+            _console.print("[bold]Warnings[/bold]")
+            for r in warnings:
+                detail = r.get("detail", "")
+                suffix = f" -- {escape(detail)}" if detail else ""
+                _console.print(f"[yellow]![/yellow] {escape(r['name'])}{suffix}", soft_wrap=True)
+        else:
+            _print(f"\n{_C.BOLD}Warnings:{_C.RESET}")
+            for r in warnings:
+                detail = r.get("detail", "")
+                suffix = f" {_C.DIM}-- {detail}{_C.RESET}" if detail else ""
+                _print(f"  {_C.YELLOW}{S.WARN}{_C.RESET} {r['name']}{suffix}")
 
     if failures:
         if _RICH_AVAILABLE:
@@ -672,6 +697,9 @@ def summary(results):
         parts.append(("ok", f"{ok_count} succeeded"))
     if skip_count:
         parts.append(("skip", f"{skip_count} skipped"))
+    if warnings:
+        n = len(warnings)
+        parts.append(("warn", f"{n} warning" + ("" if n == 1 else "s")))
     if fail_count:
         parts.append(("fail", f"{fail_count} failed"))
     if not parts:
@@ -685,11 +713,11 @@ def summary(results):
     if _RICH_AVAILABLE:
         styled = []
         for kind, text in parts:
-            style = {"ok": "green", "skip": "yellow", "fail": "red"}[kind]
+            style = {"ok": "green", "skip": "yellow", "warn": "yellow", "fail": "red"}[kind]
             styled.append(f"[{style}]{text}[/{style}]")
         _console.print("  ".join(styled))
     else:
-        style_by_kind = {"ok": _C.GREEN, "skip": _C.YELLOW, "fail": _C.RED}
+        style_by_kind = {"ok": _C.GREEN, "skip": _C.YELLOW, "warn": _C.YELLOW, "fail": _C.RED}
         _print("  " + "  ".join(f"{style_by_kind[k]}{t}{_C.RESET}" for k, t in parts))
 
 

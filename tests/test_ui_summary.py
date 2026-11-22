@@ -8,6 +8,7 @@ both the rich path and the ANSI fallback agree.
 
 import contextlib
 import io
+import re
 import unittest
 
 from deploy import ui
@@ -79,6 +80,78 @@ class SummaryAnsiFallbackTests(unittest.TestCase):
         self.assertNotIn("staging", text)
         self.assertIn("1 succeeded", text)
         self.assertIn("1 failed", text)
+
+
+# Spec 005: rows with status "warn" get their own Warnings list (plan "Summary warnings").
+LONG_DETAIL = (
+    "uosc-playlist-reorder skipped: elements/Menu.lua does not match uosc 5.13.0 "
+    "(sha256 of the unpatched form 0123456789ab…); uosc left unchanged"
+)
+WARN_ROWS = [
+    {"name": "staging", "status": "ok"},
+    {"name": "fonts", "status": "skipped"},
+    {"name": "uosc-playlist-reorder-patch", "status": "warn", "detail": LONG_DETAIL},
+    {"name": "migration", "status": "warn", "detail": "[Errno 2] No such file"},
+    {"name": "bare", "status": "warn"},
+    {"name": "verify config", "status": "failed", "detail": "bad shader path"},
+]
+
+
+def _plain_lines(text):
+    return [re.sub(r"\x1b\[[0-9;]*m", "", line).rstrip() for line in text.splitlines()]
+
+
+class SummaryWarningsTests(unittest.TestCase):
+    def test_rich_lists_warnings_unwrapped_before_failures(self):
+        with _capture_console() as out:
+            ui.summary(WARN_ROWS)
+        lines = _plain_lines(out.getvalue())
+        start = lines.index("Warnings")
+        self.assertEqual(
+            [
+                f"! uosc-playlist-reorder-patch -- {LONG_DETAIL}",
+                "! migration -- [Errno 2] No such file",
+                "! bare",
+            ],
+            lines[start + 1 : start + 4],
+        )
+        failed_at = next(i for i, line in enumerate(lines) if "verify config" in line)
+        self.assertLess(start, failed_at)
+        self.assertFalse(
+            any("uosc-playlist-reorder-patch" in line and "✗" in line for line in lines)
+        )
+        self.assertIn("1 succeeded  1 skipped  3 warnings  1 failed", lines)
+
+    def test_ansi_lists_warnings_before_the_failed_block(self):
+        original_rich = ui._RICH_AVAILABLE
+        ui._RICH_AVAILABLE = False
+        buffer = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buffer):
+                ui.summary(WARN_ROWS)
+        finally:
+            ui._RICH_AVAILABLE = original_rich
+        lines = _plain_lines(buffer.getvalue())
+        start = lines.index("Warnings:")
+        self.assertEqual(
+            [
+                f"  {ui.S.WARN} uosc-playlist-reorder-patch -- {LONG_DETAIL}",
+                f"  {ui.S.WARN} migration -- [Errno 2] No such file",
+                f"  {ui.S.WARN} bare",
+            ],
+            lines[start + 1 : start + 4],
+        )
+        self.assertLess(start, lines.index("Failed:"))
+        failed_block = lines[lines.index("Failed:") + 1 :]
+        self.assertFalse(any("uosc-playlist-reorder-patch" in line for line in failed_block))
+        self.assertIn("  1 succeeded  1 skipped  3 warnings  1 failed", lines)
+
+    def test_one_warning_is_singular_and_not_counted_as_failed(self):
+        with _capture_console() as out:
+            ui.summary([{"name": "a", "status": "warn", "detail": "d"}])
+        lines = _plain_lines(out.getvalue())
+        self.assertIn("1 warning", lines)
+        self.assertFalse(any("failed" in line for line in lines))
 
 
 if __name__ == "__main__":

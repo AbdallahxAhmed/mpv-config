@@ -77,8 +77,8 @@ position 2: the order is right, item 5 plays on uninterrupted and keeps its mark
 
 ### Summary warnings, test-first (plan "Summary warnings")
 
-- [ ] T013 [P] [US1] Add Warnings tests to `tests/test_ui_summary.py` (exact Rich lines with `soft_wrap=True`, ANSI lines with the conditional ` -- detail`, count order succeeded/skipped/warnings/failed, `warn` rows not counted as failed) and to `tests/test_ui_protocol.py` (`log` warn per row with `_proto.plain(...)`, not in the `summary` event's `failed` list)
-- [ ] T014 [US1] Implement the Warnings group in `summary()` in `deploy/ui.py`; T013 passes and no existing assertion changes (plan Test Strategy "Regression")
+- [X] T013 [P] [US1] Add Warnings tests to `tests/test_ui_summary.py` (exact Rich lines with `soft_wrap=True`, ANSI lines with the conditional ` -- detail`, count order succeeded/skipped/warnings/failed, `warn` rows not counted as failed) and to `tests/test_ui_protocol.py` (`log` warn per row with `_proto.plain(...)`, not in the `summary` event's `failed` list)
+- [X] T014 [US1] Implement the Warnings group in `summary()` in `deploy/ui.py`; T013 passes and no existing assertion changes (plan Test Strategy "Regression")
 
 ### Deployer, test-first (contracts/uosc-reorder-patch.md "Deployer integration"; research R1, R2)
 

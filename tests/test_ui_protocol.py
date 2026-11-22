@@ -86,6 +86,24 @@ class EventShapeTests(unittest.TestCase):
         self.assertEqual(summary["failed"], [{"name": "b", "detail": "x"}])
         self.assertEqual(panel["text"], "Deployment complete.\nConfig: /c")
 
+    def test_warn_rows_become_log_warnings_not_failures(self):
+        with ProtocolCapture() as cap:
+            ui.summary(
+                [
+                    {"name": "a", "status": "ok"},
+                    {"name": "[bold]patch[/bold]", "status": "warn", "detail": "skipped: x"},
+                    {"name": "bare", "status": "warn"},
+                    {"name": "b", "status": "failed", "detail": "y"},
+                ]
+            )
+        first, second, summary = cap.events
+        self.assertEqual(
+            {"t": "log", "level": "warn", "text": "patch", "detail": "skipped: x"}, first
+        )
+        self.assertEqual({"t": "log", "level": "warn", "text": "bare"}, second)
+        self.assertEqual("summary", summary["t"])
+        self.assertEqual([{"name": "b", "detail": "y"}], summary["failed"])
+
     def test_download_progress_reports_numbers_instead_of_drawing(self):
         with ProtocolCapture() as cap:
             progress = ui.InlineDownloadProgress("Downloading uosc", update_interval=0.0)
