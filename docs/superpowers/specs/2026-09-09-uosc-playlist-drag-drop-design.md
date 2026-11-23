@@ -1,7 +1,9 @@
 # Design Spec: uosc Playlist Drag-and-Drop Reordering
 
+> **Superseded by [spec 005](../../../specs/005-playlist-drag-reorder/spec.md)** (`tools/patch_uosc_playlist_reorder.py`). Kept for history; do not implement.
+
 **Date**: 2026-09-09
-**Status**: Revised with Visual Affordance, Explicit Cancellation & Resilient Hook Architecture
+**Status**: Superseded by spec 005 (2026-11-23)
 **Target**: `uosc` (MPV On-Screen Controller)
 **Implementation Tool**: `tools/patch_uosc_playlist_drag.py`
 

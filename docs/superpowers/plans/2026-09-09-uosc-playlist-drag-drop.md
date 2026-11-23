@@ -1,5 +1,7 @@
 # uosc Playlist Drag-and-Drop Implementation Plan
 
+> **Superseded by [spec 005](../../../specs/005-playlist-drag-reorder/spec.md)** (`tools/patch_uosc_playlist_reorder.py`). Kept for history; do not implement.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement drag-and-drop playlist reordering in uosc to replace up/down arrows with an intuitive, live-swapping drag handle using an idempotent post-install patcher.

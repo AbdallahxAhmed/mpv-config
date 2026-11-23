@@ -108,8 +108,8 @@ summary and release check, with every suite green.
 - [ ] T027 Maintainer, on Windows: repeat T026 (C-001 parity; steps 5-7 at least)
 - [X] T028 Run quickstart §5 (release check against the fixture, and `--latest` with network)
 - [ ] T029 Only after T026 and T027 pass: delete `tools/patch_uosc_playlist_drag.py` and `tests/test_patch_uosc_playlist_drag.py` (C-006)
-- [ ] T030 [P] Mark `docs/superpowers/specs/2026-09-09-uosc-playlist-drag-drop-design.md` and `docs/superpowers/plans/2026-09-09-uosc-playlist-drag-drop.md` superseded by spec 005 (C-006)
-- [ ] T031 Add the feature to `CHANGELOG.md`
+- [X] T030 [P] Mark `docs/superpowers/specs/2026-09-09-uosc-playlist-drag-drop-design.md` and `docs/superpowers/plans/2026-09-09-uosc-playlist-drag-drop.md` superseded by spec 005 (C-006)
+- [X] T031 Add the feature to `CHANGELOG.md`
 
 ---
 
