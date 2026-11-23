@@ -219,8 +219,9 @@ fetch_all → staging/ ──▶ prepare_assets(live ⊕ staged) → prepared/
   `from pathlib import Path` at `deployer.py:1455`, which would otherwise make the
   new `Path(...)` call raise `UnboundLocalError`. A test runs the real `deploy()`
   with a staged uosc.
-- **Update** (`cmd_update()`): after `update_assets` returns, `ok` and `skipped`
-  rows are printed with `ui.info`. Then `ui.summary(patch_rows)` runs, and its
+- **Update** (`cmd_update()`): after `update_assets` returns, `ok` rows are
+  printed with `ui.success` (renderers keep `ok` lines; the Go renderer shows
+  `info` only while it is current) and `skipped` rows with `ui.info`. Then `ui.summary(patch_rows)` runs, and its
   Warnings block is the only place a skipped patch appears. There is no `ui.warn`
   for it (SC-008).
 - Exact code: [patch contract](contracts/uosc-reorder-patch.md#deployer-integration).

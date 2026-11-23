@@ -653,6 +653,7 @@ def summary(results):
             "summary",
             succeeded=ok_count,
             skipped=skip_count,
+            warnings=len(warnings),
             failed=[
                 {
                     "name": _proto.plain(r.get("name", "")),

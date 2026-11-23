@@ -156,7 +156,9 @@ backup = tx.update_assets(
     ),
 )
 for row in patch_rows:  # right after update_assets returns, before the audit log
-    if row["status"] != "warn":
+    if row["status"] == "ok":  # level "ok": the Go renderer keeps it, "info" is transient
+        ui.success(f"{row['name']}: {row['detail']}")
+    elif row["status"] != "warn":
         ui.info(f"{row['name']}: {row['detail']}")
 ui.summary(patch_rows)  # the Warnings block is the ONLY place a skipped patch is shown
 ```

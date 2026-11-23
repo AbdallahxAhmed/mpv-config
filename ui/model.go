@@ -407,6 +407,13 @@ func (m *model) handleEvent(ev Event) tea.Cmd {
 		if ev.Skipped > 0 {
 			parts = append(parts, fmt.Sprintf("%d skipped", ev.Skipped))
 		}
+		if ev.Warnings > 0 {
+			noun := "warnings"
+			if ev.Warnings == 1 {
+				noun = "warning"
+			}
+			parts = append(parts, fmt.Sprintf("%d %s", ev.Warnings, noun))
+		}
 		if len(ev.Failed) > 0 {
 			parts = append(parts, fmt.Sprintf("%d failed", len(ev.Failed)))
 		}

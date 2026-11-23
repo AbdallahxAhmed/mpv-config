@@ -219,7 +219,7 @@ class UpdateTests(DeployerTestCase):
             self.assertEqual(0, self.update())
         self.assertEqual(["patch", "replace"], order)
         self.assertEqual(PATCHED, self.live_menu())
-        self.assertIn(mock.call(f"{ROW}: patched (staged, 5.13.0)"), self.ui.info.call_args_list)
+        self.assertIn(mock.call(f"{ROW}: patched (staged, 5.13.0)"), self.ui.success.call_args_list)
         self.assertEqual(0, self.update())
         self.assertEqual(PATCHED, self.live_menu())
 

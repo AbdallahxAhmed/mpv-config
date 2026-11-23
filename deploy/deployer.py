@@ -3392,7 +3392,10 @@ def cmd_update(args):
                 ),
             )
         for row in patch_rows:
-            if row["status"] != "warn":
+            # a result, not narration: renderers keep "ok" lines, "info" is transient
+            if row["status"] == "ok":
+                ui.success(f"{row['name']}: {row['detail']}")
+            elif row["status"] != "warn":
                 ui.info(f"{row['name']}: {row['detail']}")
         # The Warnings block is the only place a skipped patch is shown (SC-008).
         ui.summary(patch_rows)

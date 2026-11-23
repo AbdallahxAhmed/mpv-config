@@ -27,7 +27,7 @@ and answers prompts.
 | `log` | `level` (`step` `info` `item` `ok` `warn` `error`), `text`, `detail`, `transient` | `ok`/`warn`/`error` stay in the scrollback; the rest is live narration |
 | `table` | `title`, `columns`, `rows` | 2 columns → key/value list; a `Status` column → "N/M checks passed" plus failing rows |
 | `plan` | `title`, `groups: [{label, entries: [{action, target, detail}]}]` | compact install plan |
-| `summary` | `succeeded`, `skipped`, `failed: [{name, detail}]` | stage result counts |
+| `summary` | `succeeded`, `skipped`, `warnings`, `failed: [{name, detail}]` | stage result counts; each `warn` row arrives first as a `log` warning |
 | `progress` | `id`, `label`, `state` (`connect` `run` `done` `fail`), `done`, `total` | download bar |
 | `command` | `id`, `state` (`start` `output` `end`), `text`, `ok`, `secs`, `tail` | external command with a live timer; the tail of a failed command is kept |
 | `spinner` | `state` (`start` `stop`), `text` | indeterminate activity |

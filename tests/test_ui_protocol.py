@@ -102,6 +102,7 @@ class EventShapeTests(unittest.TestCase):
         )
         self.assertEqual({"t": "log", "level": "warn", "text": "bare"}, second)
         self.assertEqual("summary", summary["t"])
+        self.assertEqual(2, summary["warnings"])
         self.assertEqual([{"name": "b", "detail": "y"}], summary["failed"])
 
     def test_download_progress_reports_numbers_instead_of_drawing(self):
