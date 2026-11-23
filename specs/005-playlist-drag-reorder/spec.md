@@ -4,7 +4,7 @@
 **Created**: 2026-11-20
 **Status**: Draft
 **Input**: User description: "A YouTube Music-style playlist menu in uosc. User Story 1 (P1): drag to reorder with a drag handle, held-item highlight, drop indicator, edge auto-scroll, playlist-move on release without interrupting playback, Esc to cancel, existing keyboard reordering and move buttons kept. User Story 2 (P2): a small square thumbnail next to every visible item (cover art, video frame, yt-dlp thumbnail, or a generic icon), drawn as mpv overlays that follow the menu, generated asynchronously and cached on disk. Playlist menu only; uosc changes only as an idempotent, reversible patch; playback must not be affected; Linux Wayland and Windows."
-**Scope (decided 2026-11-20)**: this spec covers drag-to-reorder (User Story 1) only. Thumbnails (User Story 2) are moved to spec 006; see [Deferred to spec 006](#deferred-to-spec-006-playlist-item-thumbnails).
+**Scope (decided 2026-11-20)**: this spec covers drag-to-reorder (User Story 1) only. Thumbnails (User Story 2) are moved to spec 007; see [Deferred to spec 007](#deferred-to-spec-007-playlist-item-thumbnails).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -136,7 +136,7 @@ and the playing marker on item 5.
 - **FR-009**: Dragging MUST be unavailable while the menu's search/filter is
   active.
 
-FR-010 to FR-019 (thumbnails) moved to [Deferred to spec 006](#deferred-to-spec-006-playlist-item-thumbnails); the
+FR-010 to FR-019 (thumbnails) moved to [Deferred to spec 007](#deferred-to-spec-007-playlist-item-thumbnails); the
 numbers are not reused.
 
 **Playback and scope**
@@ -185,7 +185,7 @@ numbers are not reused.
 - **C-005 (measurement)**: Frame counts are measured with the spec 004 method
   ([spec 004 — Verification Method](../004-playback-performance/spec.md#verification-method)).
 
-C-003 and C-004 (thumbnail overlays and cache) moved to [Deferred to spec 006](#deferred-to-spec-006-playlist-item-thumbnails).
+C-003 and C-004 (thumbnail overlays and cache) moved to [Deferred to spec 007](#deferred-to-spec-007-playlist-item-thumbnails).
 
 ### Prior work
 
@@ -274,7 +274,7 @@ release check (breakage would only surface at the next manual bump).
   names the uosc version and the broken anchor. Against the unmodified 5.13.0
   files it passes.
 
-SC-005 and SC-006 (thumbnails) moved to [Deferred to spec 006](#deferred-to-spec-006-playlist-item-thumbnails); the
+SC-005 and SC-006 (thumbnails) moved to [Deferred to spec 007](#deferred-to-spec-007-playlist-item-thumbnails); the
 numbers are not reused.
 
 ## Alternatives Considered
@@ -293,7 +293,7 @@ numbers are not reused.
 | **uosc unpinned**, or **pinned without a release check** | Covered under "uosc pinning" | Rejected there |
 
 Thumbnail alternatives (overlays versus ASS, disk versus memory cache, stream
-thumbnail sources) belong to spec 006.
+thumbnail sources) belong to spec 007.
 
 ## Risks and Mitigations
 
@@ -339,14 +339,14 @@ thumbnail sources) belong to spec 006.
 - **No new data at rest.** The only bytes written are the patched uosc file and
   the file hashes in the existing `.deploy.lock.json`.
 
-**Spec 006 (thumbnails): requirements carried forward.** These are recorded here
-because the original request included thumbnails. Spec 006 MUST meet them or
+**Spec 007 (thumbnails): requirements carried forward.** These are recorded here
+because the original request included thumbnails. Spec 007 MUST meet them or
 replace them with stronger ones:
 
 - **Requests to YouTube's image servers.** Each YouTube item that needs a
   thumbnail costs one HTTPS request to YouTube's image host, keyed by the video
   ID. That request shows Google the user's IP address and the IDs in the
-  playlist, including items the user never plays. Spec 006 MUST:
+  playlist, including items the user never plays. Spec 007 MUST:
   - fetch only for rows that are visible;
   - fetch each video ID at most once, then serve it from the disk cache;
   - send no cookies and no referrer, and a generic user agent;
@@ -357,7 +357,7 @@ replace them with stronger ones:
 
   Items from other sites never cause a request (FR-018).
 - **The cache shows watch history.** Cached pictures and their file names show
-  what was in the user's playlists. Spec 006 MUST:
+  what was in the user's playlists. Spec 007 MUST:
   - keep the cache under mpv's cache directory (`~~cache/`, C-004) in its own
     subfolder, and state the resolved path for Linux and Windows;
   - name files by a hash of the source, not by title or path;
@@ -380,10 +380,12 @@ replace them with stronger ones:
 - Branch: the speckit `before_specify` hook would create a feature branch; it was
   not run, because the maintainer commits directly to `main`.
 
-## Deferred to spec 006: playlist item thumbnails
+## Deferred to spec 007: playlist item thumbnails
+
+(Renumbered 2026-11-23: this was "spec 006" until spec 006 became player UI styles and themes.)
 
 Decided 2026-11-20: thumbnails (the former User Story 2, P2) are not part of
-spec 005. Spec 006 starts from what is recorded here and must answer the open
+spec 005. Spec 007 starts from what is recorded here and must answer the open
 questions before it is planned.
 
 **The request**: each visible playlist row shows a small square picture on its
@@ -446,4 +448,4 @@ starting points, not decisions.
    or the thumbnail script? Either answer has to stay within C-002.
 3. Do mpv bitmap overlays draw above the uosc menu and clip correctly to it,
    including during scrolling and the fade animation? This needs a test before
-   spec 006 commits to overlays.
+   spec 007 commits to overlays.

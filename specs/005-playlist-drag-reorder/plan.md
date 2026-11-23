@@ -12,7 +12,7 @@ contracts: [uosc-reorder-patch.md](contracts/uosc-reorder-patch.md), [uosc-relea
 Story 2 (playlist item thumbnails). Nothing here implements, stubs or prepares
 thumbnails: no overlays, no cache, no image fetching, and no thumbnail-related
 hunks in the uosc patch. The spec moved User Story 2 to
-[spec 006](spec.md#deferred-to-spec-006-playlist-item-thumbnails). It gets its own
+[spec 007](spec.md#deferred-to-spec-007-playlist-item-thumbnails). It gets its own
 spec and its own plan **after User Story 1 ships**, starting from the open
 questions and the security and privacy requirements recorded in
 [spec.md](spec.md#security-and-privacy).

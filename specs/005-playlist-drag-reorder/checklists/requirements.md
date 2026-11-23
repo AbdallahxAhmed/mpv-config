@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — resolved 2026-11-20 (Prior work decision + C-006, uosc pinning C-007 to C-009; FR-018 moved to the spec 006 section)
+- [x] No [NEEDS CLARIFICATION] markers remain — resolved 2026-11-20 (Prior work decision + C-006, uosc pinning C-007 to C-009; FR-018 moved to the spec 007 section)
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [ ] Success criteria are technology-agnostic (no implementation details) — see Notes 2
@@ -50,7 +50,7 @@
 
    No markers remain. Open EGM review findings are in `.egm/`.
 5. Validation run 3 (2026-11-20), after the EGM Stage 8 decisions:
-   - Thumbnails were split out into "Deferred to spec 006". That section holds
+   - Thumbnails were split out into "Deferred to spec 007". That section holds
      the request, FR-018, C-003, C-004, the edge cases, the former SC-005 and
      SC-006, and three open questions. The removed IDs are not reused.
    - The pin is now concrete: the registry stores tags as upstream writes them,
