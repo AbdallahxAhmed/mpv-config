@@ -61,8 +61,13 @@ def render_config_dir(root, env=None):
 
 def render_frame(config_dir, sub_file, out_dir, *extra, frames=1, env=None):
     """Render frames with subtitles to PNGs; return the sha256 of the last one."""
+    return render_frame_and_log(config_dir, sub_file, out_dir, *extra, frames=frames, env=env)[0]
+
+
+def render_frame_and_log(config_dir, sub_file, out_dir, *extra, frames=1, env=None):
+    """render_frame, plus mpv's stderr (where probe scripts write)."""
     out_dir = Path(out_dir)
-    subprocess.run(
+    proc = subprocess.run(
         [
             MPV,
             f"--config-dir={config_dir}",
@@ -89,7 +94,7 @@ def render_frame(config_dir, sub_file, out_dir, *extra, frames=1, env=None):
     rendered = sorted(out_dir.glob("*.png"))
     if not rendered:
         raise AssertionError(f"mpv rendered no frame into {out_dir}")
-    return hashlib.sha256(rendered[-1].read_bytes()).hexdigest()
+    return hashlib.sha256(rendered[-1].read_bytes()).hexdigest(), proc.stderr
 
 
 @unittest.skipUnless(MPV, "mpv is not installed")
@@ -274,6 +279,169 @@ class SanitizerEncodingTests(unittest.TestCase):
         self.assertTrue(title.decode().endswith("[cleaned]"), title)
         self.assertEqual(SHOWN, bytes.fromhex(hexed.decode()).decode("utf-8"))
         self.assertEqual([], leftovers)
+
+
+RLE = "‫"  # RIGHT-TO-LEFT EMBEDDING
+RLM = "‏"  # RIGHT-TO-LEFT MARK
+LRE = "‪"  # LEFT-TO-RIGHT EMBEDDING
+# Invented lines: . ? ! ، at the end, "..." and «...», a number first, a
+# Latin name first (stays left-to-right), and a two-line cue.
+RTL_PLAIN = [
+    "نعم، أنت محق.",
+    "هل أنت بخير يا سامي?",
+    "انتبه!",
+    'قال "ليلى" ذلك،',
+    "«سامي» هنا",
+    '"ليلى"',
+    "3 رجال وصلوا.",
+    "Rami، هل أنت هنا؟",
+    "حسناً.\\Nلنذهب الآن!",
+]
+# The fansub workaround: end punctuation typed first so LTR shows it right.
+RTL_PRE_REVERSED = [".نعم، أنت محق", "?هل أنت بخير يا سامي", "!انتبه", '،قال "ليلى" ذلك', '."ليلى"']
+TITLE_PROBE = """
+mp.observe_property("current-tracks/sub/title", "string", function(_, t)
+  io.stderr:write("TITLE|" .. (t or "-") .. "\\n")
+end)
+"""
+
+
+def rtl_ass(lines, encoding=1):
+    """A track as streaming rips ship them: Encoding 1, so libass starts LTR."""
+    head = SAMPLE_ASS.split("[Events]")[0].replace(",1\nStyle: Sign", f",{encoding}\nStyle: Sign")
+    events = "".join(
+        f"Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,{line}\n" for line in lines
+    )
+    return f"{head}[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n{events}"
+
+
+def rtl_marked(lines):
+    """U+202B before every visual line that starts with Arabic, as the fix adds it."""
+
+    def mark(part):
+        return part if part[:1].isascii() and part[:1].isalpha() else RLE + part
+
+    return ["\\N".join(mark(part) for part in line.split("\\N")) for line in lines]
+
+
+def rtl_srt(lines):
+    text = "\n".join(line.replace("\\N", "\n") for line in lines)
+    return f"1\n00:00:00,000 --> 00:00:05,000\n{text}\n"
+
+
+@unittest.skipUnless(MPV, "mpv is not installed")
+class RtlPunctuationRenderTests(unittest.TestCase):
+    """Per-track right-to-left classes, as libass draws them.
+
+    libass starts an ASS line left-to-right unless its style's Encoding is
+    -1, and a leading U+200F does not change that, so the reference for a
+    correct line is the same track with Encoding -1 (automatic direction).
+    """
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory(prefix="mpv-rtl-render-")
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.config = render_config_dir(self.root)
+        (self.root / "tmp").mkdir()
+        self.probe = self.root / "title.lua"
+        self.probe.write_text(TITLE_PROBE, encoding="utf-8")
+        self.count = 0
+
+    def write(self, text, ext, encoding="utf-8"):
+        self.count += 1
+        path = self.root / f"track{self.count}.{ext}"
+        path.write_text(text, encoding=encoding)
+        return path
+
+    def plain(self, text, ext):
+        """The frame without the sanitizer."""
+        return render_frame(
+            self.config, self.write(text, ext), self.root / f"out{self.count}", frames=20
+        )
+
+    def sanitized(self, text, ext, encoding="utf-8"):
+        """(was the cleaned copy selected, frame) with the sanitizer loaded."""
+        sub = self.write(text, ext, encoding)
+        digest, log = render_frame_and_log(
+            self.config,
+            sub,
+            self.root / f"out{self.count}",
+            f"--script={SANITIZER}",
+            f"--script={self.probe}",
+            frames=20,
+            env=dict(os.environ, TMPDIR=str(self.root / "tmp"), TEMP=str(self.root / "tmp")),
+        )
+        # mpv drops the title when it quits: look at every title it showed
+        titles = [line.split(b"|", 1)[1] for line in log.splitlines() if line.startswith(b"TITLE|")]
+        return any(title.endswith(b"[cleaned]") for title in titles), digest
+
+    def test_ass_plain_track_is_fixed_to_match_automatic_direction(self):
+        for name, lines in (
+            ("no mark", RTL_PLAIN),
+            ("leading U+200F only", [RLM + line for line in RTL_PLAIN]),
+        ):
+            with self.subTest(name):
+                correct = self.plain(rtl_ass(lines, encoding=-1), "ass")
+                self.assertNotEqual(
+                    correct, self.plain(rtl_ass(lines), "ass"), "LTR layout not visible"
+                )
+                cleaned, frame = self.sanitized(rtl_ass(lines), "ass")
+                self.assertTrue(cleaned)
+                self.assertEqual(correct, frame)
+
+    def test_ass_marked_track_is_already_right_and_left_alone(self):
+        cleaned, frame = self.sanitized(rtl_ass(rtl_marked(RTL_PLAIN)), "ass")
+        self.assertFalse(cleaned)
+        self.assertEqual(self.plain(rtl_ass(RTL_PLAIN, encoding=-1), "ass"), frame)
+
+    def test_ass_pre_reversed_track_is_left_alone(self):
+        cleaned, frame = self.sanitized(rtl_ass(RTL_PRE_REVERSED), "ass")
+        self.assertFalse(cleaned)
+        self.assertEqual(self.plain(rtl_ass(RTL_PRE_REVERSED), "ass"), frame)
+
+    def test_latin_only_ass_track_is_left_alone(self):
+        lines = ["Yes, you are right.", '"Rami"!', "Who? Me?\\NFine."]
+        cleaned, _ = self.sanitized(rtl_ass(lines), "ass")
+        self.assertFalse(cleaned)
+
+    def test_srt_is_drawn_with_automatic_direction_and_never_marked(self):
+        correct = self.plain(rtl_srt(rtl_marked(RTL_PLAIN)), "srt")
+        for name, lines in (
+            ("plain", RTL_PLAIN),
+            ("marked", rtl_marked(RTL_PLAIN)),
+            ("pre-reversed", RTL_PRE_REVERSED),
+        ):
+            with self.subTest(name):
+                cleaned, frame = self.sanitized(rtl_srt(lines), "srt")
+                self.assertFalse(cleaned)
+                self.assertEqual(self.plain(rtl_srt(lines), "srt"), frame)
+                if name != "pre-reversed":
+                    self.assertEqual(correct, frame)
+
+    def test_srt_arabic_is_right_to_left_without_any_mark(self):
+        """The proof that SRT needs no mark: the unmarked line draws exactly
+        like the same line forced right-to-left (U+202B), and differently
+        from it forced left-to-right (U+202A)."""
+        for line in ('قال "ليلى" ذلك.', '"ليلى" وصلت.', "نعم، أنت محق."):
+            with self.subTest(line):
+                rtl = self.plain(rtl_srt([RLE + line]), "srt")
+                ltr = self.plain(rtl_srt([LRE + line]), "srt")
+                self.assertNotEqual(rtl, ltr, "direction not visible")
+                self.assertEqual(rtl, self.plain(rtl_srt([line]), "srt"))
+                cleaned, frame = self.sanitized(rtl_srt([line]), "srt")
+                self.assertFalse(cleaned)
+                self.assertEqual(rtl, frame)
+
+    def test_windows_1256_ass_is_converted_to_utf8_and_fixed(self):
+        lines = ["نعم، أنت محق.", 'قال "ليلى" ذلك،', "حسناً.\\Nلنذهب الآن!"]
+        correct = self.plain(rtl_ass(lines, encoding=-1), "ass")
+        cleaned, frame = self.sanitized(rtl_ass(lines), "ass", encoding="cp1256")
+        self.assertTrue(cleaned)
+        self.assertEqual(correct, frame)
+
+    def tearDown(self):
+        self.assertEqual([], [p.name for p in (self.root / "tmp").iterdir()], "temp files left")
 
 
 ARABIC_SRT = "1\n00:00:00,000 --> 00:00:02,000\nمرحباً بك يا صديقي، كيف حالك؟\n"

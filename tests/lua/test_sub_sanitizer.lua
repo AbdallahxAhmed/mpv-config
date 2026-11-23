@@ -317,7 +317,8 @@ local function run_external(name, bytes, props)
     for k, v in pairs(props or {}) do h.props[k] = v end
     local source = write_temp(name, bytes)
     h.props['current-tracks/sub'] = {
-        id = 1, external = true, ['external-filename'] = source, codec = 'subrip',
+        id = 1, external = true, ['external-filename'] = source,
+        codec = name:match('%.ass$') and 'ass' or 'subrip',
     }
     h.messages['sub-sanitize']()
     return sanitized_output(h), ss
@@ -553,6 +554,170 @@ test('async: a failed or killed ffmpeg adds nothing', function()
     h.observers['sub-text']('sub-text', '&rlm;x')
     h.pending[1](false)
     eq(0, #added_paths(h))
+end)
+
+-- ── right-to-left punctuation (ASS) ───────────────────────────────────
+-- Invented lines. libass keeps a leading U+200F line left-to-right, so the
+-- fix is U+202B (RTL embedding) at each line start and after each \N.
+
+local RLE = '\226\128\171'  -- U+202B
+local HEAD = 'Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,'
+
+local function ass(lines)
+    local out = {
+        '[Script Info]', 'ScriptType: v4.00+', '',
+        '[V4+ Styles]',
+        'Style: Default,Arial,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1',
+        '', '[Events]',
+    }
+    for _, line in ipairs(lines) do
+        out[#out + 1] = line:match('^%u%a+:') and line or HEAD .. line
+    end
+    return table.concat(out, '\r\n') .. '\r\n'
+end
+
+test('rtl: a plain track gets U+202B per line and after \\N, nothing else moves', function()
+    local _, ss = load_script()
+    local src = ass({
+        'نعم، أنت محق.',
+        '{\\an8}«سامي» هنا!',
+        '3 رجال وصلوا?',
+        'Rami، هل أنت هنا؟',
+        'حسناً.\\Nلنذهب الآن!',
+        'Fine.\\Nحسناً، "ليلى".',
+        'Dialogue: 1,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\\pos(10,10)}لافتة.',
+        'Comment: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,ملاحظة.',
+    })
+    local out, report = ss.fix_rtl_punctuation(src)
+    eq('plain', report.class)
+    eq(5, report.changed)
+    eq(ass({
+        RLE .. 'نعم، أنت محق.',
+        '{\\an8}' .. RLE .. '«سامي» هنا!',
+        RLE .. '3 رجال وصلوا?',
+        'Rami، هل أنت هنا؟',
+        RLE .. 'حسناً.\\N' .. RLE .. 'لنذهب الآن!',
+        'Fine.\\N' .. RLE .. 'حسناً، "ليلى".',
+        'Dialogue: 1,0:00:00.00,0:00:05.00,Default,,0,0,0,,{\\pos(10,10)}لافتة.',
+        'Comment: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,ملاحظة.',
+    }), out)
+end)
+
+test('rtl: a leading U+200F alone does not count as marked (libass ignores it)', function()
+    local _, ss = load_script()
+    local out, report = ss.fix_rtl_punctuation(ass({
+        RLM .. 'نعم، أنت محق.', RLM .. '"ليلى"!', RLM .. 'Rami، هل أنت هنا؟', LRM .. 'Rami، هنا.',
+    }))
+    eq('plain', report.class)
+    -- a leading RLM is itself a strong right-to-left character, LRM a left-to-right one
+    eq(ass({
+        RLE .. RLM .. 'نعم، أنت محق.', RLE .. RLM .. '"ليلى"!', RLE .. RLM .. 'Rami، هل أنت هنا؟', LRM .. 'Rami، هنا.',
+    }), out)
+end)
+
+test('rtl: already marked tracks (U+202B first or U+200F last) are left alone', function()
+    local _, ss = load_script()
+    for _, src in ipairs({
+        ass({ RLE .. 'نعم، أنت محق.', RLE .. '«سامي» هنا!', 'بلا علامة.' }),
+        ass({ 'نعم، أنت محق.' .. RLM, '"ليلى"!' .. RLM, 'بلا علامة.' }),
+    }) do
+        local out, report = ss.fix_rtl_punctuation(src)
+        eq('marked', report.class)
+        eq(src, out)
+    end
+end)
+
+test('rtl: a pre-reversed track (end punctuation typed first) is left alone', function()
+    local _, ss = load_script()
+    local src = ass({ '.نعم، أنت محق', '!انتبه', '?هل أنت بخير', '،قال ذلك', '."ليلى"', 'نعم، أنت محق.' })
+    local out, report = ss.fix_rtl_punctuation(src)
+    eq('pre-reversed', report.class)
+    eq(5, report.votes['pre-reversed'])
+    eq(src, out)
+end)
+
+test('rtl: Latin-only and tied tracks stay byte for byte', function()
+    local _, ss = load_script()
+    local latin = ass({ 'Yes, you are right.', '"Rami"!', '{\\an8}Who? Me?\\NFine.' })
+    local out, report = ss.fix_rtl_punctuation(latin)
+    eq('none', report.class)
+    eq(latin, out)
+    local tied = ass({ 'نعم، أنت محق.', '.نعم، أنت محق' })
+    out, report = ss.fix_rtl_punctuation(tied)
+    eq('tie', report.class)
+    eq(tied, out)
+end)
+
+test('rtl: override blocks are never edited, even when they hold \\N-like text', function()
+    local _, ss = load_script()
+    local out = ss.fix_rtl_punctuation(ass({ '{\\fnArial\\N}نعم، أنت محق.', '{note: x}"ليلى"!' }))
+    eq(ass({ '{\\fnArial\\N}' .. RLE .. 'نعم، أنت محق.', '{note: x}' .. RLE .. '"ليلى"!' }), out)
+end)
+
+test('rtl: Arabic sub-text triggers ASS tracks only', function()
+    local _, ss = load_script()
+    eq(true, ss.has_arabic('نعم.'))
+    eq(false, ss.has_arabic('Yes. "Rami"! « » ' .. RLM))
+    for _, case in ipairs({ { 'ass', 1 }, { 'subrip', 0 } }) do
+        local h = load_script()
+        local source = write_temp('rtl.' .. case[1], case[1] == 'ass' and ass({ 'نعم، أنت محق.' })
+            or '1\n00:00:00,000 --> 00:00:05,000\nنعم، أنت محق.\n')
+        h.props['current-tracks/sub'] = {
+            id = 1, external = true, ['external-filename'] = source, codec = case[1],
+        }
+        h.observers['sub-text']('sub-text', 'نعم، أنت محق.')
+        eq(case[2], #added_paths(h))
+    end
+end)
+
+test('rtl: an Arabic ASS file is fixed once; its cleaned copy is not reprocessed', function()
+    local h = load_script()
+    local source = write_temp('rtl-once.ass', ass({ 'نعم، أنت محق.' }))
+    h.props['current-tracks/sub'] = {
+        id = 1, external = true, ['external-filename'] = source, codec = 'ass', title = 'Arabic',
+    }
+    h.observers['sub-text']('sub-text', 'نعم، أنت محق.')
+    local added = added_paths(h)
+    eq(1, #added)
+    eq(ass({ RLE .. 'نعم، أنت محق.' }), read_file(added[1]))
+    assert(h.osds[1].text:find('right-to-left', 1, true), h.osds[1].text)
+    h.props['current-tracks/sub'] = {
+        id = 2, external = true, ['external-filename'] = added[1], codec = 'ass',
+    }
+    h.observers['sub-text']('sub-text', 'نعم، أنت محق.')
+    eq(1, #added_paths(h))
+end)
+
+test('rtl: SRT gets no marks; entity fixes still apply', function()
+    local _, ss = load_script()
+    local srt = '1\n00:00:00,000 --> 00:00:05,000\n&rlm;نعم، أنت محق.\n'
+    eq('1\n00:00:00,000 --> 00:00:05,000\n' .. RLM .. 'نعم، أنت محق.\n', ss.sanitize_content(srt, 'srt'))
+end)
+
+test('rtl: a Windows-1256 ASS track is converted whole to UTF-8, then marked', function()
+    -- U+202B has no Windows-1256 byte, so the whole file goes out as UTF-8
+    local marhaba = 'مرحبا'
+    local out, ss = run_external('rtl1256.ass', ass({
+        '&rlm;' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA .. '.',
+        CP1256_MARHABA .. '\\N' .. CP1256_MARHABA .. '!',
+    }))
+    eq(ass({
+        RLE .. RLM .. marhaba .. ' ' .. marhaba .. '.',
+        RLE .. marhaba .. '\\N' .. RLE .. marhaba .. '!',
+    }), out)
+    eq('utf-8', ss.detect_encoding(out))
+end)
+
+test('rtl: a Windows-1256 ASS track needing no marks stays 1256', function()
+    -- pre-reversed: end punctuation typed first, so no mark and no conversion
+    local out = run_external('rev1256.ass', ass({
+        '.&rlm;' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA,
+        '!' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA,
+    }))
+    eq(ass({
+        '.\254' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA,
+        '!' .. CP1256_MARHABA .. ' ' .. CP1256_MARHABA,
+    }), out)
 end)
 
 print('Sub sanitizer tests passed: ' .. total)

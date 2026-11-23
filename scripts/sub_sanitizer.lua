@@ -194,8 +194,10 @@ end
 -- ── encodings ─────────────────────────────────────────────────────────
 -- Entities decode to UTF-8 bytes, so they may only be written into UTF-8.
 -- A Windows-1256 file is decoded, cleaned and encoded back to 1256 (it has
--- RLM 0xFE, LRM 0xFD, NBSP 0xA0); UTF-16 is converted to UTF-8; any other
--- legacy encoding is left alone rather than turned into mixed garbage.
+-- RLM 0xFE, LRM 0xFD, NBSP 0xA0), unless the right-to-left fix adds U+202B,
+-- which 1256 cannot hold: then the whole file is written as UTF-8. UTF-16
+-- is converted to UTF-8; any other legacy encoding is left alone rather
+-- than turned into mixed garbage.
 
 -- Windows-1256 bytes 0x80..0xFF -> Unicode (generated from Python's codec).
 local CP1256 = {
@@ -313,6 +315,252 @@ local function to_utf8(content, encoding)
     if encoding == "utf-16be" then return utf16_to_utf8(content, true), nil end
     if encoding == "cp1256" then return cp1256_to_utf8(content), utf8_to_cp1256 end
     return content, nil
+end
+
+-- ── right-to-left punctuation (ASS) ───────────────────────────────────
+-- libass lays ASS dialogue out left-to-right whenever the style's Encoding
+-- is not -1 (VSFilter compatibility), so "نعم، أنت محق." shows its period
+-- right of the first word instead of left of the last. A leading U+200F
+-- does NOT change that base direction (libass 0.17.5, fribidi 1.0.18); a
+-- leading U+202B (RTL embedding) does, per line: after each \N too. Bidi
+-- also restarts at every override block, so only the first text segment
+-- of a line is covered. SRT needs nothing: mpv lays converted SRT out with
+-- automatic direction, and the same line already renders correctly.
+--
+-- Each Arabic ASS track is classified by majority vote of its dialogue
+-- lines, and only class "plain" is changed:
+--   marked        lines start with U+202B or end with U+200F: already right
+--   pre-reversed  end punctuation typed first (".نعم") so it shows right
+--                 under LTR: a fansub workaround, left as it is
+--   plain         first strong character Arabic, punctuation or quotes at
+--                 an edge, no mark: U+202B goes in front of every line
+--                 (and after every \N) whose first strong character is Arabic
+--                 or U+200F (the author's own right-to-left request)
+-- Signs (\pos, \move, \org, \clip, \p drawings, an Effect, a style named
+-- Sign) never vote and are never changed; neither are {\...} blocks.
+
+local RLE = "\226\128\171"  -- U+202B RIGHT-TO-LEFT EMBEDDING
+
+local function in_ranges(cp, ranges)
+    for i = 1, #ranges, 2 do
+        if cp >= ranges[i] and cp <= ranges[i + 1] then return true end
+    end
+    return false
+end
+
+-- Bidi class AL, coarsely: the Arabic blocks minus their digits, number
+-- signs, the comma, and combining marks (harakat, which belong to the
+-- letter before them).
+local ARABIC_BLOCKS = { 0x0600, 0x06FF, 0x0750, 0x077F, 0x08A0, 0x08FF, 0xFB50, 0xFDFF, 0xFE70, 0xFEFF }
+local ARABIC_NUMERIC = { 0x0600, 0x060A, 0x060C, 0x060C, 0x0660, 0x066C, 0x06F0, 0x06F9, 0xFEFF, 0xFEFF }
+local COMBINING = { 0x0610, 0x061A, 0x064B, 0x065F, 0x0670, 0x0670, 0x06D6, 0x06ED, 0x08D3, 0x08FF, 0xFE00, 0xFE0F }
+-- Bidi class L, coarsely: Latin, Greek, Cyrillic, Armenian, Indic, CJK, Hangul.
+local LTR_LETTERS = {
+    0x0041, 0x005A, 0x0061, 0x007A, 0x00C0, 0x00D6, 0x00D8, 0x00F6, 0x00F8, 0x024F,
+    0x0370, 0x058F, 0x0900, 0x1FFF, 0x3040, 0x9FFF, 0xAC00, 0xD7AF,
+}
+local BIDI_CONTROLS = { 0x200E, 0x200F, 0x202A, 0x202E, 0x2066, 0x2069 }
+local SPACES = { [0x09] = true, [0x20] = true, [0xA0] = true }
+-- What a pre-reversed line starts with: end punctuation, never a quote.
+local END_PUNCT = {
+    [0x2E] = true, [0x21] = true, [0x3F] = true, [0x2C] = true, [0x3A] = true, [0x3B] = true,
+    [0x060C] = true, [0x061F] = true, [0x2026] = true,
+}
+
+local function direction(cp)
+    if in_ranges(cp, ARABIC_BLOCKS) and not in_ranges(cp, ARABIC_NUMERIC)
+        and not in_ranges(cp, COMBINING) then
+        return "rtl"
+    end
+    if in_ranges(cp, LTR_LETTERS) then return "ltr" end
+    return nil
+end
+
+local function is_digit(cp)
+    return (cp >= 0x30 and cp <= 0x39) or (cp >= 0x0660 and cp <= 0x0669) or (cp >= 0x06F0 and cp <= 0x06F9)
+end
+
+-- Punctuation, quotes and symbols: what bidi places by its neighbours.
+local function is_neutral(cp)
+    return not direction(cp) and not is_digit(cp) and not SPACES[cp]
+        and not in_ranges(cp, BIDI_CONTROLS) and not in_ranges(cp, COMBINING)
+end
+
+-- Facts about one visual line of plain text (no blocks, \h as a space).
+local function scan_line(visible)
+    local cps = utf8_codepoints(visible)
+    local first, last, strong, arabic
+    local leading_rle = false
+    for i, cp in ipairs(cps) do
+        if cp == 0x202B and not first then leading_rle = true end
+        -- RLM and LRM are strong characters too: "\u200FRami، ..." is an
+        -- Arabic sentence whose author asked for right-to-left
+        if cp == 0x200F then strong = strong or "rtl" end
+        if cp == 0x200E then strong = strong or "ltr" end
+        if not SPACES[cp] and not in_ranges(cp, BIDI_CONTROLS) then
+            first = first or i
+            last = i
+            local d = direction(cp)
+            strong = strong or d
+            arabic = arabic or d == "rtl"
+        end
+    end
+    if not arabic then return { strong = strong } end
+    local trailing_rlm = false
+    for i = last + 1, #cps do
+        if cps[i] == 0x200F then trailing_rlm = true end
+    end
+    local vote
+    if leading_rle or trailing_rlm then
+        vote = "marked"
+    elseif END_PUNCT[cps[first]] and not END_PUNCT[cps[last]] then
+        vote = "pre-reversed"
+    elseif strong == "rtl" and (is_neutral(cps[first]) or is_neutral(cps[last])) then
+        vote = "plain"
+    end
+    return { strong = strong, vote = vote, marked = leading_rle or trailing_rlm }
+end
+
+-- The Text field as visual lines: each a list of {text=} / {tag=} pieces,
+-- with the "\N" that ended it in .sep. Joining them back is byte-identical.
+local function ass_visual_lines(text)
+    local lines, cur, pos = {}, {}, 1
+    while pos <= #text + 1 do
+        local s, e = text:find("{[^}]*}", pos)
+        local chunk = text:sub(pos, (s or #text + 1) - 1)
+        local p = 1
+        while true do
+            local a, b = chunk:find("\\N", p, true)
+            if not a then break end
+            cur[#cur + 1] = { text = chunk:sub(p, a - 1) }
+            cur.sep = "\\N"
+            lines[#lines + 1] = cur
+            cur = {}
+            p = b + 1
+        end
+        cur[#cur + 1] = { text = chunk:sub(p) }
+        if not s then break end
+        cur[#cur + 1] = { tag = text:sub(s, e) }
+        pos = e + 1
+    end
+    lines[#lines + 1] = cur
+    return lines
+end
+
+local function visible_text(line)
+    local parts = {}
+    for _, piece in ipairs(line) do
+        if piece.text then parts[#parts + 1] = (piece.text:gsub("\\h", " ")) end
+    end
+    return table.concat(parts)
+end
+
+local function join_lines(lines)
+    local out = {}
+    for _, line in ipairs(lines) do
+        for _, piece in ipairs(line) do out[#out + 1] = piece.text or piece.tag end
+        out[#out + 1] = line.sep or ""
+    end
+    return table.concat(out)
+end
+
+local DIALOGUE_FIELDS = "^Dialogue:[^,]*,[^,]*,[^,]*,([^,]*),[^,]*,[^,]*,[^,]*,[^,]*,([^,]*),$"
+
+local function is_sign(head, text)
+    local style, effect = head:match(DIALOGUE_FIELDS)
+    if not style then return true end  -- unexpected layout: hands off
+    if style:lower():find("sign", 1, true) or effect:match("%S") then return true end
+    for block in text:gmatch("{[^}]*}") do
+        if block:find("\\pos%s*%(") or block:find("\\move%s*%(") or block:find("\\org%s*%(")
+            or block:find("\\i?clip%s*%(") or block:find("\\p%s*[1-9]") then
+            return true
+        end
+    end
+    return false
+end
+
+-- Calls fn(head, lines) for every dialogue (non-sign) line of an ASS file;
+-- fn returns new lines or nil. Everything else stays byte-identical.
+local function each_dialogue(content, fn)
+    return each_line(content, function(line)
+        local head, text = line:match(DIALOGUE)
+        if not head or is_sign(head, text) then return line end
+        local lines = fn(ass_visual_lines(text))
+        return lines and head .. join_lines(lines) or line
+    end)
+end
+
+local RTL_CLASSES = { "marked", "pre-reversed", "plain" }
+
+local function count_rtl_votes(content)
+    local votes = { marked = 0, ["pre-reversed"] = 0, plain = 0 }
+    each_dialogue(content, function(lines)
+        for _, line in ipairs(lines) do
+            local facts = scan_line(visible_text(line))
+            if facts.vote then votes[facts.vote] = votes[facts.vote] + 1 end
+        end
+    end)
+    return votes
+end
+
+-- The class with the most votes; "tie" when two share it, "none" if no votes.
+local function majority(votes)
+    local class, best = "none", 0
+    for _, name in ipairs(RTL_CLASSES) do
+        if votes[name] > best then
+            class, best = name, votes[name]
+        elseif votes[name] == best and best > 0 then
+            class = "tie"
+        end
+    end
+    return class
+end
+
+-- U+202B in front of the first text segment of every unmarked visual line
+-- whose first strong character is right-to-left. Returns content, count.
+local function insert_rtl_marks(content)
+    local changed = 0
+    local fixed = each_dialogue(content, function(lines)
+        local touched = false
+        for _, line in ipairs(lines) do
+            local facts = scan_line(visible_text(line))
+            if facts.strong == "rtl" and not facts.marked then
+                for _, piece in ipairs(line) do
+                    if piece.text and piece.text:find("%S") then
+                        piece.text = RLE .. piece.text
+                        touched = true
+                        break
+                    end
+                end
+            end
+        end
+        if touched then
+            changed = changed + 1
+            return lines
+        end
+    end)
+    return fixed, changed
+end
+
+-- Returns the content (U+202B added for class plain) and a report:
+-- { class = "none"|"tie"|<one of RTL_CLASSES>, votes = {...}, changed = n }.
+local function fix_rtl_punctuation(content)
+    local votes = count_rtl_votes(content)
+    local report = { class = majority(votes), votes = votes, changed = 0 }
+    if report.class ~= "plain" then return content, report end
+    content, report.changed = insert_rtl_marks(content)
+    return content, report
+end
+
+local function describe_rtl(report)
+    local v = report.votes
+    return string.format("right-to-left check: %s (marked %d, pre-reversed %d, plain %d); %d dialogue lines changed",
+        report.class, v.marked, v["pre-reversed"], v.plain, report.changed)
+end
+
+-- sub-text carries plain text: any Arabic letter (U+0600..U+06FF, U+0750..U+077F).
+local function has_arabic(text)
+    return type(text) == "string" and text:find("[\216-\219\221][\128-\191]") ~= nil
 end
 
 -- ── track handling ────────────────────────────────────────────────────
@@ -480,6 +728,17 @@ local function finish_track(track, ext, key, content)
     end
     local text, write_back = to_utf8(content, encoding)
     local cleaned = sanitize_content(text, ext)
+    local entities_fixed = cleaned ~= text
+    local rtl = { changed = 0 }
+    if ext == "ass" then
+        cleaned, rtl = fix_rtl_punctuation(cleaned)
+        msg.info("sub_sanitizer: " .. describe_rtl(rtl))
+        if rtl.changed > 0 and write_back then
+            -- Windows-1256 has no byte for U+202B: the whole file goes out as UTF-8
+            write_back = nil
+            msg.info("sub_sanitizer: Windows-1256 file converted to UTF-8")
+        end
+    end
     if cleaned == text then
         msg.info("sub_sanitizer: track is already clean")
         return false
@@ -492,6 +751,8 @@ local function finish_track(track, ext, key, content)
         return false
     end
     if is_temp then temp_files[out_path] = true end
+    -- the copy is Arabic ASS too: selecting it must not start another pass
+    state.processed["ext:" .. out_path] = true
     msg.info("sub_sanitizer: cleaned track written to " .. out_path)
     -- the user may have moved to another track while ffmpeg ran: add, don't select
     local current = mp.get_property_native("current-tracks/sub")
@@ -501,7 +762,10 @@ local function finish_track(track, ext, key, content)
     if o.remove_original then
         mp.commandv("sub-remove", track.id)
     end
-    mp.osd_message("Subtitles sanitized: HTML entities stripped", 2)
+    local done = {}
+    if entities_fixed then done[#done + 1] = "HTML entities stripped" end
+    if rtl.changed > 0 then done[#done + 1] = "right-to-left punctuation fixed" end
+    mp.osd_message("Subtitles sanitized: " .. table.concat(done, ", "), 2)
     return true
 end
 
@@ -532,10 +796,15 @@ local function sanitize_track(track)
     return true
 end
 
+-- Any Arabic ASS track is considered (its punctuation may need marks), as
+-- is any track with entity-like text. Arabic SRT alone does not trigger:
+-- mpv already lays it out with automatic direction.
 local function on_sub_text(_, text)
     if not o.enabled then return end
-    if not looks_unsanitized(text) then return end
-    sanitize_track(mp.get_property_native("current-tracks/sub"))
+    local track = mp.get_property_native("current-tracks/sub")
+    local ass = type(track) == "table" and codec_ext_map[track.codec] == "ass"
+    if not looks_unsanitized(text) and not (ass and has_arabic(text)) then return end
+    sanitize_track(track)
 end
 
 mp.observe_property("sub-text", "string", on_sub_text)
@@ -554,6 +823,8 @@ _G.sub_sanitizer = {
     temp_files = temp_files,
     decode_entities = decode_entities,
     sanitize_content = sanitize_content,
+    fix_rtl_punctuation = fix_rtl_punctuation,
+    has_arabic = has_arabic,
     looks_unsanitized = looks_unsanitized,
     sanitize_track = sanitize_track,
     state = state,
