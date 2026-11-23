@@ -82,11 +82,11 @@ position 2: the order is right, item 5 plays on uninterrupted and keeps its mark
 
 ### Deployer, test-first (contracts/uosc-reorder-patch.md "Deployer integration"; research R1, R2)
 
-- [ ] T015 [US1] Write the integration tests in `tests/test_deploy_uosc_reorder_patch.py`: the real `deploy()` with a staged uosc; patch runs on `prepared` before `replace_items` (call-order spy, install and update); staged and nothing-staged; second update leaves live bytes unchanged; hash mismatch → update shows the patch once in the Warnings block with no `ui.warn`, exit 0, live `elements/Menu.lua` equals the fetched bytes (SC-008); install lists it under Warnings and exits 0; install `verify_callback` failure and update `os.replace` failure restore the old `scripts/`
-- [ ] T016 [US1] Add `prepare_hook=None` to `update_assets(...)` in `deploy/transaction.py`, called on the prepared tree before `asset_manifest`/`replace_items` (transaction.py:461-463)
-- [ ] T017 [US1] Give the fake `update_assets` in `tests/test_update_regenerates_mpv_conf.py` a `prepare_hook=None` parameter (the only existing test double that changes)
-- [ ] T018 [US1] Implement `_patch_prepared_uosc(prepared, staging, config_dir, lockfile)` in `deploy/deployer.py` per the patch contract (lazy `from tools.patch_uosc_playlist_reorder import apply`, staged/live source, version from the lockfile or `tx.MANIFEST` read as UTF-8 with the named exceptions, status → row table)
-- [ ] T019 [US1] In `deploy/deployer.py`: delete the local `from pathlib import Path` at :1455, wire `_patch_prepared_uosc` into `deploy()` (before `replace_items`) and `cmd_update()` (as `prepare_hook`), with update showing a skipped patch only through `ui.summary`; T015 passes
+- [X] T015 [US1] Write the integration tests in `tests/test_deploy_uosc_reorder_patch.py`: the real `deploy()` with a staged uosc; patch runs on `prepared` before `replace_items` (call-order spy, install and update); staged and nothing-staged; second update leaves live bytes unchanged; hash mismatch → update shows the patch once in the Warnings block with no `ui.warn`, exit 0, live `elements/Menu.lua` equals the fetched bytes (SC-008); install lists it under Warnings and exits 0; install `verify_callback` failure and update `os.replace` failure restore the old `scripts/`
+- [X] T016 [US1] Add `prepare_hook=None` to `update_assets(...)` in `deploy/transaction.py`, called on the prepared tree before `asset_manifest`/`replace_items` (transaction.py:461-463)
+- [X] T017 [US1] Give the fake `update_assets` in `tests/test_update_regenerates_mpv_conf.py` a `prepare_hook=None` parameter (the only existing test double that changes)
+- [X] T018 [US1] Implement `_patch_prepared_uosc(prepared, staging, config_dir, lockfile)` in `deploy/deployer.py` per the patch contract (lazy `from tools.patch_uosc_playlist_reorder import apply`, staged/live source, version from the lockfile or `tx.MANIFEST` read as UTF-8 with the named exceptions, status → row table)
+- [X] T019 [US1] In `deploy/deployer.py`: delete the local `from pathlib import Path` at :1455, wire `_patch_prepared_uosc` into `deploy()` (before `replace_items`) and `cmd_update()` (as `prepare_hook`), with update showing a skipped patch only through `ui.summary`; T015 passes
 
 ### Release check, test-first (contracts/uosc-release-check.md; research R8, R12; C-008)
 

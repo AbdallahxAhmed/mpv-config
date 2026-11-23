@@ -1271,6 +1271,39 @@ def _deploy_ytdlp_plugins_and_config(env, repo_dir):
         ui.warn(f"Notice: yt-dlp plugin deployment: {exc}")
 
 
+PLAYLIST_REORDER_ROW = "uosc-playlist-reorder-patch"
+
+
+def _uosc_version(lockfile, config_dir):
+    """The uosc tag being deployed: the fetch lockfile, else the live manifest."""
+    try:
+        return lockfile["scripts"]["uosc"]["version"]
+    except (KeyError, TypeError):
+        pass
+    try:
+        manifest = Path(config_dir, tx.MANIFEST).read_text(encoding="utf-8")
+        return json.loads(manifest)["scripts"]["uosc"]["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return "unknown"
+
+
+def _patch_prepared_uosc(prepared, staging, config_dir, lockfile):
+    """Patch the prepared uosc before the commit (spec 005); one result row."""
+    from tools.patch_uosc_playlist_reorder import apply
+
+    staged = (Path(staging) / "scripts" / "uosc" / "elements" / "Menu.lua").is_file()
+    source = "staged" if staged else "live"
+    result = apply(Path(prepared) / "scripts" / "uosc")
+    if result.status == "absent":
+        detail = "uosc not present in this deployment; nothing to patch"
+        return {"name": PLAYLIST_REORDER_ROW, "status": "skipped", "detail": detail}
+    if result.status == "skipped":
+        return {"name": PLAYLIST_REORDER_ROW, "status": "warn", "detail": result.detail}
+    done = "patched" if result.status == "patched" else "already patched"
+    version = _uosc_version(lockfile, config_dir)
+    return {"name": PLAYLIST_REORDER_ROW, "status": "ok", "detail": f"{done} ({source}, {version})"}
+
+
 def deploy(
     staging_dir,
     env,
@@ -1311,6 +1344,9 @@ def deploy(
     results = []
     with tempfile.TemporaryDirectory(prefix=".mpv-install-prepared-", dir=parent) as prepared:
         tx.prepare_assets(config_dir, staging_dir, repo_dir, prepared)
+        results.append(
+            _patch_prepared_uosc(Path(prepared), Path(staging_dir), Path(config_dir), lockfile)
+        )
         names = list(tx.ASSET_DIRS)
         newly_managed = []
         opts_src = os.path.join(config_src, "script-opts")
@@ -1452,8 +1488,6 @@ def deploy(
         results.extend(_migrate_deployed_configs(config_dir, env, audit_log))
         # Apply uosc Timeline mouse-leave and TopBar fast-close patches
         try:
-            from pathlib import Path
-
             from tools.patch_uosc_timeline_thumb import run_patcher
             from tools.patch_uosc_topbar import run_patcher as run_topbar_patcher
 
@@ -3347,7 +3381,21 @@ def cmd_update(args):
             ui.summary(fetch_results)
             _require_complete_fetch(fetch_results)
             ui.header("Applying Update", key="deploy")
-            backup = tx.update_assets(config_dir, staging, str(REPO_ROOT), lockfile)
+            patch_rows = []
+            backup = tx.update_assets(
+                config_dir,
+                staging,
+                str(REPO_ROOT),
+                lockfile,
+                prepare_hook=lambda p: patch_rows.append(
+                    _patch_prepared_uosc(Path(p), Path(staging), Path(config_dir), lockfile)
+                ),
+            )
+        for row in patch_rows:
+            if row["status"] != "warn":
+                ui.info(f"{row['name']}: {row['detail']}")
+        # The Warnings block is the only place a skipped patch is shown (SC-008).
+        ui.summary(patch_rows)
         audit_log = _audit_log_for(env)
         audit_log.start_session("update", env)
         if backup:

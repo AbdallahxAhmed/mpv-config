@@ -453,13 +453,20 @@ def asset_manifest(metadata, staging_dir, repo_dir, prepared):
     return result
 
 
-def update_assets(config_dir, staging_dir, repo_dir, metadata):
-    """Apply a backed-up scripts/shaders/fonts update; config text is untouched."""
+def update_assets(config_dir, staging_dir, repo_dir, metadata, prepare_hook=None):
+    """Apply a backed-up scripts/shaders/fonts update; config text is untouched.
+
+    ``prepare_hook(prepared)`` runs on the complete prepared tree (a str path)
+    before it is hashed and swapped in, so a patch it applies is committed, or
+    rolled back, together with everything else.
+    """
     config_dir = config_path(config_dir)
     assert_disjoint(config_dir, staging_dir, repo_dir)
     parent = os.path.dirname(config_dir)
     with tempfile.TemporaryDirectory(prefix=".mpv-prepared-", dir=parent) as prepared:
         prepare_assets(config_dir, staging_dir, repo_dir, prepared)
+        if prepare_hook is not None:
+            prepare_hook(prepared)
         manifest = asset_manifest(metadata, staging_dir, repo_dir, prepared)
         _write_json(os.path.join(prepared, MANIFEST), manifest)
         backup = snapshot_config(config_dir)

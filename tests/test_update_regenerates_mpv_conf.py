@@ -142,7 +142,7 @@ class UpdateCommandTests(QuietDeployerTestCase):
         results = [{"name": s["name"], "status": "ok"} for s in deployer.SCRIPTS]
         results.append({"name": deployer.SHADERS["name"], "status": "ok"})
 
-        def update_assets(config_dir, staging, repo_dir, lockfile):
+        def update_assets(config_dir, staging, repo_dir, lockfile, prepare_hook=None):
             shutil.copytree(config_dir, self.backup_dir, dirs_exist_ok=True)
             return str(self.backup_dir)
 
