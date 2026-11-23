@@ -75,7 +75,6 @@ type Event struct {
 	Groups    []PlanGroup    `json:"groups"`
 	Succeeded int            `json:"succeeded"`
 	Skipped   int            `json:"skipped"`
-	Warnings  int            `json:"warnings"`
 	Failed    []FailedResult `json:"failed"`
 
 	// progress / command / prompt
