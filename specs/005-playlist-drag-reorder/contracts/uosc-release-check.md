@@ -94,7 +94,7 @@ jobs:
 | Test | Setup | Expect |
 |---|---|---|
 | pass on 5.13.0 | `check_dir(tests/fixtures/uosc-5.13.0, "5.13.0")` | 0 |
-| broken anchor (SC-009) | copy the fixture to a temp dir, change one byte inside the `menu-key` anchor | 1; output contains `5.13.0`, `menu-esc` and `elements/Menu.lua` |
+| broken anchor (SC-009) | copy the fixture to a temp dir, change one byte inside the `menu-key` anchor | 1; output contains `5.13.0`, `menu-key` and `elements/Menu.lua` |
 | hung server | local `http.server` on 127.0.0.1: sends headers with `Content-Length: 1048576`, then sleeps 30 s; `run(api_url=…, download_timeout=1)` | 2 within 5 s; output contains `did not finish within 1 s` |
 | trickling body | same, but sends 1 body byte every 0.2 s | 2 within 5 s; same text |
 | trickled headers | sends the status line and headers 1 byte every 0.2 s | 2 within 5 s; same text |

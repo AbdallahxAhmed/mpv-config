@@ -1,0 +1,22 @@
+name: uosc release check
+
+# Spec 005 (C-008): warn when a new uosc release breaks an anchor of the
+# playlist-reorder patch, before anyone bumps the pin in deploy/registry.py.
+on:
+  schedule: [{cron: '41 5 * * 1'}]   # weekly, Monday 05:41 UTC
+  workflow_dispatch:
+
+permissions: {contents: read}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Check latest uosc release against the reorder patch anchors
+        timeout-minutes: 5
+        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+        run: python -m tools.check_uosc_release --latest --download-timeout 120

@@ -90,9 +90,9 @@ position 2: the order is right, item 5 plays on uninterrupted and keeps its mark
 
 ### Release check, test-first (contracts/uosc-release-check.md; research R8, R12; C-008)
 
-- [ ] T020 [P] [US1] Write `tests/test_uosc_release_check.py` per the contract test table: SC-009 on the fixture (and a broken `menu-key` anchor), hung server, trickled body, trickled headers → exit 2 within 5 s, HTTP 500, invalid zip, missing asset or member, token sent only to `api.github.com`, CLI smoke with a list argv
-- [ ] T021 [US1] Implement `tools/check_uosc_release.py` (`API_URL`, `run(api_url, download_timeout)`, one 120 s monotonic deadline with per-read timeouts and the `threading.Timer` watchdog, in-memory zip, `fetcher` limits, exact output strings with `{N:g}`); T020 passes
-- [ ] T022 [US1] Add `.github/workflows/uosc-release-check.yml` (weekly and `workflow_dispatch`, `permissions: contents: read`, step `timeout-minutes: 5`, job `timeout-minutes: 10`)
+- [X] T020 [P] [US1] Write `tests/test_uosc_release_check.py` per the contract test table: SC-009 on the fixture (and a broken `menu-key` anchor), hung server, trickled body, trickled headers → exit 2 within 5 s, HTTP 500, invalid zip, missing asset or member, token sent only to `api.github.com`, CLI smoke with a list argv
+- [X] T021 [US1] Implement `tools/check_uosc_release.py` (`API_URL`, `run(api_url, download_timeout)`, one 120 s monotonic deadline with per-read timeouts and the `threading.Timer` watchdog, in-memory zip, `fetcher` limits, exact output strings with `{N:g}`); T020 passes
+- [X] T022 [US1] Add `.github/workflows/uosc-release-check.yml` (weekly and `workflow_dispatch`, `permissions: contents: read`, step `timeout-minutes: 5`, job `timeout-minutes: 10`)
 
 **Checkpoint**: User Story 1 works end to end in tests: payload, patcher, deployer,
 summary and release check, with every suite green.
