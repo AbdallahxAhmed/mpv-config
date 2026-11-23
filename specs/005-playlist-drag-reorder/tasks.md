@@ -101,12 +101,12 @@ summary and release check, with every suite green.
 
 ## Phase 4: Polish, verification and retirement
 
-- [ ] T023 [P] Add the AST scan to `tests/test_repo_hygiene.py`: no `shell=True` keyword in tracked `*.py` outside `VENDORED_PREFIXES`, reusing `tracked`
-- [ ] T024 Run quickstart §1: all Python suites (project venv, `PYTHONPATH=src`), `python tests/run_lua_tests.py`, `ruff check` and `ruff format --check`; all green
-- [ ] T025 Run quickstart §2 (patcher by hand on a throwaway copy) and §3 (deploy twice; the second run changes nothing, FR-023)
+- [X] T023 [P] Add the AST scan to `tests/test_repo_hygiene.py`: no `shell=True` keyword in tracked `*.py` outside `VENDORED_PREFIXES`, reusing `tracked`
+- [X] T024 Run quickstart §1: all Python suites (project venv, `PYTHONPATH=src`), `python tests/run_lua_tests.py`, `ruff check` and `ruff format --check`; all green
+- [X] T025 Run quickstart §2 (patcher by hand on a throwaway copy) and §3 (deploy twice; the second run changes nothing, FR-023)
 - [ ] T026 Maintainer, on KDE Wayland: quickstart §4 steps 1-7 (SC-001, SC-004, SC-007, FR-006, step 5 Esc/menu key/Space/focus loss with the button held, step 6 off-window check with outcome (a) or (b) recorded, step 7 SC-003)
 - [ ] T027 Maintainer, on Windows: repeat T026 (C-001 parity; steps 5-7 at least)
-- [ ] T028 Run quickstart §5 (release check against the fixture, and `--latest` with network)
+- [X] T028 Run quickstart §5 (release check against the fixture, and `--latest` with network)
 - [ ] T029 Only after T026 and T027 pass: delete `tools/patch_uosc_playlist_drag.py` and `tests/test_patch_uosc_playlist_drag.py` (C-006)
 - [ ] T030 [P] Mark `docs/superpowers/specs/2026-09-09-uosc-playlist-drag-drop-design.md` and `docs/superpowers/plans/2026-09-09-uosc-playlist-drag-drop.md` superseded by spec 005 (C-006)
 - [ ] T031 Add the feature to `CHANGELOG.md`

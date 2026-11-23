@@ -5,6 +5,7 @@ repeat so they run in CI on every push: no key material is tracked, ``.gitignore
 blocks it, and no tracked file carries a hard-coded personal path.
 """
 
+import ast
 import re
 import shutil
 import subprocess
@@ -44,6 +45,17 @@ MAX_SCANNED_BYTES = 5_000_000
 def _is_placeholder(account):
     lowered = account.lower()
     return lowered in GENERIC_ACCOUNTS or lowered.startswith(PLACEHOLDER_PREFIXES)
+
+
+def _shell_true_lines(source):
+    """Line numbers of every call that passes the keyword shell=True."""
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "shell" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+    ]
 
 
 class RepositoryHygieneTests(unittest.TestCase):
@@ -99,6 +111,16 @@ class RepositoryHygieneTests(unittest.TestCase):
             [],
             "Hard-coded personal paths found; use Path.home(), os.environ or relative links",
         )
+
+    def test_no_shell_true_in_tracked_python(self):
+        self.assertEqual([1], _shell_true_lines("run(['x'], shell=True)"))  # the scan works
+        offenders = [
+            f"{name}:{line}"
+            for name, text in self.tracked_texts(skip_vendored=True)
+            if name.endswith(".py")
+            for line in _shell_true_lines(text)
+        ]
+        self.assertEqual(offenders, [], "Pass an argument list instead of shell=True")
 
 
 if __name__ == "__main__":
