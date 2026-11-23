@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/005-playlist-drag-reorder/plan.md
+at specs/006-player-ui-themes/plan.md
 <!-- SPECKIT END -->
 
 ## Agent context — current status (refreshed 2026-10-26, Arabic keyboard: AHK scan-code helper & clean layout twins shipped)
