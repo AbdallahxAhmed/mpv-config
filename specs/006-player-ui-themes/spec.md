@@ -192,7 +192,7 @@ Where each of today's controls goes. "More" means a row of the new More menu;
 **Deployment**
 
 - **FR-015**: A fresh install MUST get the default look. `mpv-config update` MUST keep an existing `ui_appearance.conf`. An existing install without one MUST move to the default look on its first update. `uosc.conf` and `input.conf` MUST NOT be edited by the deployer for this feature. A plain `mpv-config uninstall` removes `ui_appearance.conf` with the rest of `script-opts/`, as it does for the other saved player choices.
-- **FR-016**: A test MUST check, against the pinned uosc 5.13.0 sources, that every uosc option a look sets exists and that uosc still registers its runtime option handler. The weekly uosc release check (spec 005, C-008) MUST run the same check on the latest release, and a pin bump MUST NOT land unless it passes.
+- **FR-016**: A test MUST check, against a committed facts file extracted from the pinned uosc 5.13.0 (option names and defaults, colour and opacity sub-keys, binding names, the SHA-256 of `main.lua`; no copy of `main.lua` is committed, decided 2026-11-24), that every uosc option and sub-key a look sets exists and that uosc still registers its runtime option handler. The weekly uosc release check (spec 005, C-008) MUST regenerate those facts from the downloaded release and run the same check, and a pin bump MUST NOT land unless it passes.
 
 **More menu (US3)**
 
@@ -240,7 +240,7 @@ Where each of today's controls goes. "More" means a row of the new More menu;
 - **SC-005**: An automated test checks that every More row's command equals an existing binding, button command or uosc binding (FR-018), and that conditional rows follow FR-019.
 - **SC-006**: Every uosc file is byte-identical to a deploy from the commit before this feature.
 - **SC-007**: An automated test generates the options of every look and checks each against the US1 table and FR-011 (owned keys only, complete `color` and `opacity` values).
-- **SC-008**: An automated test of the deployer shows: a fresh install gets `ui_appearance.conf` with the defaults; an update keeps a changed one; an update of an install without one adds the defaults (FR-015).
+- **SC-008**: An automated test of the deployer shows: a fresh install gets `ui_appearance.conf` with the defaults; an update keeps a changed one; an update of an install without one adds the defaults (FR-015; `mpv-config update` needs a seeding migration for this, plan).
 - **SC-009**: Both test suites pass.
 
 ## Not in this spec

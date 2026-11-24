@@ -3,8 +3,10 @@
 Run on KDE Wayland (143.98 Hz) and on Windows after `mpv-config update`. Use a
 local 23.976 fps file with chapters, and one YouTube URL.
 
-1. **Default look (US1-1, US1-2).** Delete `script-opts/ui_appearance.conf`, run
-   `mpv-config update`, open the local file. Move the pointer to the bottom:
+1. **Default look (US1-1, US1-2, SC-006).** Note the hash of every file under `scripts/uosc/`
+   (`sha256sum` on Linux, `Get-FileHash` on Windows). Delete `script-opts/ui_appearance.conf`,
+   run `mpv-config update`: the file is back with the defaults, and every uosc hash is unchanged.
+   Open the local file. Move the pointer to the bottom:
    prev, round play/pause, next at the left; speed, subtitles, audio, playlist,
    More, fullscreen at the right; amber icons on no box. Move away: a 3 px line
    stays. Move back near: the timeline grows and shows both times.
@@ -14,7 +16,8 @@ local 23.976 fps file with chapters, and one YouTube URL.
    Bar: leave the window with the pointer, the controls stay, each on a box.
    Focus: play/pause is centred; only playlist, More, fullscreen at the right.
 3. **Restart (US2-3, SC-003).** Pick bar / slate / teal / compact, quit, start
-   mpv with the file: that look. Start `mpv` with no file (idle): note whether
+   mpv with the file: that look. Repeat the restart 10 times, with `mpv-config update`
+   run before the 5th and the 10th: the look holds every time. Start `mpv` with no file (idle): note whether
    the old toolbar flashes before the theme applies (R10).
 4. **Update (US2-4).** Run `mpv-config update`, start mpv: the look from step 3.
 5. **Bad file (US2-5).** Write `style=huge` into `ui_appearance.conf`, start
@@ -23,8 +26,9 @@ local 23.976 fps file with chapters, and one YouTube URL.
 6. **Save failure (FR-014).** Make `ui_appearance.conf` read-only, pick a value:
    it applies, and an on-screen message says it was not saved. Restore the file.
 7. **More menu (US3).** On the local file, open every row and compare with its
-   key (Subtitles = `Ctrl+C`, Audio = `a`, Paste = `Ctrl+V`, All shortcuts = `F9`,
-   Anime4K mode = `Ctrl+1`…, Stable volume = `F8`). Stream quality and Download
+   key or today's button (Subtitles = the CC button / `Ctrl+C`, Audio = the audio-tracks
+   button, Paste = `Ctrl+V`, All shortcuts = `F9`, Anime4K mode = `Ctrl+1`…, Stable volume =
+   the stable-volume button). Stream quality and Download
    video are absent. On the URL they are present. Full uosc menu shows chapters,
    screenshot, aspect ratio, audio devices, Quit.
 8. **Narrow window (Edge Cases).** Resize to 480 px wide in each style: no
