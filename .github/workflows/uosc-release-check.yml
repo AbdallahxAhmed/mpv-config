@@ -16,7 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Check latest uosc release against the reorder patch anchors
+      - name: Check latest uosc release (reorder anchors, theme options)
         timeout-minutes: 5
         env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
         run: python -m tools.check_uosc_release --latest --download-timeout 120
+      - name: Compare pinned uosc 5.13.0 options
+        timeout-minutes: 5
+        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+        run: python -m tools.check_uosc_release --tag 5.13.0 --compare-options tests/fixtures/uosc-5.13.0/uosc-options.json --download-timeout 120
