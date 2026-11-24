@@ -173,7 +173,19 @@ end)
 
 -- ── T002: script-level tests for ui_appearance.lua ────────────────────
 
-local function create_script_harness(raw_opts, script_opts)
+local function sandbox_conf(initial_content)
+    local tmpdir = os.getenv('TEMP') or os.getenv('TMPDIR') or os.getenv('TMP') or '/tmp'
+    local sep = (tmpdir:sub(-1) == '/' or tmpdir:sub(-1) == '\\') and '' or '/'
+    local path = tmpdir .. sep .. 'test_ui_appearance_' .. tostring(os.time()) .. '_' .. tostring(math.random(100000, 999999)) .. '.conf'
+    if initial_content then
+        local f = assert(io.open(path, 'w'))
+        f:write(initial_content)
+        f:close()
+    end
+    return path
+end
+
+local function create_script_harness(raw_opts, script_opts, conf_path)
     local h = {
         props = {
             ['script-opts'] = script_opts or {},
@@ -181,14 +193,27 @@ local function create_script_harness(raw_opts, script_opts)
         warnings = {},
         commands = {},
         messages = {},
+        osd_messages = {},
         set_property_native_calls = 0,
+        conf_path = conf_path,
+        conf_exists = conf_path and true or false,
     }
+    if conf_path then
+        local f = io.open(conf_path, 'r')
+        if f then
+            f:close()
+            h.conf_exists = true
+        else
+            h.conf_exists = false
+        end
+    end
     _G.mp = {
         log = function() end,
         msg = {
             warn = function(msg) h.warnings[#h.warnings + 1] = msg end,
             info = function() end,
             debug = function() end,
+            error = function() end,
         },
         get_property_native = function(k, d)
             local v = h.props[k]
@@ -201,15 +226,38 @@ local function create_script_harness(raw_opts, script_opts)
             end
             h.props[k] = v
         end,
+        get_property = function(k, d)
+            if k == 'config-dir' and h.conf_path then
+                return (h.conf_path:match('^(.*[/\\])[^/\\]+$') or './')
+            end
+            local v = h.props[k]
+            if v == nil then return d end
+            return v
+        end,
         commandv = function(...)
             h.commands[#h.commands + 1] = { ... }
+        end,
+        command_native = function(cmd)
+            if type(cmd) == 'table' and cmd[1] == 'expand-path' then
+                return h.conf_path or '~~/script-opts/ui_appearance.conf'
+            end
+            return nil
         end,
         register_script_message = function(name, fn)
             h.messages[name] = fn
         end,
+        osd_message = function(text, timeout)
+            h.osd_messages[#h.osd_messages + 1] = {text = text, timeout = timeout}
+        end,
         find_config_file = function(path)
             if path == 'scripts/modules/looks.lua' then
                 return LOOKS_MODULE
+            end
+            if path == 'script-opts/ui_appearance.conf' then
+                if h.conf_exists and h.conf_path then
+                    return h.conf_path
+                end
+                return nil
             end
             return nil
         end,
@@ -273,21 +321,23 @@ test('open-more sends one script-message-to uosc open-menu with P1 rows', functi
     local menu = utils.parse_json(cmd[4])
     eq(menu.type, 'ui_appearance_more')
     eq(menu.title, 'More')
-    eq(#menu.items, 4)
+    eq(#menu.items, 5)
 
-    eq(menu.items[1].title, 'Paste link')
-    eq(menu.items[1].hint, 'Ctrl+V')
-    eq(menu.items[1].value, 'script-binding smart_paste/paste-to-open')
+    eq(menu.items[1].title, 'Appearance')
 
-    eq(menu.items[2].title, 'Stable volume')
-    eq(menu.items[2].value, 'script-message-to player_toolbar toggle-stable-volume')
+    eq(menu.items[2].title, 'Paste link')
+    eq(menu.items[2].hint, 'Ctrl+V')
+    eq(menu.items[2].value, 'script-binding smart_paste/paste-to-open')
 
-    eq(menu.items[3].title, 'Full uosc menu')
-    eq(menu.items[3].value, 'script-binding uosc/menu-blurred')
+    eq(menu.items[3].title, 'Stable volume')
+    eq(menu.items[3].value, 'script-message-to player_toolbar toggle-stable-volume')
 
-    eq(menu.items[4].title, 'All shortcuts')
-    eq(menu.items[4].hint, 'F9')
-    eq(menu.items[4].value, 'script-message-to help_overlay help')
+    eq(menu.items[4].title, 'Full uosc menu')
+    eq(menu.items[4].value, 'script-binding uosc/menu-blurred')
+
+    eq(menu.items[5].title, 'All shortcuts')
+    eq(menu.items[5].hint, 'F9')
+    eq(menu.items[5].value, 'script-message-to help_overlay help')
 end)
 
 -- ── T003: contrast test from research R6 ──────────────────────────────
@@ -346,6 +396,273 @@ test('contrast model satisfies WCAG thresholds across all 15 background x accent
         end
     end
     eq(count, 15, 'total background x accent pairs checked')
+end)
+
+test('more_menu puts Appearance first with Style, Background, Accent, Size marking current look', function()
+    local look = {style = 'bar', background = 'black', accent = 'teal', size = 'compact'}
+    local menu = looks.more_menu(look)
+    eq(menu.type, 'ui_appearance_more')
+    eq(menu.title, 'More')
+    eq(#menu.items, 5)
+
+    local app = menu.items[1]
+    eq(app.title, 'Appearance')
+    assert(type(app.items) == 'table', 'Appearance items must be table')
+    eq(#app.items, 4)
+
+    local expected_fields = {
+        {field = 'style', title = 'Style', choices = looks.CHOICES.style, current = 'bar'},
+        {field = 'background', title = 'Background', choices = looks.CHOICES.background, current = 'black'},
+        {field = 'accent', title = 'Accent', choices = looks.CHOICES.accent, current = 'teal'},
+        {field = 'size', title = 'Size', choices = looks.CHOICES.size, current = 'compact'},
+    }
+
+    for f_idx, exp in ipairs(expected_fields) do
+        local sub = app.items[f_idx]
+        eq(sub.title, exp.title)
+        eq(#sub.items, #exp.choices)
+        for c_idx, val in ipairs(exp.choices) do
+            local item = sub.items[c_idx]
+            eq(item.title, val)
+            eq(item.value, 'script-message-to ui_appearance set ' .. exp.field .. ' ' .. val)
+            eq(item.keep_open, true)
+            if val == exp.current then
+                eq(item.active, true)
+                eq(item.hint, nil, 'active row must not carry hint')
+            else
+                eq(item.active, nil)
+            end
+        end
+    end
+
+    -- P1 rows follow unchanged
+    eq(menu.items[2].title, 'Paste link')
+    eq(menu.items[2].hint, 'Ctrl+V')
+    eq(menu.items[3].title, 'Stable volume')
+    eq(menu.items[4].title, 'Full uosc menu')
+    eq(menu.items[5].title, 'All shortcuts')
+    eq(menu.items[5].hint, 'F9')
+end)
+
+-- ── T019 & T020: pick tests and windows save tests ───────────────────
+
+test('set writes file before its one script-opts write and sends update-menu', function()
+    local conf = sandbox_conf(looks.serialize(looks.DEFAULTS))
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, conf)
+
+    local events = {}
+    local orig_io_open = io.open
+    _G.io.open = function(path, mode)
+        if path == conf and mode == 'w' then
+            events[#events + 1] = 'file_open'
+            local f = orig_io_open(path, mode)
+            return {
+                write = function(self, text)
+                    events[#events + 1] = 'file_write'
+                    return f:write(text)
+                end,
+                close = function(self)
+                    events[#events + 1] = 'file_close'
+                    return f:close()
+                end,
+            }
+        end
+        return orig_io_open(path, mode)
+    end
+
+    local orig_set_prop = mp.set_property_native
+    mp.set_property_native = function(k, v)
+        if k == 'script-opts' then
+            events[#events + 1] = 'script_opts'
+        end
+        return orig_set_prop(k, v)
+    end
+
+    dofile(SCRIPT)
+    events = {}
+    local set_calls_before = h.set_property_native_calls
+    local cmds_before = #h.commands
+
+    assert(h.messages['set'] ~= nil, 'set message not registered')
+    h.messages['set']('style', 'bar')
+
+    _G.io.open = orig_io_open
+    mp.set_property_native = orig_set_prop
+
+    local write_idx, opts_idx
+    for i, ev in ipairs(events) do
+        if ev == 'file_write' and not write_idx then write_idx = i end
+        if ev == 'script_opts' and not opts_idx then opts_idx = i end
+    end
+    assert(write_idx ~= nil, 'file write did not occur')
+    assert(opts_idx ~= nil, 'script-opts write did not occur')
+    assert(write_idx < opts_idx, 'file write must happen before script-opts write')
+
+    local expected_look = {style = 'bar', background = 'dark', accent = 'amber', size = 'comfortable'}
+    local f = io.open(conf, 'r')
+    local content = f:read('*a')
+    f:close()
+    eq(content, looks.serialize(expected_look))
+
+    eq(h.set_property_native_calls, set_calls_before + 1)
+    eq(h.props['script-opts']['uosc-controls_persistency'], 'idle,windowed')
+
+    eq(#h.commands, cmds_before + 1)
+    local cmd = h.commands[#h.commands]
+    eq(cmd[1], 'script-message-to')
+    eq(cmd[2], 'uosc')
+    eq(cmd[3], 'update-menu')
+    local utils = require 'mp.utils'
+    local menu = utils.parse_json(cmd[4])
+    eq(menu.type, 'ui_appearance_more')
+    eq(menu.items[1].items[1].items[2].active, true)
+
+    pcall(os.remove, conf)
+end)
+
+test('three quick picks give three writes and the last one wins', function()
+    local conf = sandbox_conf(looks.serialize(looks.DEFAULTS))
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, conf)
+    dofile(SCRIPT)
+    local set_calls_before = h.set_property_native_calls
+
+    assert(h.messages['set'] ~= nil, 'set message not registered')
+    h.messages['set']('style', 'bar')
+    h.messages['set']('accent', 'teal')
+    h.messages['set']('style', 'focus')
+
+    eq(h.set_property_native_calls, set_calls_before + 3)
+
+    local expected_look = {style = 'focus', background = 'dark', accent = 'teal', size = 'comfortable'}
+    local f = io.open(conf, 'r')
+    local content = f:read('*a')
+    f:close()
+    eq(content, looks.serialize(expected_look))
+
+    local focus_opts = looks.uosc_options(expected_look)
+    for k, v in pairs(focus_opts) do
+        eq(h.props['script-opts'][k], v)
+    end
+
+    pcall(os.remove, conf)
+end)
+
+test('failed save shows osd message and still applies look', function()
+    local conf = sandbox_conf(looks.serialize(looks.DEFAULTS))
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, conf)
+    dofile(SCRIPT)
+
+    local orig_io_open = io.open
+    _G.io.open = function(...) return nil, 'Permission denied' end
+
+    assert(h.messages['set'] ~= nil, 'set message not registered')
+    h.messages['set']('style', 'bar')
+
+    _G.io.open = orig_io_open
+
+    eq(#h.osd_messages, 1)
+    eq(h.osd_messages[1].text, 'Appearance not saved: Permission denied')
+    eq(h.osd_messages[1].timeout, 3)
+
+    eq(h.props['script-opts']['uosc-controls_persistency'], 'idle,windowed')
+
+    local cmd = h.commands[#h.commands]
+    eq(cmd[3], 'update-menu')
+
+    pcall(os.remove, conf)
+end)
+
+test('invalid field or value logs warning and does not write or apply', function()
+    local conf = sandbox_conf(looks.serialize(looks.DEFAULTS))
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, conf)
+    dofile(SCRIPT)
+
+    local writes_before = h.set_property_native_calls
+    local cmds_before = #h.commands
+    local warns_before = #h.warnings
+
+    assert(h.messages['set'] ~= nil, 'set message not registered')
+    h.messages['set']('style', 'huge')
+    eq(#h.warnings, warns_before + 1)
+    eq(h.set_property_native_calls, writes_before)
+    eq(#h.commands, cmds_before)
+
+    h.messages['set']('colour', 'amber')
+    eq(#h.warnings, warns_before + 2)
+    eq(h.set_property_native_calls, writes_before)
+    eq(#h.commands, cmds_before)
+
+    local f = io.open(conf, 'r')
+    local content = f:read('*a')
+    f:close()
+    eq(content, looks.serialize(looks.DEFAULTS))
+
+    pcall(os.remove, conf)
+end)
+
+test('windows save writes in place without os.rename or os.remove', function()
+    local conf = sandbox_conf(looks.serialize(looks.DEFAULTS))
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, conf)
+    dofile(SCRIPT)
+
+    local rename_calls = 0
+    local remove_calls = 0
+    local orig_rename = os.rename
+    local orig_remove = os.remove
+    _G.os.rename = function() rename_calls = rename_calls + 1; error('Windows rename failure') end
+    _G.os.remove = function() remove_calls = remove_calls + 1; error('Windows remove failure') end
+
+    assert(h.messages['set'] ~= nil, 'set message not registered')
+    -- 1. File already present
+    h.messages['set']('accent', 'teal')
+    eq(rename_calls, 0, 'os.rename should not be called')
+    eq(remove_calls, 0, 'os.remove should not be called')
+
+    local f = io.open(conf, 'r')
+    local content = f:read('*a')
+    f:close()
+    local expected1 = {style = 'calm', background = 'dark', accent = 'teal', size = 'comfortable'}
+    eq(content, looks.serialize(expected1))
+
+    -- 2. File absent (first save after deleted file)
+    orig_remove(conf)
+    h.conf_exists = false
+    h.messages['set']('style', 'bar')
+    eq(rename_calls, 0, 'os.rename should not be called')
+    eq(remove_calls, 0, 'os.remove should not be called')
+
+    f = io.open(conf, 'r')
+    assert(f ~= nil, 'file should have been created')
+    content = f:read('*a')
+    f:close()
+    local expected2 = {style = 'bar', background = 'dark', accent = 'teal', size = 'comfortable'}
+    eq(content, looks.serialize(expected2))
+
+    _G.os.rename = orig_rename
+    _G.os.remove = orig_remove
+    pcall(orig_remove, conf)
+end)
+
+test('open-more closes menu when ui_appearance_more is already open and opens otherwise', function()
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'})
+    dofile(SCRIPT)
+
+    -- Branch 1: menu not open
+    h.props['user-data/uosc/menu/type'] = nil
+    h.messages['open-more']()
+    eq(#h.commands, 1)
+    eq(h.commands[1][1], 'script-message-to')
+    eq(h.commands[1][2], 'uosc')
+    eq(h.commands[1][3], 'open-menu')
+
+    -- Branch 2: ui_appearance_more is open -> close-menu is sent instead
+    h.props['user-data/uosc/menu/type'] = 'ui_appearance_more'
+    h.messages['open-more']()
+    eq(#h.commands, 2)
+    eq(h.commands[2][1], 'script-message-to')
+    eq(h.commands[2][2], 'uosc')
+    eq(h.commands[2][3], 'close-menu')
+    eq(h.commands[2][4], 'ui_appearance_more')
 end)
 
 io.stdout:write(string.format('UI appearance tests passed: %d\n', total))

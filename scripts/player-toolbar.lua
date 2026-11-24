@@ -1283,6 +1283,14 @@ mp.observe_property('dwidth', 'number', function() publish_quality(false) end)
 mp.observe_property('track-list', 'native', function() publish_audio(false) end)
 mp.observe_property('current-tracks/audio/id', 'number', function() publish_audio(false) end)
 mp.observe_property('aid', 'string', function() publish_audio(false) end)
+local last_controls_size
+mp.observe_property('options/script-opts', 'native', function(_, opts)
+    local size = type(opts) == 'table' and opts['uosc-controls_size'] or nil
+    if size ~= last_controls_size then
+        last_controls_size = size
+        publish_quality(true)
+    end
+end)
 mp.register_event('file-loaded', function()
     publish_quality(true)
     publish_audio(true)

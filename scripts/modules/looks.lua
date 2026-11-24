@@ -306,7 +306,41 @@ local function contrast(fg_hex, bg_hex)
 end
 
 local function more_menu(look, state)
+    local validated_look = normalize(look)
+    local field_order = {'style', 'background', 'accent', 'size'}
+    local field_labels = {
+        style = 'Style',
+        background = 'Background',
+        accent = 'Accent',
+        size = 'Size',
+    }
+
+    local app_items = {}
+    for _, field in ipairs(field_order) do
+        local choices = CHOICES[field]
+        local sub_items = {}
+        for _, val in ipairs(choices) do
+            local item = {
+                title = val,
+                value = 'script-message-to ui_appearance set ' .. field .. ' ' .. val,
+                keep_open = true,
+            }
+            if val == validated_look[field] then
+                item.active = true
+            end
+            sub_items[#sub_items + 1] = item
+        end
+        app_items[#app_items + 1] = {
+            title = field_labels[field],
+            items = sub_items,
+        }
+    end
+
     local items = {
+        {
+            title = 'Appearance',
+            items = app_items,
+        },
         {
             title = 'Paste link',
             hint = 'Ctrl+V',

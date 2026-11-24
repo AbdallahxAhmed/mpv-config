@@ -776,4 +776,34 @@ test('download button polls status file and updates progress badge and tooltip',
     assert(h.buttons['download-video'].tooltip:find('complete') ~= nil)
     eq(h.periodic_timers[1].dead, true)
 end)
+test('options/script-opts observer republishes quality only when uosc-controls_size changes', function()
+    local h=harness()
+    assert(h.observers['options/script-opts']~=nil, 'options/script-opts observer not registered')
+    local before=h.sends
+    -- Changing an unrelated option does not republish
+    h.observers['options/script-opts']('options/script-opts', {
+        ['other_option'] = '123',
+        ['uosc-timeline_size'] = '40',
+    })
+    eq(h.sends, before)
+
+    -- Setting uosc-controls_size republishes quality once
+    h.observers['options/script-opts']('options/script-opts', {
+        ['uosc-controls_size'] = '44',
+    })
+    eq(h.sends, before + 1)
+
+    -- Same uosc-controls_size does not republish
+    h.observers['options/script-opts']('options/script-opts', {
+        ['uosc-controls_size'] = '44',
+        ['uosc-controls_margin'] = '8',
+    })
+    eq(h.sends, before + 1)
+
+    -- Changing uosc-controls_size to 36 republishes quality once
+    h.observers['options/script-opts']('options/script-opts', {
+        ['uosc-controls_size'] = '36',
+    })
+    eq(h.sends, before + 2)
+end)
 print('Toolbar tests passed: '..total)
