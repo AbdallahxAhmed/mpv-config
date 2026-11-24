@@ -41,7 +41,7 @@ pass. Then the reviewer's live check in a nested KWin session.
 ### Tests first
 
 - [ ] T001 [P] [US1] Write `tests/lua/test_ui_appearance.lua` with a harness modelled on `tests/lua/test_profile_picker.lua` (it stubs `mp`, `mp.options`, `mp.msg`, `mp.utils`). Cover:
-  - `looks.uosc_options` for all 30 looks: only `OWNED_KEYS` are produced, each `color` value has the 10 sub-keys in `OWNED_COLOR_KEYS` order, and each `opacity` value has the 19 sub-keys in `OWNED_OPACITY_KEYS` order;
+  - `looks.uosc_options` for all 90 looks (3 styles × 3 backgrounds × 5 accents × 2 sizes, enumerated from `CHOICES`; the test asserts the count is 90): only `OWNED_KEYS` are produced, each `color` value has the 10 sub-keys in `OWNED_COLOR_KEYS` order, and each `opacity` value has the 19 sub-keys in `OWNED_OPACITY_KEYS` order;
   - for the default look, the output is byte-equal to the literal block in data-model.md "Literal values for the default look";
   - the focus `controls` string is `space,prev,PLAY,next,space,items,MORE,fullscreen`, and bar differs from calm only in `opacity.controls=0.92` and `controls_persistency=idle,windowed`;
   - `merge_script_opts` keeps a foreign entry (`display_fps_guard-detected_fps=144`) and replaces every owned key;
@@ -67,12 +67,13 @@ pass. Then the reviewer's live check in a nested KWin session.
   - load `looks.lua` the way `player-toolbar.lua` loads `stream_policy.lua`;
   - load and apply per plan "Load and apply" steps 1 to 3;
   - register `open-more` per plan "More menu";
-  - the shuffle flag read (step 4) is added in T026.
+  - the shuffle flag read (step 4) is added in T028.
 - [ ] T008 [P] [US1] Edit `config/mpv.conf.template`: add the two `script-opts-append` lines directly after `osd-fonts-dir`.
 - [ ] T009 [P] [US1] Edit `deploy/deployer.py`: add `_migrate_ui_appearance_conf(conf_path, repo_config_dir, audit_log=None)` per plan "Seeding migration", using `pathlib`, `shutil.copyfile` and an audit `create` record. Register it in `_migrate_deployed_configs` as `seed-ui-appearance-conf`.
 - [ ] T010 [US1] Run both suites. Fix only the files touched in this phase.
 
 **Checkpoint (reviewer)**:
+- Run `PYTHONPATH=src python -m unittest discover -s tests` (project venv) and `python tests/run_lua_tests.py`, and report both results to the maintainer.
 - Review the diff against the plan and the allowlist, then commit P1.
 - Live check in a nested KWin session: mpv with uosc and the theme script shows calm. Then set `script-opts` to the focus look's `uosc-*` entries through mpv's IPC socket: the controls re-lay out while playing.
 - Stop before Phase 2 if the live check fails.
@@ -119,7 +120,7 @@ and weekly. No copy of `main.lua` is committed.
 - [ ] T017 [P] Edit `specs/005-playlist-drag-reorder/contracts/uosc-release-check.md`: add the new checks, problem lines, exit codes and flags.
 - [ ] T018 Run both suites.
 
-**Checkpoint (reviewer)**: run T014's command again and confirm the output is byte-identical. Then commit P2.
+**Checkpoint (reviewer)**: run `PYTHONPATH=src python -m unittest discover -s tests` (project venv) and `python tests/run_lua_tests.py`, and report both results to the maintainer; run T014's command again and confirm the output is byte-identical. Then commit P2.
 
 ---
 
@@ -140,15 +141,17 @@ the republish case in `tests/lua/test_player_toolbar.lua` pass.
   - `set style huge` and `set colour amber` write and apply nothing;
   - after each pick, one `update-menu` with type `ui_appearance_more` is sent;
   - `open-more` now starts with Appearance (Style, Background, Accent, Size, each submenu marking the current value, value rows `keep_open`), followed by the P1 rows.
-- [ ] T020 [P] [US2] Add to `tests/lua/test_player_toolbar.lua`: a change of the `uosc-controls_size` entry in `options/script-opts` calls the quality republish once; a change of any other entry does not.
+- [ ] T020 [US2] Add a Windows save test to `tests/lua/test_ui_appearance.lua`: stub `os.rename` and `os.remove` to fail whenever the target exists (Windows semantics) and record any call. With `ui_appearance.conf` already present, `set accent teal` must leave the file holding the new `serialize` text, and must call neither `os.rename` nor `os.remove`. Run the same test with the file absent (first save after a deleted file).
+- [ ] T021 [P] [US2] Add to `tests/lua/test_player_toolbar.lua`: a change of the `uosc-controls_size` entry in `options/script-opts` calls the quality republish once; a change of any other entry does not.
 
 ### Implementation
 
-- [ ] T021 [US2] In `scripts/modules/looks.lua`, add the Appearance submenu to `more_menu`. In `scripts/ui_appearance.lua`, register `set` per plan "A pick" steps 1 to 4, with the path lookup modelled on `profile_picker.lua` `mode_file_path`.
-- [ ] T022 [P] [US2] In `scripts/player-toolbar.lua`, observe `options/script-opts`, remember the last `uosc-controls_size` value, and call `publish_quality(true)` only when it changes (research R8).
-- [ ] T023 [US2] Run both suites.
+- [ ] T022 [US2] In `scripts/modules/looks.lua`, add the Appearance submenu to `more_menu`. In `scripts/ui_appearance.lua`, register `set` per plan "A pick" steps 1 to 4, with the path lookup modelled on `profile_picker.lua` `mode_file_path`.
+- [ ] T023 [US2] In `scripts/ui_appearance.lua`, make the save write in place: `io.open(path, 'w')` on the final path, one `write` of the whole text, then `close`. No temporary file, no `os.rename`, no `os.remove` (research R3). This is the pattern `profile_picker.lua` uses, which works on Windows.
+- [ ] T024 [P] [US2] In `scripts/player-toolbar.lua`, observe `options/script-opts`, remember the last `uosc-controls_size` value, and call `publish_quality(true)` only when it changes (research R8).
+- [ ] T025 [US2] Run both suites.
 
-**Checkpoint (reviewer)**: diff review, then commit P3.
+**Checkpoint (reviewer)**: run `PYTHONPATH=src python -m unittest discover -s tests` (project venv) and `python tests/run_lua_tests.py`, and report both results to the maintainer; diff review; then commit P3.
 
 ---
 
@@ -162,7 +165,7 @@ and the conditional rows.
 
 ### Tests first
 
-- [ ] T024 [P] [US3] Add More-menu tests to `tests/lua/test_ui_appearance.lua`:
+- [ ] T026 [P] [US3] Add More-menu tests to `tests/lua/test_ui_appearance.lua`:
   - **Allowed commands (SC-005)**: every row command is in the allowed set of research R5. Build the set inside the test from `config/input.conf.template` (with `no-osd ` stripped), the fixture `uosc-options.json` `bindings`, the `register_script_message` names in the four scripts, and the R5 extras.
   - **Conditional rows (FR-019)**:
     - a local file has no Stream quality and no Download video, and a stream has both;
@@ -172,13 +175,13 @@ and the conditional rows.
   - **Shuffle**:
     - `toggle-shuffle` runs `script-binding uosc/shuffle`, flips the mark and sends `update-menu`;
     - the flag starts as true when `uosc.conf` ends with `shuffle=yes`, and false when there is no file.
-- [ ] T025 [P] [US3] Add tests:
+- [ ] T027 [P] [US3] Add tests:
   - in `tests/lua/test_profile_picker.lua`: `user-data/anime4k/mode` equals the saved mode after load, after `set-mode B`, and after a `glsl-shaders` change that `on_shaders_changed` maps to a mode;
   - in `tests/lua/test_player_toolbar.lua`: `user-data/player_toolbar/stable-volume` is true or false after `publish()` with and without the filter.
 
 ### Implementation
 
-- [ ] T026 [US3] Complete `more_menu` in `scripts/modules/looks.lua` per the data-model.md table:
+- [ ] T028 [US3] Complete `more_menu` in `scripts/modules/looks.lua` per the data-model.md table:
   - labels, the 8 Anime4K modes in order `off fast A B C A+A B+B C+A` with `MODE_LABELS` hints, speeds `0.5×` to `2×`, and `keep_open` where listed;
   - Full uosc menu runs `script-binding uosc/menu-blurred`.
 
@@ -186,29 +189,47 @@ and the conditional rows.
   - read `state` per the contract;
   - register `toggle-shuffle`;
   - read the initial shuffle flag (plan "Load and apply" step 4).
-- [ ] T027 [P] [US3] In `scripts/profile_picker.lua`, set `user-data/anime4k/mode` to `state.mode` at load (after `read_mode`), in `apply_mode` and in `on_shaders_changed`.
-- [ ] T028 [P] [US3] In `scripts/player-toolbar.lua`, set `user-data/player_toolbar/stable-volume` in `publish()`, before its early return.
-- [ ] T029 [US3] Run both suites.
+- [ ] T029 [P] [US3] In `scripts/profile_picker.lua`, set `user-data/anime4k/mode` to `state.mode` at load (after `read_mode`), in `apply_mode` and in `on_shaders_changed`.
+- [ ] T030 [P] [US3] In `scripts/player-toolbar.lua`, set `user-data/player_toolbar/stable-volume` in `publish()`, before its early return.
+- [ ] T031 [US3] Run both suites.
 
-**Checkpoint (reviewer)**: diff review, then commit P4.
+**Checkpoint (reviewer)**: run `PYTHONPATH=src python -m unittest discover -s tests` (project venv) and `python tests/run_lua_tests.py`, and report both results to the maintainer; diff review; then commit P4.
 
 ---
 
 ## Phase 5 (commit P5): Documentation
 
-- [ ] T030 [P] In `scripts/help_overlay.lua`, change the MOUSE row `{ "menu button", … }` to `{ "More button", "appearance, playback, open, all menus" }`. Update `tests/lua/test_help_overlay.lua` if it asserts the old text.
-- [ ] T031 [P] Update `README.md` and `README.ar.md`: the toolbar line becomes the three styles and More > Appearance. Hand edits to owned uosc keys have no effect; list the keys. Keep `tests/test_readme_toc.py` green.
-- [ ] T032 [P] Update `docs/YOUTUBE_GUI.md`: the toolbar groups for calm, bar and focus, the new More menu, and the sizes 44 and 36.
-- [ ] T033 [P] Add a `CHANGELOG.md` entry covering:
+- [ ] T032 [P] In `scripts/help_overlay.lua`, change the MOUSE row `{ "menu button", … }` to `{ "More button", "appearance, playback, open, all menus" }`. Update `tests/lua/test_help_overlay.lua` if it asserts the old text.
+- [ ] T033 [P] Update `README.md` and `README.ar.md`: the toolbar line becomes the three styles and More > Appearance. Hand edits to owned uosc keys have no effect; list the keys. Keep `tests/test_readme_toc.py` green.
+- [ ] T034 [P] Update `docs/YOUTUBE_GUI.md`: the toolbar groups for calm, bar and focus, the new More menu, and the sizes 44 and 36.
+- [ ] T035 [P] Add a `CHANGELOG.md` entry covering:
   - the new looks;
   - existing installs move to calm, dark, amber, comfortable;
   - `--keep-conf`, a re-install over an existing `mpv.conf`, or a plain `script-opts=` in `mpv.conf.user` keeps radius 8 and the old range colour until `mpv.conf` is regenerated;
   - hand edits to owned keys no longer apply.
-- [ ] T034 [P] Update the `AGENTS.md` status section for spec 006.
-- [ ] T035 Run both suites, including `tests/test_repo_hygiene.py`.
+- [ ] T036 [P] Update the `AGENTS.md` status section for spec 006.
+- [ ] T037 Run both suites, including `tests/test_repo_hygiene.py`.
 
-**Checkpoint (reviewer)**: diff review, then commit P5. Stop: hand the maintainer
-the quickstart steps for KDE Wayland and Windows.
+**Checkpoint (reviewer)**: run `PYTHONPATH=src python -m unittest discover -s tests` (project venv) and `python tests/run_lua_tests.py`, and report both results to the maintainer; diff review; then commit P5. Stop: hand the maintainer
+the quickstart steps and the Phase 6 steps for KDE Wayland and Windows.
+
+---
+
+## Phase 6 (manual, maintainer): playback check (FR-021, SC-002, C-003)
+
+The reviewer stops before this phase and hands over the exact steps. It is the
+spec 004 Verification Method with Appearance switching added.
+
+- [ ] T038 KDE Wayland (143.98 Hz), 23.976 fps local file:
+  - run `mpv --no-resume-playback --length=90 --term-status-msg='ratio=${vsync-ratio} jitter=${vsync-jitter} avsync=${avsync} drop=${frame-drop-count} delayed=${vo-delayed-frame-count} mistimed=${mistimed-frame-count}' <file>`;
+  - after about 5 s, read the status line, then make 20 picks in More > Appearance (every style, background, accent and size at least once), moving the pointer away and back so the controls show and hide;
+  - read the last status line;
+  - pass: delayed 0, dropped 0, `vsync-ratio` 6 ± 0.05, mistimed not grown since startup, `avsync` within ±0.005 s.
+- [ ] T039 Windows, same file and command (`mpv.com`):
+  - run A: no picks, pointer moved the same way;
+  - run B: the 20 picks;
+  - pass: every counter in run B is no worse than in run A (delayed, dropped, mistimed growth, `vsync-ratio` spread, `avsync`).
+- [ ] T040 Record both results (the numbers for each run) in `specs/006-player-ui-themes/quickstart.md` under a "Results" heading; the reviewer commits it.
 
 ---
 
@@ -217,7 +238,7 @@ the quickstart steps for KDE Wayland and Windows.
 - P1 blocks everything: `looks.lua` and the theme script exist only after P1.
 - P2 needs P1 (`read_looks_keys` parses `looks.lua`).
 - P3 needs P1. P4 needs P3, because the Appearance rows go into the full menu.
-- P5 needs P4.
+- P5 needs P4. Phase 6 needs P5 deployed.
 - Within a phase, the test tasks come before the implementation tasks. `[P]` tasks
   touch different files.
 
@@ -225,7 +246,7 @@ the quickstart steps for KDE Wayland and Windows.
 
 - P1: T001, T003 and T004 together; then T008 and T009 alongside T005 to T007.
 - P2: T011 and T012 together; T015, T016 and T017 after T013 and T014.
-- P4: T024 and T025 together; T027 and T028 alongside T026.
+- P4: T026 and T027 together; T029 and T030 alongside T028.
 
 ## Implementation strategy
 
