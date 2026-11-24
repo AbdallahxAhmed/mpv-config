@@ -1617,6 +1617,13 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None, skip=()):
             lambda p: _migrate_sub_sanitizer_conf(p, audit_log=audit_log),
         ),
         (
+            "seed-ui-appearance-conf",
+            os.path.join(config_dir, "script-opts", "ui_appearance.conf"),
+            lambda p: _migrate_ui_appearance_conf(
+                p, REPO_ROOT / "config", audit_log=audit_log
+            ),
+        ),
+        (
             "migrate-uosc-fonts",
             os.path.join(config_dir, "fonts"),
             lambda p: _sync_linux_uosc_fonts(config_dir, env=env, audit_log=audit_log),
@@ -2864,6 +2871,25 @@ def _migrate_sub_sanitizer_conf(conf_path, audit_log=None):
                 )
         return True
     return False
+
+
+def _migrate_ui_appearance_conf(conf_path, repo_config_dir, audit_log=None):
+    """Seed script-opts/ui_appearance.conf with shipped defaults if absent."""
+    conf = Path(conf_path)
+    src = Path(repo_config_dir) / "script-opts" / "ui_appearance.conf"
+    if conf.exists() or not src.is_file():
+        return False
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, conf)
+    if audit_log:
+        if hasattr(audit_log, "record_file"):
+            audit_log.record_file(
+                str(conf),
+                "create",
+                "ok",
+                "seeded ui_appearance.conf with defaults",
+            )
+    return True
 
 
 def _migrate_mpv_conf_user(user_conf_path, audit_log=None):

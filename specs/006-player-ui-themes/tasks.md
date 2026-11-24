@@ -43,7 +43,7 @@ pass. Then the reviewer's live check in a nested KWin session.
 - [ ] T001 [P] [US1] Write `tests/lua/test_ui_appearance.lua` with a harness modelled on `tests/lua/test_profile_picker.lua` (it stubs `mp`, `mp.options`, `mp.msg`, `mp.utils`). Cover:
   - `looks.uosc_options` for all 90 looks (3 styles × 3 backgrounds × 5 accents × 2 sizes, enumerated from `CHOICES`; the test asserts the count is 90): only `OWNED_KEYS` are produced, each `color` value has the 10 sub-keys in `OWNED_COLOR_KEYS` order, and each `opacity` value has the 19 sub-keys in `OWNED_OPACITY_KEYS` order;
   - for the default look, the output is byte-equal to the literal block in data-model.md "Literal values for the default look";
-  - the focus `controls` string is `space,prev,PLAY,next,space,items,MORE,fullscreen`, and bar differs from calm only in `opacity.controls=0.92` and `controls_persistency=idle,windowed`;
+  - the focus `controls` string is `space,prev,PLAY,next,space,items,MORE,fullscreen`, and bar differs from calm only in `opacity.controls=0.93` and `controls_persistency=idle,windowed`;
   - `merge_script_opts` keeps a foreign entry (`display_fps_guard-detected_fps=144`) and replaces every owned key;
   - `normalize`: empty fields, invalid values and all-empty input give the defaults, with `fallbacks` in `DEFAULTS` order;
   - `serialize(DEFAULTS)` is byte-equal to `config/script-opts/ui_appearance.conf`.

@@ -56,5 +56,5 @@
 4. Contrast with uosc's real opacities (menu 0.95 over black or white video,
    hover row 0.15, active row 0.8, hints 0.5), worst pair of the 15:
    title on menu 12.07; hint on menu 4.24; title on hover row 7.72; hint on hover
-   row 3.25; `#000000` title on active row 5.12; accent icon on a bar box (0.92)
-   4.51; Background icon on an active button 5.74; accent icon on menu 4.96.
+   row 3.25; `#000000` title on active row 5.12; accent icon on a bar box (0.93, raised from 0.92 on 2026-11-24 after the
+   8-bit-rounding check gave 4.49 at 0.92) 4.68; Background icon on an active button 5.74; accent icon on menu 4.96.
