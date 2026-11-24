@@ -468,6 +468,7 @@ end
 local function publish(filters, force)
     filters = type(filters) == 'table' and filters or mp.get_property_native('af', {})
     local _, active = inspect(filters)
+    mp.set_property_native('user-data/player_toolbar/stable-volume', active)
     if not force and last_active == active then return end
     last_active = active
     local data = utils.format_json({

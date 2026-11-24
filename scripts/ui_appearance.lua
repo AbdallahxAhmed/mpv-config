@@ -32,11 +32,13 @@ end
 
 apply_look(current_look)
 
-local function conf_file_path()
-    local found = mp.find_config_file and mp.find_config_file('script-opts/ui_appearance.conf')
+-- Path of a file under the config dir's script-opts/, existing or not.
+local function opts_file_path(name)
+    local rel = 'script-opts/' .. name
+    local found = mp.find_config_file and mp.find_config_file(rel)
     if found and found ~= '' then return found end
     if mp.command_native then
-        local expanded = mp.command_native({'expand-path', '~~/script-opts/ui_appearance.conf'})
+        local expanded = mp.command_native({'expand-path', '~~/' .. rel})
         if expanded and expanded ~= '' and not expanded:find('^~~/') then
             return expanded
         end
@@ -46,13 +48,13 @@ local function conf_file_path()
     if dir ~= '' then
         local sep = dir:sub(-1)
         if sep ~= '/' and sep ~= '\\' then dir = dir .. '/' end
-        return dir .. 'script-opts/ui_appearance.conf'
+        return dir .. rel
     end
     return nil
 end
 
 local function save_look(look)
-    local path = conf_file_path()
+    local path = opts_file_path('ui_appearance.conf')
     local file, err
     if path then
         file, err = io.open(path, 'w')
@@ -68,6 +70,74 @@ local function save_look(look)
     return true
 end
 
+local function read_initial_shuffle()
+    local path = opts_file_path('uosc.conf')
+    if not path then return false end
+    local f = io.open(path, 'r')
+    if not f then return false end
+    local last_val = nil
+    for line in f:lines() do
+        local val = line:match('^%s*shuffle%s*=%s*(.-)%s*$')
+        if val then
+            last_val = val
+        end
+    end
+    f:close()
+    return last_val == 'yes'
+end
+
+local shuffle_flag = read_initial_shuffle()
+
+local function read_state()
+    local video_count = 0
+    local tracks = mp.get_property_native('track-list') or {}
+    for _, t in ipairs(tracks) do
+        if t.type == 'video' and not t.image and not t.albumart then
+            video_count = video_count + 1
+        end
+    end
+    local editions = mp.get_property_native('edition-list') or {}
+    local speed = mp.get_property_native('speed')
+    if speed == nil then
+        speed = tonumber(mp.get_property('speed'))
+    end
+    local is_stream = false
+    if mp.get_property_bool then
+        is_stream = mp.get_property_bool('demuxer-via-network', false)
+    else
+        is_stream = mp.get_property_native('demuxer-via-network') == true
+    end
+
+    return {
+        loop_playlist = mp.get_property('loop-playlist'),
+        loop_file = mp.get_property('loop-file'),
+        speed = tonumber(speed) or 1,
+        video_tracks = video_count,
+        editions = #editions,
+        is_stream = is_stream,
+        anime4k_mode = mp.get_property_native('user-data/anime4k/mode'),
+        stable_volume = mp.get_property_native('user-data/player_toolbar/stable-volume'),
+        shuffle = shuffle_flag,
+    }
+end
+
+local function send_update_menu()
+    local state = read_state()
+    local menu = looks.more_menu(current_look, state)
+    local menu_json = utils.format_json(menu)
+    if menu_json then
+        pcall(mp.commandv, 'script-message-to', 'uosc', 'update-menu', menu_json)
+    end
+end
+
+-- Keep the marks of an open More menu current: rows with keep_open run their
+-- command through uosc, so the new value arrives here as a property change.
+-- uosc ignores update-menu unless a ui_appearance_more menu is open.
+for _, prop in ipairs({'loop-playlist', 'loop-file', 'speed', 'user-data/anime4k/mode',
+    'user-data/player_toolbar/stable-volume'}) do
+    mp.observe_property(prop, 'native', function() send_update_menu() end)
+end
+
 -- Register open-more script message
 mp.register_script_message('open-more', function()
     local open_menu_type = mp.get_property_native('user-data/uosc/menu/type')
@@ -75,11 +145,19 @@ mp.register_script_message('open-more', function()
         pcall(mp.commandv, 'script-message-to', 'uosc', 'close-menu', 'ui_appearance_more')
         return
     end
-    local menu = looks.more_menu(current_look)
+    local state = read_state()
+    local menu = looks.more_menu(current_look, state)
     local menu_json = utils.format_json(menu)
     if menu_json then
         pcall(mp.commandv, 'script-message-to', 'uosc', 'open-menu', menu_json)
     end
+end)
+
+-- Register toggle-shuffle script message
+mp.register_script_message('toggle-shuffle', function()
+    pcall(mp.commandv, 'script-binding', 'uosc/shuffle')
+    shuffle_flag = not shuffle_flag
+    send_update_menu()
 end)
 
 -- Register set script message
@@ -109,9 +187,5 @@ mp.register_script_message('set', function(field, value)
     apply_look(current_look)
 
     -- 3. Update menu
-    local menu = looks.more_menu(current_look)
-    local menu_json = utils.format_json(menu)
-    if menu_json then
-        pcall(mp.commandv, 'script-message-to', 'uosc', 'update-menu', menu_json)
-    end
+    send_update_menu()
 end)

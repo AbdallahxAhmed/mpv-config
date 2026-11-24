@@ -305,8 +305,32 @@ local function contrast(fg_hex, bg_hex)
     return (max_l + 0.05) / (min_l + 0.05)
 end
 
+local ANIME4K_MODES = {'off', 'fast', 'A', 'B', 'C', 'A+A', 'B+B', 'C+A'}
+local ANIME4K_MODE_LABELS = {
+    ["off"] = "off",
+    ["fast"] = "fast (cheap)",
+    ["A"] = "A (sharp)",
+    ["A+A"] = "A+A (ultra sharp)",
+    ["B"] = "B (soft)",
+    ["B+B"] = "B+B (ultra soft)",
+    ["C"] = "C (denoise)",
+    ["C+A"] = "C+A (denoise + sharp)",
+}
+
+local SPEED_VALUES = {
+    {title = '0.5×', num = 0.5},
+    {title = '0.75×', num = 0.75},
+    {title = '1×', num = 1},
+    {title = '1.25×', num = 1.25},
+    {title = '1.5×', num = 1.5},
+    {title = '1.75×', num = 1.75},
+    {title = '2×', num = 2},
+}
+
 local function more_menu(look, state)
     local validated_look = normalize(look)
+    state = type(state) == 'table' and state or {}
+
     local field_order = {'style', 'background', 'accent', 'size'}
     local field_labels = {
         style = 'Style',
@@ -336,30 +360,154 @@ local function more_menu(look, state)
         }
     end
 
-    local items = {
+    -- Playback sub-items
+    local current_speed = tonumber(state.speed) or 1
+    local speed_items = {}
+    for _, s in ipairs(SPEED_VALUES) do
+        local s_item = {
+            title = s.title,
+            value = 'set speed ' .. tostring(s.num),
+        }
+        if math.abs(current_speed - s.num) < 0.001 then
+            s_item.active = true
+        end
+        speed_items[#speed_items + 1] = s_item
+    end
+
+    local playback_items = {
         {
-            title = 'Appearance',
-            items = app_items,
+            title = 'Shuffle',
+            value = 'script-message-to ui_appearance toggle-shuffle',
+            keep_open = true,
         },
+        {
+            title = 'Loop playlist',
+            value = 'cycle-values loop-playlist inf no',
+            keep_open = true,
+        },
+        {
+            title = 'Loop file',
+            value = 'cycle-values loop-file inf no',
+            keep_open = true,
+        },
+        {
+            title = 'Speed',
+            items = speed_items,
+        },
+    }
+    if state.shuffle == true then
+        playback_items[1].active = true
+    end
+    if state.loop_playlist and state.loop_playlist ~= 'no' then
+        playback_items[2].active = true
+    end
+    if state.loop_file and state.loop_file ~= 'no' then
+        playback_items[3].active = true
+    end
+
+    -- Picture & sound sub-items
+    local anime_items = {}
+    for _, mode in ipairs(ANIME4K_MODES) do
+        local a_item = {
+            title = mode,
+            value = 'script-message-to profile_picker set-mode ' .. mode,
+        }
+        if state.anime4k_mode == mode then
+            a_item.active = true
+        else
+            a_item.hint = ANIME4K_MODE_LABELS[mode]
+        end
+        anime_items[#anime_items + 1] = a_item
+    end
+
+    local pic_sound_items = {
+        {
+            title = 'Anime4K mode',
+            items = anime_items,
+        },
+        {
+            title = 'Stable volume',
+            value = 'script-message-to player_toolbar toggle-stable-volume',
+            keep_open = true,
+        },
+    }
+    if state.stable_volume == true then
+        pic_sound_items[2].active = true
+    end
+    if (state.video_tracks or 0) > 1 then
+        pic_sound_items[#pic_sound_items + 1] = {
+            title = 'Video track',
+            value = 'script-binding uosc/video',
+        }
+    end
+    if (state.editions or 0) > 1 then
+        pic_sound_items[#pic_sound_items + 1] = {
+            title = 'Editions',
+            value = 'script-binding uosc/editions',
+        }
+    end
+
+    -- Open sub-items
+    local open_items = {
         {
             title = 'Paste link',
             hint = 'Ctrl+V',
             value = 'script-binding smart_paste/paste-to-open',
         },
         {
-            title = 'Stable volume',
-            value = 'script-message-to player_toolbar toggle-stable-volume',
-        },
-        {
-            title = 'Full uosc menu',
-            value = 'script-binding uosc/menu-blurred',
-        },
-        {
-            title = 'All shortcuts',
-            hint = 'F9',
-            value = 'script-message-to help_overlay help',
+            title = 'Open file',
+            value = 'script-binding uosc/open-file',
         },
     }
+    if state.is_stream == true then
+        open_items[#open_items + 1] = {
+            title = 'Download video',
+            value = 'script-message-to player_toolbar download-video',
+        }
+    end
+
+    local items = {
+        {
+            title = 'Appearance',
+            items = app_items,
+        },
+        {
+            title = 'Subtitles',
+            value = 'script-binding ytdl_sub_menu/open',
+        },
+        {
+            title = 'Audio',
+            value = 'script-message-to player_toolbar open-audio-menu',
+        },
+    }
+    if state.is_stream == true then
+        items[#items + 1] = {
+            title = 'Stream quality',
+            value = 'script-message-to player_toolbar open-quality-menu',
+        }
+    end
+    items[#items + 1] = {
+        title = 'Playback',
+        items = playback_items,
+    }
+    items[#items + 1] = {
+        title = 'Picture & sound',
+        items = pic_sound_items,
+    }
+    items[#items + 1] = {
+        title = 'Open',
+        items = open_items,
+    }
+    items[#items + 1] = {
+        title = 'Full uosc menu',
+        value = 'script-binding uosc/menu-blurred',
+    }
+    items[#items + 1] = {
+        title = 'All shortcuts',
+        hint = 'F9',
+        value = 'script-message-to help_overlay help',
+    }
+
     return {
         type = 'ui_appearance_more',
         title = 'More',
@@ -384,5 +532,7 @@ M.serialize = serialize
 M.blend = blend
 M.contrast = contrast
 M.more_menu = more_menu
+M.ANIME4K_MODES = ANIME4K_MODES
+M.ANIME4K_MODE_LABELS = ANIME4K_MODE_LABELS
 
 return M

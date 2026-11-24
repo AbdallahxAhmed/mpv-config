@@ -460,4 +460,16 @@ test('set_mode off clears the shader list', function()
     eq(0, #chain)
 end)
 
+test('user-data/anime4k/mode equals the saved mode after load, after set-mode B, and after a glsl-shaders change that on_shaders_changed maps to a mode', function()
+    local h, pp = load_script()
+    eq('A+A', h.props['user-data/anime4k/mode'])
+
+    h.messages['set-mode']('B')
+    eq('B', h.props['user-data/anime4k/mode'])
+
+    local chain_c = table.concat(pp.chain_for('C'), ':')
+    h.observers['glsl-shaders']('glsl-shaders', chain_c)
+    eq('C', h.props['user-data/anime4k/mode'])
+end)
+
 print('Profile picker tests passed: ' .. total)

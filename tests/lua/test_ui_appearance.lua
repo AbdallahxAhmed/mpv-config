@@ -19,6 +19,11 @@ if not here:match('[/\\]$') and here ~= './' then here = here .. '/' end
 local LOOKS_MODULE = here .. '../../scripts/modules/looks.lua'
 local SCRIPT = here .. '../../scripts/ui_appearance.lua'
 local CONF_SHIPPED = here .. '../../config/script-opts/ui_appearance.conf'
+local INPUT_CONF_TEMPLATE = here .. '../../config/input.conf.template'
+local UOSC_OPTIONS_JSON = here .. '../fixtures/uosc-5.13.0/uosc-options.json'
+local SCRIPT_PLAYER_TOOLBAR = here .. '../../scripts/player-toolbar.lua'
+local SCRIPT_PROFILE_PICKER = here .. '../../scripts/profile_picker.lua'
+local SCRIPT_HELP_OVERLAY = here .. '../../scripts/help_overlay.lua'
 
 local ok_looks, looks = pcall(dofile, LOOKS_MODULE)
 if not ok_looks or type(looks) ~= 'table' then
@@ -185,7 +190,7 @@ local function sandbox_conf(initial_content)
     return path
 end
 
-local function create_script_harness(raw_opts, script_opts, conf_path)
+local function create_script_harness(raw_opts, script_opts, conf_path, uosc_conf_path)
     local h = {
         props = {
             ['script-opts'] = script_opts or {},
@@ -193,10 +198,13 @@ local function create_script_harness(raw_opts, script_opts, conf_path)
         warnings = {},
         commands = {},
         messages = {},
+        observers = {},
         osd_messages = {},
         set_property_native_calls = 0,
         conf_path = conf_path,
         conf_exists = conf_path and true or false,
+        uosc_conf_path = uosc_conf_path,
+        uosc_conf_exists = uosc_conf_path and true or false,
     }
     if conf_path then
         local f = io.open(conf_path, 'r')
@@ -205,6 +213,15 @@ local function create_script_harness(raw_opts, script_opts, conf_path)
             h.conf_exists = true
         else
             h.conf_exists = false
+        end
+    end
+    if uosc_conf_path then
+        local f = io.open(uosc_conf_path, 'r')
+        if f then
+            f:close()
+            h.uosc_conf_exists = true
+        else
+            h.uosc_conf_exists = false
         end
     end
     _G.mp = {
@@ -234,17 +251,29 @@ local function create_script_harness(raw_opts, script_opts, conf_path)
             if v == nil then return d end
             return v
         end,
+        get_property_bool = function(k, d)
+            local v = h.props[k]
+            if v == nil then return d end
+            if type(v) == 'boolean' then return v end
+            return v == 'yes' or v == 'true'
+        end,
         commandv = function(...)
             h.commands[#h.commands + 1] = { ... }
         end,
         command_native = function(cmd)
             if type(cmd) == 'table' and cmd[1] == 'expand-path' then
+                if cmd[2] == '~~/script-opts/uosc.conf' then
+                    return h.uosc_conf_path or '~~/script-opts/uosc.conf'
+                end
                 return h.conf_path or '~~/script-opts/ui_appearance.conf'
             end
             return nil
         end,
         register_script_message = function(name, fn)
             h.messages[name] = fn
+        end,
+        observe_property = function(name, _, fn)
+            h.observers[name] = fn
         end,
         osd_message = function(text, timeout)
             h.osd_messages[#h.osd_messages + 1] = {text = text, timeout = timeout}
@@ -256,6 +285,12 @@ local function create_script_harness(raw_opts, script_opts, conf_path)
             if path == 'script-opts/ui_appearance.conf' then
                 if h.conf_exists and h.conf_path then
                     return h.conf_path
+                end
+                return nil
+            end
+            if path == 'script-opts/uosc.conf' then
+                if h.uosc_conf_exists and h.uosc_conf_path then
+                    return h.uosc_conf_path
                 end
                 return nil
             end
@@ -306,7 +341,7 @@ test('load with no uosc present raises no error', function()
     eq(ok, true, 'script failed to load: ' .. tostring(err))
 end)
 
-test('open-more sends one script-message-to uosc open-menu with P1 rows', function()
+test('open-more sends one script-message-to uosc open-menu with full More menu', function()
     local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'})
     dofile(SCRIPT)
     assert(h.messages['open-more'] ~= nil, 'open-more not registered')
@@ -321,23 +356,28 @@ test('open-more sends one script-message-to uosc open-menu with P1 rows', functi
     local menu = utils.parse_json(cmd[4])
     eq(menu.type, 'ui_appearance_more')
     eq(menu.title, 'More')
-    eq(#menu.items, 5)
+    eq(#menu.items, 8)
 
     eq(menu.items[1].title, 'Appearance')
+    eq(menu.items[2].title, 'Subtitles')
+    eq(menu.items[2].value, 'script-binding ytdl_sub_menu/open')
+    eq(menu.items[3].title, 'Audio')
+    eq(menu.items[3].value, 'script-message-to player_toolbar open-audio-menu')
+    eq(menu.items[4].title, 'Playback')
+    eq(menu.items[5].title, 'Picture & sound')
+    eq(menu.items[6].title, 'Open')
+    eq(menu.items[7].title, 'Full uosc menu')
+    eq(menu.items[7].value, 'script-binding uosc/menu-blurred')
+    eq(menu.items[8].title, 'All shortcuts')
+    eq(menu.items[8].hint, 'F9')
+    eq(menu.items[8].value, 'script-message-to help_overlay help')
 
-    eq(menu.items[2].title, 'Paste link')
-    eq(menu.items[2].hint, 'Ctrl+V')
-    eq(menu.items[2].value, 'script-binding smart_paste/paste-to-open')
-
-    eq(menu.items[3].title, 'Stable volume')
-    eq(menu.items[3].value, 'script-message-to player_toolbar toggle-stable-volume')
-
-    eq(menu.items[4].title, 'Full uosc menu')
-    eq(menu.items[4].value, 'script-binding uosc/menu-blurred')
-
-    eq(menu.items[5].title, 'All shortcuts')
-    eq(menu.items[5].hint, 'F9')
-    eq(menu.items[5].value, 'script-message-to help_overlay help')
+    eq(#menu.items[6].items, 2)
+    eq(menu.items[6].items[1].title, 'Paste link')
+    eq(menu.items[6].items[1].hint, 'Ctrl+V')
+    eq(menu.items[6].items[1].value, 'script-binding smart_paste/paste-to-open')
+    eq(menu.items[6].items[2].title, 'Open file')
+    eq(menu.items[6].items[2].value, 'script-binding uosc/open-file')
 end)
 
 -- ── T003: contrast test from research R6 ──────────────────────────────
@@ -403,7 +443,7 @@ test('more_menu puts Appearance first with Style, Background, Accent, Size marki
     local menu = looks.more_menu(look)
     eq(menu.type, 'ui_appearance_more')
     eq(menu.title, 'More')
-    eq(#menu.items, 5)
+    eq(#menu.items, 8)
 
     local app = menu.items[1]
     eq(app.title, 'Appearance')
@@ -435,13 +475,22 @@ test('more_menu puts Appearance first with Style, Background, Accent, Size marki
         end
     end
 
-    -- P1 rows follow unchanged
-    eq(menu.items[2].title, 'Paste link')
-    eq(menu.items[2].hint, 'Ctrl+V')
-    eq(menu.items[3].title, 'Stable volume')
-    eq(menu.items[4].title, 'Full uosc menu')
-    eq(menu.items[5].title, 'All shortcuts')
-    eq(menu.items[5].hint, 'F9')
+    -- Following rows in More menu
+    eq(menu.items[2].title, 'Subtitles')
+    eq(menu.items[3].title, 'Audio')
+    eq(menu.items[4].title, 'Playback')
+    eq(menu.items[5].title, 'Picture & sound')
+    eq(menu.items[6].title, 'Open')
+    eq(menu.items[7].title, 'Full uosc menu')
+    eq(menu.items[8].title, 'All shortcuts')
+    eq(menu.items[8].hint, 'F9')
+
+    -- Paste link moved into Open
+    eq(menu.items[6].items[1].title, 'Paste link')
+    eq(menu.items[6].items[1].hint, 'Ctrl+V')
+
+    -- Stable volume moved into Picture & sound
+    eq(menu.items[5].items[2].title, 'Stable volume')
 end)
 
 -- ── T019 & T020: pick tests and windows save tests ───────────────────
@@ -663,6 +712,492 @@ test('open-more closes menu when ui_appearance_more is already open and opens ot
     eq(h.commands[2][2], 'uosc')
     eq(h.commands[2][3], 'close-menu')
     eq(h.commands[2][4], 'ui_appearance_more')
+end)
+
+-- ── T026: More menu tests (US3) ────────────────────────────────────────
+
+local function build_allowed_command_checker()
+    -- 1. config/input.conf.template
+    local input_commands = {}
+    local f_in = assert(io.open(INPUT_CONF_TEMPLATE, 'r'))
+    for line in f_in:lines() do
+        local trimmed = line:match('^%s*(.-)%s*$')
+        if trimmed ~= '' and not trimmed:match('^#') then
+            local key, cmd = trimmed:match('^(%S+)%s+(.*)$')
+            if cmd then
+                cmd = cmd:gsub('^no%-osd%s+', '')
+                input_commands[cmd] = true
+            end
+        end
+    end
+    f_in:close()
+
+    -- 2. tests/fixtures/uosc-5.13.0/uosc-options.json bindings
+    local uosc_bindings = {}
+    local f_json = assert(io.open(UOSC_OPTIONS_JSON, 'r'))
+    local json_text = f_json:read('*a')
+    f_json:close()
+    local bindings_block = json_text:match('"bindings"%s*:%s*%[(.-)%]')
+    if bindings_block then
+        for b in bindings_block:gmatch('"([^"]+)"') do
+            uosc_bindings[b] = true
+        end
+    end
+
+    -- 3. register_script_message in the 4 scripts
+    local script_messages = {
+        player_toolbar = {},
+        profile_picker = {},
+        help_overlay = {},
+        ui_appearance = {},
+    }
+    local script_files = {
+        player_toolbar = SCRIPT_PLAYER_TOOLBAR,
+        profile_picker = SCRIPT_PROFILE_PICKER,
+        help_overlay = SCRIPT_HELP_OVERLAY,
+        ui_appearance = SCRIPT,
+    }
+    for sname, spath in pairs(script_files) do
+        local sf = assert(io.open(spath, 'r'))
+        local scontent = sf:read('*a')
+        sf:close()
+        for msg in scontent:gmatch('register_script_message%s*%(%s*[\'"]([^\'"]+)[\'"]') do
+            script_messages[sname][msg] = true
+        end
+    end
+
+    -- Checker function
+    return function(cmd)
+        -- 1. input.conf.template commands
+        if input_commands[cmd] then return true end
+
+        -- 2. script-binding uosc/<name>
+        local uosc_b = cmd:match('^script%-binding%s+uosc/([%w_%-]+)$')
+        if uosc_b and uosc_bindings[uosc_b] then return true end
+
+        -- 3. script-message-to <script> <message> [args]
+        local sname, smsg = cmd:match('^script%-message%-to%s+([%w_%-]+)%s+([%w_%-]+)')
+        if sname and smsg and script_messages[sname] and script_messages[sname][smsg] then
+            return true
+        end
+
+        -- 4. extras
+        if cmd == 'cycle-values loop-playlist inf no' then return true end
+        if cmd == 'cycle-values loop-file inf no' then return true end
+        if cmd == 'script-binding ytdl_sub_menu/open' then return true end
+        if cmd == 'script-binding smart_paste/paste-to-open' then return true end
+        if cmd:match('^set%s+speed%s+%-?%d+%.?%d*$') then return true end
+
+        return false
+    end
+end
+
+test('all More menu row commands are in the allowed set (SC-005)', function()
+    local checker = build_allowed_command_checker()
+    local full_state = {
+        is_stream = true,
+        video_tracks = 2,
+        editions = 2,
+        speed = 1.0,
+        loop_playlist = 'no',
+        loop_file = 'no',
+        shuffle = false,
+        anime4k_mode = 'A+A',
+        stable_volume = false,
+    }
+    local menu = looks.more_menu(looks.DEFAULTS, full_state)
+    local function collect_commands(items, out)
+        out = out or {}
+        for _, it in ipairs(items) do
+            if it.value then
+                out[#out + 1] = it.value
+            end
+            if it.items then
+                collect_commands(it.items, out)
+            end
+        end
+        return out
+    end
+    local commands = collect_commands(menu.items)
+    assert(#commands >= 25, 'expected full menu commands count >= 25, got ' .. tostring(#commands))
+    for _, cmd in ipairs(commands) do
+        assert(checker(cmd), 'Command not in SC-005 allowed set: ' .. tostring(cmd))
+    end
+end)
+
+test('Anime4K mode rows use the 8 modes in order with MODE_LABELS from profile_picker', function()
+    local f = assert(io.open(SCRIPT_PROFILE_PICKER, 'r'))
+    local content = f:read('*a')
+    f:close()
+    local labels_block = content:match('local MODE_LABELS = %{([^%}]*)%}')
+    assert(labels_block ~= nil, 'MODE_LABELS block not found in profile_picker.lua')
+    local expected_labels = {}
+    for k, v in labels_block:gmatch('%["([^"]+)"%]%s*=%s*"([^"]+)"') do
+        expected_labels[k] = v
+    end
+
+    local expected_order = {'off', 'fast', 'A', 'B', 'C', 'A+A', 'B+B', 'C+A'}
+    eq(#expected_order, 8)
+
+    local menu = looks.more_menu(looks.DEFAULTS, {anime4k_mode = 'A'})
+    local pic_sound
+    for _, it in ipairs(menu.items) do
+        if it.title == 'Picture & sound' then pic_sound = it break end
+    end
+    assert(pic_sound ~= nil, 'Picture & sound item not found')
+
+    local anime_item
+    for _, it in ipairs(pic_sound.items) do
+        if it.title == 'Anime4K mode' then anime_item = it break end
+    end
+    assert(anime_item ~= nil, 'Anime4K mode item not found')
+    eq(#anime_item.items, 8)
+
+    for i, mode in ipairs(expected_order) do
+        local row = anime_item.items[i]
+        eq(row.title, mode, 'mode title at ' .. tostring(i))
+        eq(row.value, 'script-message-to profile_picker set-mode ' .. mode)
+        if mode == 'A' then
+            eq(row.active, true)
+            eq(row.hint, nil, 'active mode must not have hint')
+        else
+            eq(row.active, nil)
+            eq(row.hint, expected_labels[mode], 'hint for mode ' .. mode)
+        end
+    end
+end)
+
+test('conditional rows: stream quality and download video only when is_stream (FR-019)', function()
+    -- local file: no stream quality, no download video
+    local local_menu = looks.more_menu(looks.DEFAULTS, {is_stream = false})
+    for _, it in ipairs(local_menu.items) do
+        assert(it.title ~= 'Stream quality', 'Stream quality must not appear for local files')
+        if it.title == 'Open' then
+            for _, sub in ipairs(it.items) do
+                assert(sub.title ~= 'Download video', 'Download video must not appear for local files')
+            end
+        end
+    end
+
+    -- stream: has stream quality and download video
+    local stream_menu = looks.more_menu(looks.DEFAULTS, {is_stream = true})
+    local has_quality, has_download = false, false
+    for idx, it in ipairs(stream_menu.items) do
+        if it.title == 'Stream quality' then
+            has_quality = true
+            eq(idx, 4, 'Stream quality should be after Audio')
+            eq(it.value, 'script-message-to player_toolbar open-quality-menu')
+        end
+        if it.title == 'Open' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Download video' then
+                    has_download = true
+                    eq(sub.value, 'script-message-to player_toolbar download-video')
+                end
+            end
+        end
+    end
+    assert(has_quality, 'Stream quality must appear for streams')
+    assert(has_download, 'Download video must appear in Open for streams')
+end)
+
+test('conditional rows: video track only when video_tracks > 1, editions only when editions > 1', function()
+    -- 1 video track + 1 album art track -> video_tracks = 1 -> no Video track
+    local menu1 = looks.more_menu(looks.DEFAULTS, {video_tracks = 1, editions = 1})
+    local pic_sound1
+    for _, it in ipairs(menu1.items) do
+        if it.title == 'Picture & sound' then pic_sound1 = it break end
+    end
+    for _, sub in ipairs(pic_sound1.items) do
+        assert(sub.title ~= 'Video track', 'Video track should not appear when video_tracks <= 1')
+        assert(sub.title ~= 'Editions', 'Editions should not appear when editions <= 1')
+    end
+
+    -- 2 video tracks, 2 editions -> both appear
+    local menu2 = looks.more_menu(looks.DEFAULTS, {video_tracks = 2, editions = 2})
+    local pic_sound2
+    for _, it in ipairs(menu2.items) do
+        if it.title == 'Picture & sound' then pic_sound2 = it break end
+    end
+    local has_vt, has_ed = false, false
+    for _, sub in ipairs(pic_sound2.items) do
+        if sub.title == 'Video track' then
+            has_vt = true
+            eq(sub.value, 'script-binding uosc/video')
+        end
+        if sub.title == 'Editions' then
+            has_ed = true
+            eq(sub.value, 'script-binding uosc/editions')
+        end
+    end
+    assert(has_vt, 'Video track should appear when video_tracks > 1')
+    assert(has_ed, 'Editions should appear when editions > 1')
+end)
+
+test('marks: active rows have no hint; Loop, Speed, Stable volume marked from state', function()
+    local state = {
+        loop_playlist = 'inf',
+        loop_file = 'no',
+        speed = 1.2504, -- within 0.001 tolerance of 1.25
+        stable_volume = true,
+        shuffle = true,
+        anime4k_mode = 'off',
+    }
+    local menu = looks.more_menu(looks.DEFAULTS, state)
+    local playback, pic_sound
+    for _, it in ipairs(menu.items) do
+        if it.title == 'Playback' then playback = it end
+        if it.title == 'Picture & sound' then pic_sound = it end
+    end
+    assert(playback ~= nil and pic_sound ~= nil)
+
+    -- Playback: Shuffle
+    local shuffle_item
+    for _, sub in ipairs(playback.items) do
+        if sub.title == 'Shuffle' then shuffle_item = sub break end
+    end
+    assert(shuffle_item ~= nil)
+    eq(shuffle_item.active, true)
+    eq(shuffle_item.hint, nil)
+    eq(shuffle_item.keep_open, true)
+
+    -- Playback: Loop playlist (active)
+    local loop_pl_item
+    for _, sub in ipairs(playback.items) do
+        if sub.title == 'Loop playlist' then loop_pl_item = sub break end
+    end
+    assert(loop_pl_item ~= nil)
+    eq(loop_pl_item.active, true)
+    eq(loop_pl_item.hint, nil)
+    eq(loop_pl_item.keep_open, true)
+
+    -- Playback: Loop file (inactive)
+    local loop_f_item
+    for _, sub in ipairs(playback.items) do
+        if sub.title == 'Loop file' then loop_f_item = sub break end
+    end
+    assert(loop_f_item ~= nil)
+    eq(loop_f_item.active, nil)
+    eq(loop_f_item.keep_open, true)
+
+    -- Playback: Speed
+    local speed_sub
+    for _, sub in ipairs(playback.items) do
+        if sub.title == 'Speed' then speed_sub = sub break end
+    end
+    assert(speed_sub ~= nil)
+    local speed_vals = {'0.5×', '0.75×', '1×', '1.25×', '1.5×', '1.75×', '2×'}
+    local speed_nums = {0.5, 0.75, 1, 1.25, 1.5, 1.75, 2}
+    eq(#speed_sub.items, #speed_vals)
+    for i, s_title in ipairs(speed_vals) do
+        local it = speed_sub.items[i]
+        eq(it.title, s_title)
+        eq(it.value, 'set speed ' .. tostring(speed_nums[i]))
+        if s_title == '1.25×' then
+            eq(it.active, true)
+            eq(it.hint, nil)
+        else
+            eq(it.active, nil)
+        end
+    end
+
+    -- Picture & sound: Stable volume
+    local sv_item
+    for _, sub in ipairs(pic_sound.items) do
+        if sub.title == 'Stable volume' then sv_item = sub break end
+    end
+    assert(sv_item ~= nil)
+    eq(sv_item.active, true)
+    eq(sv_item.hint, nil)
+    eq(sv_item.keep_open, true)
+end)
+
+test('a change of a marked value sends update-menu with the new mark', function()
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'})
+    dofile(SCRIPT)
+    for _, prop in ipairs({'loop-playlist', 'loop-file', 'speed', 'user-data/anime4k/mode',
+        'user-data/player_toolbar/stable-volume'}) do
+        assert(h.observers[prop] ~= nil, prop .. ' is not observed')
+    end
+    h.props['loop-file'] = 'inf'
+    local before = #h.commands
+    h.observers['loop-file']('loop-file', 'inf')
+    eq(#h.commands, before + 1, 'one command sent')
+    local cmd = h.commands[#h.commands]
+    eq(cmd[3], 'update-menu')
+    local menu = require('mp.utils').parse_json(cmd[4])
+    local loop_file
+    for _, it in ipairs(menu.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Loop file' then loop_file = sub end
+            end
+        end
+    end
+    assert(loop_file and loop_file.active == true, 'Loop file is not marked after the change')
+end)
+
+test('toggle-shuffle runs script-binding uosc/shuffle, flips mark and sends update-menu', function()
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'})
+    dofile(SCRIPT)
+
+    assert(h.messages['toggle-shuffle'] ~= nil, 'toggle-shuffle message not registered')
+
+    local cmds_before = #h.commands
+    h.messages['toggle-shuffle']()
+
+    -- Runs script-binding uosc/shuffle
+    eq(h.commands[cmds_before + 1][1], 'script-binding')
+    eq(h.commands[cmds_before + 1][2], 'uosc/shuffle')
+
+    -- Sends update-menu
+    local update_cmd = h.commands[cmds_before + 2]
+    eq(update_cmd[1], 'script-message-to')
+    eq(update_cmd[2], 'uosc')
+    eq(update_cmd[3], 'update-menu')
+
+    local utils = require 'mp.utils'
+    local menu1 = utils.parse_json(update_cmd[4])
+    local shuffle1
+    for _, it in ipairs(menu1.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Shuffle' then shuffle1 = sub break end
+            end
+        end
+    end
+    assert(shuffle1 ~= nil)
+    eq(shuffle1.active, true)
+
+    -- Toggle again flips to false
+    h.messages['toggle-shuffle']()
+    local update_cmd2 = h.commands[#h.commands]
+    local menu2 = utils.parse_json(update_cmd2[4])
+    local shuffle2
+    for _, it in ipairs(menu2.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Shuffle' then shuffle2 = sub break end
+            end
+        end
+    end
+    assert(shuffle2 ~= nil)
+    eq(shuffle2.active, nil)
+end)
+
+test('initial shuffle flag starts as true when uosc.conf ends with shuffle=yes, false otherwise', function()
+    -- 1. uosc.conf with shuffle=yes
+    local uosc_conf_yes = sandbox_conf("# uosc options\nshuffle=no\nshuffle=yes\n")
+    local h1 = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, nil, uosc_conf_yes)
+    dofile(SCRIPT)
+
+    h1.messages['open-more']()
+    local utils = require 'mp.utils'
+    local menu1 = utils.parse_json(h1.commands[#h1.commands][4])
+    local shuf1
+    for _, it in ipairs(menu1.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Shuffle' then shuf1 = sub break end
+            end
+        end
+    end
+    assert(shuf1 ~= nil)
+    eq(shuf1.active, true)
+    pcall(os.remove, uosc_conf_yes)
+
+    -- 2. uosc.conf with shuffle=no
+    local uosc_conf_no = sandbox_conf("shuffle=yes\n# commented\nshuffle=no\n")
+    local h2 = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, nil, uosc_conf_no)
+    dofile(SCRIPT)
+    h2.messages['open-more']()
+    local menu2 = utils.parse_json(h2.commands[#h2.commands][4])
+    local shuf2
+    for _, it in ipairs(menu2.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Shuffle' then shuf2 = sub break end
+            end
+        end
+    end
+    assert(shuf2 ~= nil)
+    eq(shuf2.active, nil)
+    pcall(os.remove, uosc_conf_no)
+
+    -- 3. missing uosc.conf
+    local h3 = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'}, {}, nil, nil)
+    dofile(SCRIPT)
+    h3.messages['open-more']()
+    local menu3 = utils.parse_json(h3.commands[#h3.commands][4])
+    local shuf3
+    for _, it in ipairs(menu3.items) do
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Shuffle' then shuf3 = sub break end
+            end
+        end
+    end
+    assert(shuf3 ~= nil)
+    eq(shuf3.active, nil)
+end)
+
+test('open-more and update-menu read state dynamically from mp properties', function()
+    local h = create_script_harness({style = 'calm', background = 'dark', accent = 'amber', size = 'comfortable'})
+    h.props['demuxer-via-network'] = true
+    h.props['speed'] = 1.5
+    h.props['loop-playlist'] = 'inf'
+    h.props['loop-file'] = 'inf'
+    h.props['user-data/anime4k/mode'] = 'B+B'
+    h.props['user-data/player_toolbar/stable-volume'] = true
+    h.props['edition-list'] = {{id = 0}, {id = 1}}
+    h.props['track-list'] = {
+        {type = 'video'},
+        {type = 'video', albumart = true},
+        {type = 'video'},
+    }
+    dofile(SCRIPT)
+
+    h.messages['open-more']()
+    local utils = require 'mp.utils'
+    local menu = utils.parse_json(h.commands[#h.commands][4])
+
+    -- Verify stream quality and download video exist
+    local has_sq, has_dv, has_ed, has_vt = false, false, false, false
+    for _, it in ipairs(menu.items) do
+        if it.title == 'Stream quality' then has_sq = true end
+        if it.title == 'Open' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Download video' then has_dv = true end
+            end
+        end
+        if it.title == 'Picture & sound' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Editions' then has_ed = true end
+                if sub.title == 'Video track' then has_vt = true end
+                if sub.title == 'Anime4K mode' then
+                    for _, m in ipairs(sub.items) do
+                        if m.title == 'B+B' then eq(m.active, true) end
+                    end
+                end
+                if sub.title == 'Stable volume' then eq(sub.active, true) end
+            end
+        end
+        if it.title == 'Playback' then
+            for _, sub in ipairs(it.items) do
+                if sub.title == 'Loop playlist' then eq(sub.active, true) end
+                if sub.title == 'Loop file' then eq(sub.active, true) end
+                if sub.title == 'Speed' then
+                    for _, s in ipairs(sub.items) do
+                        if s.title == '1.5×' then eq(s.active, true) end
+                    end
+                end
+            end
+        end
+    end
+    assert(has_sq, 'Stream quality should be present')
+    assert(has_dv, 'Download video should be present')
+    assert(has_ed, 'Editions should be present')
+    assert(has_vt, 'Video track should be present (2 real video tracks)')
 end)
 
 io.stdout:write(string.format('UI appearance tests passed: %d\n', total))

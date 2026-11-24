@@ -398,10 +398,15 @@ local function mode_of_chain(chain)
     return nil
 end
 
+local function publish_mode()
+    mp.set_property_native("user-data/anime4k/mode", state.mode)
+end
+
 local function apply_mode(mode, announce)
     local chain = chain_for(mode)
     if chain == nil then return false end
     state.mode = mode
+    publish_mode()
     state.expect[chain_key(chain)] = true
     mp.set_property_native("glsl-shaders", chain)
     if announce then
@@ -545,6 +550,7 @@ local function on_shaders_changed(_, value)
     local mode = mode_of_chain(value)
     if not mode or mode == state.mode then return end
     state.mode = mode
+    publish_mode()
     if write_mode(mode) then
         msg.info("Anime4K mode changed to " .. mode .. " (persisted)")
     end
@@ -558,5 +564,6 @@ mp.register_script_message("toggle-manual", function() return M.toggle_manual() 
 mp.register_script_message("detect-profile", function() decide() end)
 
 state.mode = read_mode() or "A+A"
+publish_mode()
 
 _G.profile_picker = M
