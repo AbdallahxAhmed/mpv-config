@@ -16,6 +16,21 @@ at specs/006-player-ui-themes/plan.md
 ### State of main
 - Up to date on `main`, deployed to `%APPDATA%\mpv`. Tests green: all Python suites + all Lua suites.
 
+### Spec 006: Player UI Styles & Themes (Phases 1–5 on main; manual checks pending)
+- **What shipped:**
+  - P1 (`a581786`): `feat(ui): spec 006 P1: theme script applies the default look at load; minimal More menu; seed ui_appearance.conf on update`
+  - P2 (`a5f3b73`): `feat(ci): spec 006 P2: guard the theme's uosc options with a facts fixture; weekly check regenerates it`
+  - P3 (`7066bcd`): `feat(ui): spec 006 P3: More > Appearance switches the look while playing; save in place; More toggles`
+  - P4 (`c865e49`): `feat(ui): spec 006 P4: grouped More menu with marked state; shuffle toggle; Anime4K and stable-volume state`
+- **New files:**
+  - `scripts/ui_appearance.lua`: loads theme, applies look at runtime via `script-opts`, handles in-place config writing and builds More menu.
+  - `scripts/modules/looks.lua`: pure functions for palette, styles (`calm`, `bar`, `focus`), sizes (`comfortable`, `compact`), 90 looks, WCAG contrast verification, and menu structures.
+  - `script-opts/ui_appearance.conf`: saved appearance configuration (`style=calm`, `background=dark`, `accent=amber`, `size=comfortable`).
+  - `tests/fixtures/uosc-5.13.0/uosc-options.json`: facts fixture guarding against uosc pin bumps breaking owned options.
+- **Manual checks pending:**
+  - `specs/006-player-ui-themes/quickstart.md` manual walkthrough.
+  - Phase 6 playback check (FR-021, SC-002, C-003) measuring vsync ratio, frame drops, mistimed frames, and avsync during 20 Appearance switches on KDE Wayland (143.98 Hz) and Windows.
+
 ### Arabic keyboard — what works NOW (deployed, verified in live headless mpv)
 | User presses (Arabic layout) | Delivers to mpv | Fires |
 | --- | --- | --- |

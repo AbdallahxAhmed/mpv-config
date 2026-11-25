@@ -101,7 +101,9 @@ Recent work now on `main` (unreleased in the changelog):
 
 <a id="interface"></a>
 ### 🖥️ Interface
-- **Mouse-first uosc toolbar** — `Menu · Paste | CC · Dubs · Quality · Download | Stable Volume … Fullscreen`; no keyboard required (see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
+- **Player UI styles & switchable themes** — three built-in layout styles: **calm** (default, clean controls with a thin 3 px progress line expanding on hover), **bar** (filled button boxes at 0.93 opacity, controls persist in windowed mode), and **focus** (centered playback controls, uncluttered). Switch styles, backgrounds (`dark`, `black`, `slate`), accents (`amber`, `teal`, `violet`, `rose`, `white`), and sizes (`comfortable` 44 px, `compact` 36 px) live while playing via **More > Appearance**; choices persist across restarts and updates in `script-opts/ui_appearance.conf` (see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
+- **Grouped More menu** — a unified in-player menu organizing Appearance, Subtitles, Audio, Stream quality (streams only), Playback (Shuffle, Loop playlist, Loop file, Speed), Picture & sound (Anime4K mode, Stable volume, Video track, Editions), and Open (Paste link, Open file, Download video), with full uosc menu and cheat sheet access.
+- **Theme-owned uosc settings** — the theme dynamically owns these `uosc.conf` keys, so hand edits to them in `uosc.conf` no longer take effect: `controls`, `color`, `opacity`, `controls_size`, `controls_spacing`, `controls_margin`, `controls_persistency`, `timeline_size`, `progress`, `progress_size`, and `menu_item_height`.
 - **thumbfast** seekbar hover previews (with local race-condition hardening patches).
 - **Watch history & recent files** (memo) on `h`, subtitle backdrop "Netflix look" toggle on `b` with clear OSD feedback.
 - Playlists, editions and quality selectors appear contextually; window close always exits instantly.
@@ -239,7 +241,7 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | Double right-click | Ignored |
 | Window close (X) | Quit mpv instantly (`CLOSE_WIN quit`) |
 
-> Everything above also has a mouse equivalent in the uosc toolbar — see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
+> Everything above also has a mouse equivalent in the uosc controls and More menu — see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
 
 <a id="arabic-keyboard-twins-same-physical-key"></a>
 <a id="arabic-keyboard-twins"></a>
@@ -432,6 +434,8 @@ mpv-config download --watch
 | `scripts/display_fps_guard.lua` | Wayland: pins `display-fps-override` to the compositor's rate, only for the mode detected at install |
 | `scripts/keyboard_layout.lua` | Silent native async Win32 launcher for the Arabic AHK helper |
 | `scripts/help_overlay.lua` | ASS vector keybinding cheat sheet on `?` / `F9` |
+| `scripts/ui_appearance.lua` | Player UI theme engine, runtime style/appearance switching, and More menu |
+| `scripts/modules/looks.lua` | Theme definitions, palettes, options generator, and menu layout builder |
 | `scripts/player-toolbar.lua` | Stable Volume toolbar button and codec-prioritized quality switching (AV1 > VP9 > H.264) |
 | `scripts/modules/stream_policy.lua` | Shared YouTube/stream policy module |
 

@@ -52,7 +52,7 @@ local SECTIONS = {
     {
         title = "MOUSE",
         rows = {
-            { "menu button", "quality, audio, captions, download, help" },
+            { "More button", "appearance, playback, open, all menus" },
             { "right click", "context menu" },
             { "double click", "fullscreen" },
             { "scroll", "seek / volume" },
