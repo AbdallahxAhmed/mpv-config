@@ -776,4 +776,19 @@ test('download button polls status file and updates progress badge and tooltip',
     assert(h.buttons['download-video'].tooltip:find('complete') ~= nil)
     eq(h.periodic_timers[1].dead, true)
 end)
+test('user-data/player_toolbar/stable-volume is true or false after publish() with and without the filter', function()
+    local h = harness()
+    -- without the filter (on load)
+    eq(false, h.props['user-data/player_toolbar/stable-volume'])
+
+    -- with the filter
+    h.filters = {filter(graph, label)}
+    h.observer('af', h.filters)
+    eq(true, h.props['user-data/player_toolbar/stable-volume'])
+
+    -- without the filter
+    h.filters = {}
+    h.observer('af', h.filters)
+    eq(false, h.props['user-data/player_toolbar/stable-volume'])
+end)
 print('Toolbar tests passed: '..total)

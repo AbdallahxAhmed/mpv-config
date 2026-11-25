@@ -2056,8 +2056,9 @@ class TestAuditPatches(unittest.TestCase):
         ]
         self.assertEqual(len(controls), 1)
         items = controls[0].split(",")
-        self.assertEqual(items[0], "menu")
-        self.assertEqual(items[-2:], ["gap", "fullscreen"])
+        self.assertEqual(items[0], "prev")
+        self.assertEqual(items[-1], "fullscreen")
+        self.assertEqual(items[-2], "command:menu:script-message-to more_menu open?More")
         self.assertIn(
             "command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", items
         )
@@ -2065,7 +2066,10 @@ class TestAuditPatches(unittest.TestCase):
             "button:audio-tracks" in items
             or "command:headphones:script-binding uosc/audio?Audio tracks and dubs" in items
         )
-        self.assertIn("button:stable-volume", items)
+        self.assertIn("<has_many_video>video", items)
+        self.assertIn("<stream>button:stream-quality", items)
+        self.assertIn("items", items)
+        self.assertNotIn("button:stable-volume", items)
         self.assertNotIn("keypress", controls[0])
 
     def test_input_conf_has_no_arabic_twin_bindings(self):

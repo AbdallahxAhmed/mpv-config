@@ -18,9 +18,9 @@ description: "Task list for spec 006: control bar cleanup"
 
 ## Phase 3: Bar and More menu
 
-- [ ] T004 `scripts/more_menu.lua` (FR-002) and the stable-volume `user-data` in `scripts/player-toolbar.lua`.
-- [ ] T005 New `controls=` line in `config/script-opts/uosc.conf` (FR-001).
-- [ ] T006 Lua tests: entries, conditional rows, marks, live update, open/close toggle.
+- [x] T004 `scripts/more_menu.lua` (FR-002) and the stable-volume `user-data` in `scripts/player-toolbar.lua`.
+- [x] T005 New `controls=` line in `config/script-opts/uosc.conf` (FR-001).
+- [x] T006 Lua tests: entries, conditional rows, marks, live update, open/close toggle.
 
 ## Phase 4: Existing installs
 

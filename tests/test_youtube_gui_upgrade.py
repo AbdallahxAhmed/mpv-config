@@ -158,19 +158,33 @@ class GuiUpgrade(unittest.TestCase):
 
     def test_toolbar_is_mouse_first_and_fullscreen_is_rightmost(self):
         items = gui.NEW_CONTROLS.split(",")
+        self.assertEqual(items[0], "prev")
         self.assertEqual(items[-1], "fullscreen")
+        self.assertEqual(items[-2], "command:menu:script-message-to more_menu open?More")
         self.assertEqual(items.count("space"), 2)
         self.assertEqual(items.count("fullscreen"), 1)
         self.assertIn(
             "command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions", items
         )
         self.assertIn("button:audio-tracks", items)
-        self.assertIn("button:stable-volume", items)
-        self.assertIn("loop-file", items)
+        self.assertIn("<has_many_video>video", items)
         self.assertIn("<stream>button:stream-quality", items)
-        self.assertIn("<stream>button:download-video", items)
+        self.assertIn("items", items)
+        self.assertNotIn("button:stable-volume", items)
+        self.assertNotIn("<stream>button:download-video", items)
+        self.assertNotIn("loop-file", items)
+        self.assertNotIn("loop-playlist", items)
+        self.assertNotIn("shuffle", items)
         self.assertNotIn("keypress", gui.NEW_CONTROLS)
         self.assertNotIn("#audio", gui.NEW_CONTROLS)
+
+    def test_upgrade_from_icon_first_v7_controls(self):
+        raw = f"controls={gui.ICON_FIRST_V7_CONTROLS}\n".encode()
+        self.path.write_bytes(raw)
+        changes, backup = gui.upgrade(self.root, apply=True)
+        self.assertIn("controls", changes)
+        self.assertIsNotNone(backup)
+        self.assertEqual(f"controls={gui.NEW_CONTROLS}\n".encode(), self.path.read_bytes())
 
 
 if __name__ == "__main__":

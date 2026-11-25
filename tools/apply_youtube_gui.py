@@ -19,7 +19,8 @@ ICON_FIRST_V3_CONTROLS = "menu,command:content_paste:script-binding smart_paste/
 ICON_FIRST_V4_CONTROLS = "menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,gap,button:audio-tracks,gap,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen"
 ICON_FIRST_V5_CONTROLS = "menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,button:stable-volume,loop-file,space,fullscreen"
 ICON_FIRST_V6_CONTROLS = "menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<stream>button:stream-quality,<stream>button:download-video,button:stable-volume,loop-file,space,fullscreen"
-NEW_CONTROLS = "menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<has_many_video>video,<has_many_edition>editions,<stream>button:stream-quality,<stream>button:download-video,button:stable-volume,gap,space,<video,audio>speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen"
+ICON_FIRST_V7_CONTROLS = "menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<has_many_video>video,<has_many_edition>editions,<stream>button:stream-quality,<stream>button:download-video,button:stable-volume,gap,space,<video,audio>speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen"
+NEW_CONTROLS = "prev,play-pause,next,space,<video,audio>speed,space,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,button:audio-tracks,<has_many_video>video,<stream>button:stream-quality,items,command:menu:script-message-to more_menu open?More,fullscreen"
 ACCEPTED_CONTROLS = (
     OLD_CONTROLS,
     PREVIOUS_CONTROLS,
@@ -29,6 +30,7 @@ ACCEPTED_CONTROLS = (
     ICON_FIRST_V4_CONTROLS,
     ICON_FIRST_V5_CONTROLS,
     ICON_FIRST_V6_CONTROLS,
+    ICON_FIRST_V7_CONTROLS,
 )
 REQUIRED_SCRIPTS = (
     "scripts/smart-paste.lua",
@@ -36,6 +38,7 @@ REQUIRED_SCRIPTS = (
     "scripts/ytdl_hook.lua",
     "scripts/modules/stream_policy.lua",
     "scripts/player-toolbar.lua",
+    "scripts/more_menu.lua",
     "tools/vtt_translate.py",
 )
 DEFAULTS = {
