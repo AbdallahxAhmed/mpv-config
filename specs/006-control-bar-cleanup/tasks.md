@@ -31,10 +31,11 @@ description: "Task list for spec 006: control bar cleanup"
 
 ## Phase 5: Docs
 
-- [ ] T011 READMEs (English and Arabic), `docs/YOUTUBE_GUI.md`, the help overlay's "menu button" row, `CHANGELOG.md`.
+- [x] T011 READMEs (English and Arabic), `docs/YOUTUBE_GUI.md`, the help overlay's "menu button" row, `CHANGELOG.md`.
 
 ## Phase 6: Checks
 
-- [ ] T012 Both suites green.
-- [ ] T013 Does "thumbfast: pipe open failed" happen before spec 006 (`eb6cd4c`)? Headless check; if it cannot reproduce, give the maintainer steps.
+- [x] T012 Both suites green (757 Python tests, all Lua suites).
+- [x] T013 Does "thumbfast: pipe open failed" happen before spec 006 (`eb6cd4c`)? Headless check; if it cannot reproduce, give the maintainer steps.
+  Result (2026-11-25): yes. Headless mpv with `eb6cd4c` scripts and with the P5 config each log it once per file load: thumbfast respawns its helper and writes to `/tmp/thumbfast<pid>_1` about 1 ms before the helper creates that socket. Later requests succeed. `scripts/thumbfast.lua` is unchanged since `eb6cd4c`, so spec 006 is not the cause.
 - [ ] T014 (manual, maintainer, last) Playback check on KDE Wayland, two runs from `--start=5:00`: A no UI use, B bar and More menu. Pass: `delayed=0` and `drop=0` in both.

@@ -15,6 +15,7 @@ at specs/006-control-bar-cleanup/plan.md
 
 ### State of main
 - Up to date on `main`, deployed to `%APPDATA%\mpv`. Tests green: all Python suites + all Lua suites.
+- Spec 006 (control bar cleanup): control bar cleanup shipped in 03a1a9f and 0dc357c; themes dropped (66e11bc); manual T014 playback check pending.
 
 ### Arabic keyboard — what works NOW (deployed, verified in live headless mpv)
 | User presses (Arabic layout) | Delivers to mpv | Fires |

@@ -101,7 +101,7 @@ Recent work now on `main` (unreleased in the changelog):
 
 <a id="interface"></a>
 ### 🖥️ Interface
-- **Mouse-first uosc toolbar** — `Menu · Paste | CC · Dubs · Quality · Download | Stable Volume … Fullscreen`; no keyboard required (see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
+- **Mouse-first uosc toolbar** — left `Prev · Play/Pause · Next`, centered `Speed`, right `CC · Audio · Video · Quality · Items · More · Fullscreen`; no keyboard required (see [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)). The More menu holds secondary controls (Paste link, Download video, Stable Volume, Shuffle, Loops, Editions, full uosc menu, shortcuts cheat sheet).
 - **thumbfast** seekbar hover previews (with local race-condition hardening patches).
 - **Watch history & recent files** (memo) on `h`, subtitle backdrop "Netflix look" toggle on `b` with clear OSD feedback.
 - Playlists, editions and quality selectors appear contextually; window close always exits instantly.
@@ -118,7 +118,7 @@ Recent work now on `main` (unreleased in the changelog):
 
 <a id="player-utilities"></a>
 ### 🧰 Player utilities
-- **Stable Volume / night mode** (`F8` or toolbar button) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.
+- **Stable Volume / night mode** (`F8` or the More menu) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.
 - **Subtitle sync menu** (`n`, autosubsync + optional `alass`), screenshots with/without subtitles (`F1`/`F2`, PNG → `Pictures/mpv-screenshots`).
 - **SmartSkip** (`>` `<` `?`) — smart intro/outro/silence skipping, auto-skip countdowns, and chapter add/remove/save.
 - **evafast** hybrid fast-forward on `Right`; `autoload` fills the playlist from the folder; playback pauses when the window is minimized.
@@ -432,7 +432,8 @@ mpv-config download --watch
 | `scripts/display_fps_guard.lua` | Wayland: pins `display-fps-override` to the compositor's rate, only for the mode detected at install |
 | `scripts/keyboard_layout.lua` | Silent native async Win32 launcher for the Arabic AHK helper |
 | `scripts/help_overlay.lua` | ASS vector keybinding cheat sheet on `?` / `F9` |
-| `scripts/player-toolbar.lua` | Stable Volume toolbar button and codec-prioritized quality switching (AV1 > VP9 > H.264) |
+| `scripts/more_menu.lua` | More menu for uosc toolbar (paste link, download, stable volume, shuffle, loops, editions, shortcuts) |
+| `scripts/player-toolbar.lua` | Audio tracks, stream quality buttons, Stable Volume toggle handler, and codec-prioritized quality switching |
 | `scripts/modules/stream_policy.lua` | Shared YouTube/stream policy module |
 
 <a id="system-dependencies-managed-by-the-installer"></a>
@@ -446,7 +447,7 @@ mpv ≥ 0.40 (zhongfly daily builds on Windows with shinchiro fallback, `ppa:ubu
 - **MPV Companion browser extension** (`tools/extension/`, Chrome MV3) + native messaging host — one-click playback and site-cookie sync to mpv/yt-dlp for Cloudflare-protected sites, with optional FlareSolverr support (`tools/core/flaresolverr.py`). Register it with `tools/register_extension.py`.
 - **`tools/download_worker.py`** — headless 16-connection download worker (aria2c or native concurrent fragments).
 - **`tools/vtt_translate.py`** — translate WebVTT subtitles (e.g. into Arabic) without cookies or API keys.
-- **`tools/apply_youtube_gui.py`** — standalone, preview-first toolbar layout upgrade for uosc.
+- **`tools/apply_youtube_gui.py`** — standalone, preview-first toolbar layout upgrade for uosc (for configurations updated outside the deployer).
 
 ---
 
