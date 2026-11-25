@@ -10,6 +10,7 @@ a single file or package is touched.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 from deploy import ui
@@ -40,6 +41,19 @@ class PlanEntry:
 
 
 # ─── Plan builders ─────────────────────────────────────────────────────
+
+
+def _bar_cleanup_entries(env: "Environment", include_mpv_conf: bool) -> List[PlanEntry]:
+    """Spec 006 config migrations this run would make, previewed read-only."""
+    from deploy.bar_migration import pending_changes
+
+    repo_config_dir = Path(__file__).resolve().parent.parent / "config"
+    return [
+        PlanEntry("file", action, path, detail)
+        for action, path, detail in pending_changes(
+            env.config_dir, repo_config_dir, include_mpv_conf=include_mpv_conf
+        )
+    ]
 
 
 def build_install_plan(env: "Environment", dep_actions=None) -> List[PlanEntry]:
@@ -123,6 +137,13 @@ def build_install_plan(env: "Environment", dep_actions=None) -> List[PlanEntry]:
             )
         )
 
+    # install keeps an existing mpv.conf, so its theme lines are migrated.
+    plan.extend(
+        _bar_cleanup_entries(
+            env, include_mpv_conf=os.path.isfile(os.path.join(env.config_dir, "mpv.conf"))
+        )
+    )
+
     return plan
 
 
@@ -175,6 +196,9 @@ def build_update_plan(env: "Environment", keep_conf: bool = False) -> List[PlanE
                 "regenerate from template (old copy in the backup; mpv.conf.user untouched)",
             )
         )
+
+    # Without --keep-conf, mpv.conf is regenerated and needs no migration.
+    plan.extend(_bar_cleanup_entries(env, include_mpv_conf=keep_conf))
 
     return plan
 

@@ -24,10 +24,10 @@ description: "Task list for spec 006: control bar cleanup"
 
 ## Phase 4: Existing installs
 
-- [ ] T007 Replace the `controls=` line in a kept `uosc.conf` (FR-003).
-- [ ] T008 Remove the two spec-006 lines from a kept `mpv.conf` (FR-004).
-- [ ] T009 Delete a leftover `script-opts/ui_appearance.conf` (FR-005).
-- [ ] T010 Python tests for T007 to T009: other lines kept, idempotent, fresh install; the backup holds the old files (FR-006); `--dry-run` lists the changes and writes nothing (FR-007).
+- [x] T007 Replace the `controls=` line in a kept `uosc.conf` (FR-003).
+- [x] T008 Remove the two spec-006 lines from a kept `mpv.conf` (FR-004).
+- [x] T009 Delete a leftover `script-opts/ui_appearance.conf` (FR-005).
+- [x] T010 Python tests for T007 to T009: other lines kept, idempotent, fresh install; the backup holds the old files (FR-006); `--dry-run` lists the changes and writes nothing (FR-007).
 
 ## Phase 5: Docs
 

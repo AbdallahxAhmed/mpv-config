@@ -16,6 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from deploy import bar_migration
 from deploy import transaction as tx
 from deploy import ui
 from deploy.audit_log import AuditLog
@@ -1574,7 +1575,12 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None, skip=()):
         (
             "migrate-uosc-conf",
             os.path.join(config_dir, "script-opts", "uosc.conf"),
-            lambda p: _migrate_uosc_conf(p, audit_log=audit_log),
+            lambda p: _migrate_uosc_conf(p, REPO_ROOT / "config", audit_log=audit_log),
+        ),
+        (
+            "remove-ui-appearance-conf",
+            os.path.join(config_dir, "script-opts", "ui_appearance.conf"),
+            lambda p: _remove_ui_appearance_conf(p, audit_log=audit_log),
         ),
         (
             "migrate-smartskip-conf",
@@ -2769,6 +2775,8 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
                     )
             fonts_dir_fixed = True
 
+    updated, theme_lines_dropped = bar_migration.drop_theme_lines(updated)
+
     if updated == content:
         return False
     with open(mpv_conf_path, "w", encoding="utf-8") as f:
@@ -2791,12 +2799,14 @@ def _migrate_mpv_conf(mpv_conf_path, env=None, audit_log=None):
             detail += f" — restored {restored_count} option(s) for upgraded mpv"
         if sanitized_count:
             detail += f" — commented {sanitized_count} too-new option(s)"
+        if theme_lines_dropped:
+            detail += f" — dropped {theme_lines_dropped} deprecated theme line(s)"
         audit_log.record_file(mpv_conf_path, "modify", "ok", detail)
     return True
 
 
-def _migrate_uosc_conf(uosc_conf_path, audit_log=None):
-    """Drop uosc.conf keys removed upstream, with a comment instead of silence.
+def _migrate_uosc_conf(uosc_conf_path, repo_config_dir=None, audit_log=None):
+    """Drop uosc.conf keys removed upstream, and update controls= to shipped layout.
 
     volume_max was removed in uosc 5.13.0 — the volume widget now follows
     mpv's `volume-max` option, so the stale key printed
@@ -2804,6 +2814,8 @@ def _migrate_uosc_conf(uosc_conf_path, audit_log=None):
     """
     if not os.path.isfile(uosc_conf_path):
         return False
+    if repo_config_dir is None:
+        repo_config_dir = REPO_ROOT / "config"
     with open(uosc_conf_path, "r", encoding="utf-8") as f:
         content = f.read()
     updated, removed = re.subn(
@@ -2812,17 +2824,42 @@ def _migrate_uosc_conf(uosc_conf_path, audit_log=None):
         content,
         flags=re.MULTILINE,
     )
-    if not removed:
+    # Errors propagate: _migrate_deployed_configs reports them as a warning row.
+    shipped = bar_migration.controls_line(repo_config_dir)
+    updated, controls_changed = bar_migration.update_controls(updated, shipped)
+    if not removed and not controls_changed:
         return False
     with open(uosc_conf_path, "w", encoding="utf-8") as f:
         f.write(updated)
     if audit_log:
+        details = []
+        if removed:
+            details.append("removed volume_max (dropped in uosc 5.13)")
+        if controls_changed:
+            details.append("updated controls toolbar to match shipped layout")
         audit_log.record_file(
             uosc_conf_path,
             "modify",
             "ok",
-            "removed volume_max (dropped in uosc 5.13)",
+            "; ".join(details),
         )
+    return True
+
+
+def _remove_ui_appearance_conf(conf_path, audit_log=None):
+    """Delete leftover script-opts/ui_appearance.conf if it is a regular file."""
+    path = Path(conf_path)
+    if not path.is_file() or path.is_symlink():
+        return False
+    path.unlink()
+    if audit_log:
+        if hasattr(audit_log, "record_file"):
+            audit_log.record_file(
+                str(path),
+                "remove",
+                "ok",
+                "removed deprecated ui_appearance.conf",
+            )
     return True
 
 
