@@ -13,6 +13,38 @@ THEME_LINE_VALUES = frozenset(
 )
 
 
+# Files spec 006 P1-P5 shipped that the revert (66e11bc) removed from the repo.
+# Updates keep unknown files in scripts/ (transaction.prepare_assets), so these
+# survive an update and the leftover script re-applies the dropped theme unless
+# removed here. A script counts as ours only if it starts with the header every
+# P1-P5 version had; ui_appearance.conf is removed by name.
+LEFTOVER_THEME_FILES = (
+    ("scripts/ui_appearance.lua", "-- scripts/ui_appearance.lua:"),
+    ("scripts/modules/looks.lua", "-- scripts/modules/looks.lua:"),
+    ("script-opts/ui_appearance.conf", None),
+)
+
+
+def _first_line(path: Path) -> str:
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        return stream.readline().lstrip("\ufeff")
+
+
+def leftover_theme_files(config_dir: str | Path) -> Tuple[List[Path], List[Path]]:
+    """(removable, kept) leftover theme files: regular files only, never links or dirs."""
+    removable: List[Path] = []
+    kept: List[Path] = []
+    for relative, header in LEFTOVER_THEME_FILES:
+        path = Path(config_dir, *relative.split("/"))
+        if path.is_symlink() or not path.is_file():
+            continue
+        if header is None or _first_line(path).startswith(header):
+            removable.append(path)
+        else:
+            kept.append(path)
+    return removable, kept
+
+
 def controls_line(repo_config_dir: str | Path) -> str:
     """Read the shipped controls= line from config/script-opts/uosc.conf."""
     conf_path = Path(repo_config_dir) / "script-opts" / "uosc.conf"
@@ -122,8 +154,14 @@ def pending_changes(
                         ("modify", str(mpv_conf), f"drop {count} spec 006 theme line(s)")
                     )
 
-    ui_app = cfg / "script-opts" / "ui_appearance.conf"
-    if ui_app.is_file() and not ui_app.is_symlink():
-        changes.append(("remove", str(ui_app), "remove leftover ui_appearance.conf"))
+    try:
+        removable, kept = leftover_theme_files(cfg)
+    except OSError as exc:
+        changes.append(("remove", str(cfg), f"cannot inspect leftover theme files: {exc}"))
+    else:
+        for path in removable:
+            changes.append(("remove", str(path), "remove leftover spec 006 theme file"))
+        for path in kept:
+            changes.append(("skip", str(path), "kept: not the file spec 006 shipped"))
 
     return changes

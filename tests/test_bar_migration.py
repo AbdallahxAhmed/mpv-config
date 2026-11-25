@@ -29,6 +29,15 @@ OLD_CONTROLS = (
     "gap,space,<video,audio>speed,space,shuffle,loop-playlist,loop-file,gap,prev,items,next,gap,fullscreen"
 )
 LOCKFILE = {"scripts": {"uosc": {"version": "5.13.0"}}}
+# First lines of the P5 files (a60b5a8); every P1-P5 version starts the same way.
+P5_UI_APPEARANCE_LUA = (
+    "-- scripts/ui_appearance.lua: applies chosen UI style and look at load and opens More menu\n"
+    "local utils = require 'mp.utils'\n"
+)
+P5_LOOKS_LUA = (
+    "-- scripts/modules/looks.lua: pure appearance logic and look configurations (spec 006)\n"
+    "local M = {}\nreturn M\n"
+)
 
 
 class PureTextMigrationTests(unittest.TestCase):
@@ -308,6 +317,8 @@ class DeployerMigrationIntegrationTests(unittest.TestCase):
         old = {
             opts_dir / "uosc.conf": "controls=" + OLD_CONTROLS + "\nmy_key=1\n",
             opts_dir / "ui_appearance.conf": "style=calm\n",
+            self.config_dir / "scripts" / "ui_appearance.lua": P5_UI_APPEARANCE_LUA,
+            self.config_dir / "scripts" / "modules" / "looks.lua": P5_LOOKS_LUA,
             self.config_dir / "mpv.conf": (
                 "vo=gpu-next\n"
                 "script-opts-append        = uosc-border_radius=10\n"
@@ -316,8 +327,32 @@ class DeployerMigrationIntegrationTests(unittest.TestCase):
             ),
         }
         for path, text in old.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text, encoding="utf-8")
         return old
+
+    def _assert_theme_files_gone(self):
+        scripts = self.config_dir / "scripts"
+        self.assertFalse((scripts / "ui_appearance.lua").exists())
+        self.assertFalse((scripts / "modules" / "looks.lua").exists())
+        self.assertFalse((self.config_dir / "script-opts" / "ui_appearance.conf").exists())
+        # Other modules stay: the directory is shared.
+        self.assertTrue((scripts / "modules" / "stream_policy.lua").is_file())
+
+    def _mock_update(self):
+        def mock_fetch(scripts, shaders, staging):
+            for folder in ("scripts", "shaders", "fonts"):
+                d = Path(staging) / folder
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "dummy").write_text("dummy", encoding="utf-8")
+            results = [{"name": s["name"], "status": "ok"} for s in deployer.SCRIPTS]
+            results.append({"name": deployer.SHADERS["name"], "status": "ok"})
+            return results, LOCKFILE
+
+        return (
+            mock.patch.object(deployer, "detect", return_value=self.env),
+            mock.patch.object(deployer, "fetch_all", side_effect=mock_fetch),
+        )
 
     def _only_backup(self):
         backups = [p for p in self.config_dir.parent.iterdir() if p.name.startswith("mpv.backup.")]
@@ -337,7 +372,7 @@ class DeployerMigrationIntegrationTests(unittest.TestCase):
         live = self.config_dir / "script-opts" / "uosc.conf"
         self.assertIn("controls=" + SPEC_CONTROLS + "\n", live.read_text(encoding="utf-8"))
         self.assertNotIn("uosc-border_radius=10", (self.config_dir / "mpv.conf").read_text())
-        self.assertFalse((self.config_dir / "script-opts" / "ui_appearance.conf").exists())
+        self._assert_theme_files_gone()
 
     def test_update_without_keep_conf_backs_up_before_migrating(self):
         old = self._seed_old_config()
@@ -360,6 +395,39 @@ class DeployerMigrationIntegrationTests(unittest.TestCase):
         self._assert_backup_holds(self._only_backup(), old)
         live = self.config_dir / "script-opts" / "uosc.conf"
         self.assertIn("controls=" + SPEC_CONTROLS + "\n", live.read_text(encoding="utf-8"))
+        self._assert_theme_files_gone()
+
+    def test_second_update_finds_no_leftover_theme_files(self):
+        self._seed_old_config()
+        detect, fetch = self._mock_update()
+        shown = []
+        with detect, fetch, mock.patch.object(
+            deployer, "display_plan", side_effect=lambda plan, title: shown.append(plan)
+        ):
+            self.assertEqual(0, deployer.main(["--update", "--yes"]))
+            self._assert_theme_files_gone()
+            self.assertEqual(0, deployer.main(["--update", "--yes"]))
+            self._assert_theme_files_gone()
+        theme = ("ui_appearance", "looks.lua")
+        first, second = shown
+        self.assertEqual(3, sum(any(t in e.target for t in theme) for e in first))
+        self.assertEqual([], [e.target for e in second if any(t in e.target for t in theme)])
+
+    def test_same_named_user_script_is_kept_and_shown_as_skip(self):
+        own = self.config_dir / "scripts" / "ui_appearance.lua"
+        own.parent.mkdir(parents=True)
+        own.write_text("-- my own appearance script\n", encoding="utf-8")
+        link = self.config_dir / "scripts" / "modules" / "looks.lua"
+        link.parent.mkdir()
+        target = self.root / "elsewhere.lua"
+        target.write_text(P5_LOOKS_LUA, encoding="utf-8")
+        link.symlink_to(target)
+        changes = bar_migration.pending_changes(self.config_dir, REPO_CONFIG_DIR)
+        self.assertEqual([("skip", str(own))], [(a, p) for a, p, _ in changes])
+        self.assertFalse(deployer._remove_leftover_theme_files(str(self.config_dir)))
+        self.assertTrue(own.is_file())
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(P5_LOOKS_LUA, target.read_text(encoding="utf-8"))
 
     def test_install_dry_run_lists_pending_changes_and_writes_nothing(self):
         old = self._seed_old_config()
@@ -381,6 +449,9 @@ class DeployerMigrationIntegrationTests(unittest.TestCase):
         opts = self.config_dir / "script-opts"
         self.assertEqual("modify", targets[str(opts / "uosc.conf")])
         self.assertEqual("remove", targets[str(opts / "ui_appearance.conf")])
+        scripts = self.config_dir / "scripts"
+        self.assertEqual("remove", targets[str(scripts / "ui_appearance.lua")])
+        self.assertEqual("remove", targets[str(scripts / "modules" / "looks.lua")])
         self.assertEqual("modify", targets[str(self.config_dir / "mpv.conf")])
         after = {p: p.read_bytes() for p in self.config_dir.rglob("*") if p.is_file()}
         self.assertEqual(before, after)

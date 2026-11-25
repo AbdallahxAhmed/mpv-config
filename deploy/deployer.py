@@ -1578,9 +1578,9 @@ def _migrate_deployed_configs(config_dir, env, audit_log=None, skip=()):
             lambda p: _migrate_uosc_conf(p, REPO_ROOT / "config", audit_log=audit_log),
         ),
         (
-            "remove-ui-appearance-conf",
-            os.path.join(config_dir, "script-opts", "ui_appearance.conf"),
-            lambda p: _remove_ui_appearance_conf(p, audit_log=audit_log),
+            "remove-leftover-theme-files",
+            config_dir,
+            lambda p: _remove_leftover_theme_files(p, audit_log=audit_log),
         ),
         (
             "migrate-smartskip-conf",
@@ -2846,21 +2846,18 @@ def _migrate_uosc_conf(uosc_conf_path, repo_config_dir=None, audit_log=None):
     return True
 
 
-def _remove_ui_appearance_conf(conf_path, audit_log=None):
-    """Delete leftover script-opts/ui_appearance.conf if it is a regular file."""
-    path = Path(conf_path)
-    if not path.is_file() or path.is_symlink():
-        return False
-    path.unlink()
-    if audit_log:
-        if hasattr(audit_log, "record_file"):
+def _remove_leftover_theme_files(config_dir, audit_log=None):
+    """Delete the spec 006 theme files an update would otherwise keep (see bar_migration)."""
+    removable, kept = bar_migration.leftover_theme_files(config_dir)
+    for path in kept:
+        ui.warn(f"Kept {path}: it is not the file spec 006 shipped; delete it if unused.")
+    for path in removable:
+        path.unlink()
+        if audit_log:
             audit_log.record_file(
-                str(path),
-                "remove",
-                "ok",
-                "removed deprecated ui_appearance.conf",
+                str(path), "remove", "ok", "removed leftover spec 006 theme file"
             )
-    return True
+    return bool(removable)
 
 
 def _migrate_anime4k_conf(anime4k_conf_path, audit_log=None):

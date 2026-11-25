@@ -27,6 +27,7 @@ description: "Task list for spec 006: control bar cleanup"
 - [x] T007 Replace the `controls=` line in a kept `uosc.conf` (FR-003).
 - [x] T008 Remove the two spec-006 lines from a kept `mpv.conf` (FR-004).
 - [x] T009 Delete a leftover `script-opts/ui_appearance.conf` (FR-005).
+- [x] T009a Also delete leftover `scripts/ui_appearance.lua` and `scripts/modules/looks.lua` (FR-005). Found in manual testing 2026-11-25: updates keep unknown files in `scripts/`, so the P5 script survived, re-applied the theme and recreated `ui_appearance.conf`.
 - [x] T010 Python tests for T007 to T009: other lines kept, idempotent, fresh install; the backup holds the old files (FR-006); `--dry-run` lists the changes and writes nothing (FR-007).
 
 ## Phase 5: Docs

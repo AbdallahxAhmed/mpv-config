@@ -39,7 +39,7 @@ installs onto it. The earlier theme plan is dropped (see the spec).
   (as reverted P4 did).
 - `deploy/deployer.py`: `_migrate_uosc_conf` also replaces the `controls=`
   line; `_migrate_mpv_conf` also drops the two spec-006 lines (skipped when
-  `mpv.conf` was just regenerated); a new `remove-ui-appearance-conf`
+  `mpv.conf` was just regenerated); a new `remove-leftover-theme-files`
   migration. `deploy/planner.py`: read-only previews of the same three
   changes for the install and update plans.
 

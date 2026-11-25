@@ -77,7 +77,13 @@ More menu, a download reports through its existing OSD messages only.
   and nothing else:
   `script-opts-append        = uosc-border_radius=10` and
   `script-opts-append        = uosc-chapter_ranges=openings:7cc4fa64,endings:7cc4fa64,ads:c54e4e80`.
-- **FR-005**: The deployer deletes a leftover `script-opts/ui_appearance.conf`.
+- **FR-005**: The deployer deletes the leftover theme files: `script-opts/ui_appearance.conf`,
+  `scripts/ui_appearance.lua` and `scripts/modules/looks.lua`. Updates keep files
+  in `scripts/` that the repo no longer ships, so without this the leftover script
+  re-applies the dropped theme and recreates `ui_appearance.conf` at the next mpv
+  start. Regular files only, never links or directories; a script is deleted
+  only if it starts with the header every P1 to P5 version had, otherwise it is
+  kept and `--dry-run` shows it as skipped. `scripts/modules/` itself stays.
 - **FR-006** (constitution VI): FR-003 to FR-005 change a user file only after
   the config backup for that run exists, and the backup holds the old file.
 - **FR-007** (constitution VI): `--dry-run` for `install` and `update` lists
