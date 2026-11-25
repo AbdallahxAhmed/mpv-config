@@ -468,7 +468,6 @@ end
 local function publish(filters, force)
     filters = type(filters) == 'table' and filters or mp.get_property_native('af', {})
     local _, active = inspect(filters)
-    mp.set_property_native('user-data/player_toolbar/stable-volume', active)
     if not force and last_active == active then return end
     last_active = active
     local data = utils.format_json({
@@ -1284,14 +1283,6 @@ mp.observe_property('dwidth', 'number', function() publish_quality(false) end)
 mp.observe_property('track-list', 'native', function() publish_audio(false) end)
 mp.observe_property('current-tracks/audio/id', 'number', function() publish_audio(false) end)
 mp.observe_property('aid', 'string', function() publish_audio(false) end)
-local last_controls_size
-mp.observe_property('options/script-opts', 'native', function(_, opts)
-    local size = type(opts) == 'table' and opts['uosc-controls_size'] or nil
-    if size ~= last_controls_size then
-        last_controls_size = size
-        publish_quality(true)
-    end
-end)
 mp.register_event('file-loaded', function()
     publish_quality(true)
     publish_audio(true)

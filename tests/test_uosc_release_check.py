@@ -37,68 +37,7 @@ def zip_bytes(members):
     return buffer.getvalue()
 
 
-SYNTHETIC_MAIN = b"""
-defaults = {
-    controls = 'menu',
-    color = '',
-    opacity = '',
-    controls_size = 44,
-    controls_spacing = 4,
-    controls_margin = 8,
-    controls_persistency = 'idle',
-    timeline_size = 40,
-    progress = 'always',
-    progress_size = 3,
-    menu_item_height = 40,
-}
-
-local config_defaults = {
-    color = {
-        foreground = serialize_rgba('ffffff').color,
-        foreground_text = serialize_rgba('000000').color,
-        background = serialize_rgba('000000').color,
-        background_text = serialize_rgba('ffffff').color,
-        window_border = serialize_rgba('000000').color,
-        curtain = serialize_rgba('111111').color,
-        success = serialize_rgba('a5e075').color,
-        error = serialize_rgba('ff616e').color,
-        match = serialize_rgba('69c5ff').color,
-        heatmap = serialize_rgba('00adee').color,
-    },
-    opacity = {
-        timeline = 0.9,
-        position = 1,
-        chapters = 0.8,
-        slider = 0.9,
-        slider_gauge = 1,
-        controls = 0,
-        speed = 0.6,
-        menu = 1,
-        submenu = 0.4,
-        border = 1,
-        title = 1,
-        tooltip = 1,
-        thumbnail = 1,
-        curtain = 0.8,
-        idle_indicator = 0.8,
-        audio_indicator = 0.5,
-        buffering_indicator = 0.3,
-        playlist_position = 0.8,
-        heatmap = 0.4,
-    },
-}
-
-opt.read_options(options, 'uosc', handle_options)
-
-bind_command('shuffle', function() end)
-bind_command('video', function() end)
-bind_command('editions', function() end)
-bind_command('open-file', function() end)
-bind_command('menu-blurred', function() end)
-"""
-
-GOOD_ZIP = zip_bytes({check.MEMBER: MENU, "scripts/uosc/main.lua": SYNTHETIC_MAIN})
-
+GOOD_ZIP = zip_bytes({check.MEMBER: MENU, "scripts/uosc/main.lua": b"-- main\n"})
 
 
 class FakeGitHub:
@@ -162,33 +101,7 @@ class CheckDirTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             self.assertEqual(0, check.check_dir(FIXTURE, "5.13.0"))
         self.assertEqual(
-            f"uosc 5.13.0: main.lua not found in {FIXTURE}; option checks skipped\n"
-            "uosc 5.13.0: all 8 anchors of uosc-playlist-reorder match\n",
-            out.getvalue(),
-        )
-
-    def test_missing_main_lua_in_dir_prints_skipped_line(self):
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            code = check.check_dir(FIXTURE, "5.13.0")
-        self.assertEqual(0, code)
-        self.assertIn(
-            f"uosc 5.13.0: main.lua not found in {FIXTURE}; option checks skipped\n",
-            out.getvalue(),
-        )
-
-    def test_check_dir_with_main_lua_runs_options_check(self):
-        tmp = Path(tempfile.mkdtemp(prefix="uosc-check-dir-main-"))
-        self.addCleanup(shutil.rmtree, tmp)
-        shutil.copytree(FIXTURE, tmp, dirs_exist_ok=True)
-        (tmp / "main.lua").write_bytes(SYNTHETIC_MAIN)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out):
-            self.assertEqual(0, check.check_dir(tmp, "5.13.0"))
-        self.assertEqual(
-            "uosc 5.13.0: all 8 anchors of uosc-playlist-reorder match\n"
-            "uosc 5.13.0: 11 owned options, runtime handler and 5 bindings present\n",
-            out.getvalue(),
+            "uosc 5.13.0: all 8 anchors of uosc-playlist-reorder match\n", out.getvalue()
         )
 
     def test_a_broken_anchor_names_the_version_and_the_hunk(self):  # SC-009
@@ -202,7 +115,6 @@ class CheckDirTests(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             self.assertEqual(1, check.check_dir(tmp, "5.13.0"))
         self.assertEqual(
-            f"uosc 5.13.0: main.lua not found in {tmp}; option checks skipped\n"
             "::error title=uosc release check::uosc 5.13.0: anchor menu-key matched 0× "
             "in elements/Menu.lua (expected 1)\n",
             out.getvalue(),
@@ -221,65 +133,7 @@ class RunTests(unittest.TestCase):
         )
         code, out, _ = run_check(api_url=server.url("/api"))
         self.assertEqual(0, code)
-        self.assertEqual(
-            "uosc 5.99.0: all 8 anchors of uosc-playlist-reorder match\n"
-            "uosc 5.99.0: 11 owned options, runtime handler and 5 bindings present\n",
-            out,
-        )
-
-    def test_main_lua_lacks_owned_key(self):
-        broken_main = SYNTHETIC_MAIN.replace(b"controls_size = 44,", b"")
-        zip_data = zip_bytes({check.MEMBER: MENU, "scripts/uosc/main.lua": broken_main})
-        server = FakeGitHub(self, {"/api": release(), "/uosc.zip": lambda r, s: send(r, zip_data)})
-        code, out, _ = run_check(api_url=server.url("/api"))
-        self.assertEqual(1, code)
-        self.assertIn("option controls_size missing", out)
-
-    def test_main_lua_lacks_handler(self):
-        broken_main = SYNTHETIC_MAIN.replace(
-            b"opt.read_options(options, 'uosc', handle_options)", b""
-        )
-        zip_data = zip_bytes({check.MEMBER: MENU, "scripts/uosc/main.lua": broken_main})
-        server = FakeGitHub(self, {"/api": release(), "/uosc.zip": lambda r, s: send(r, zip_data)})
-        code, out, _ = run_check(api_url=server.url("/api"))
-        self.assertEqual(1, code)
-        self.assertIn("runtime option handler missing", out)
-
-    def test_zip_lacks_main_lua(self):
-        zip_data = zip_bytes({check.MEMBER: MENU})
-        server = FakeGitHub(self, {"/api": release(), "/uosc.zip": lambda r, s: send(r, zip_data)})
-        code, out, _ = run_check(api_url=server.url("/api"))
-        self.assertEqual(2, code)
-        self.assertIn("release zip has no scripts/uosc/main.lua", out)
-
-    def test_write_options_writes_sorted_json(self):
-        tmp_dir = Path(tempfile.mkdtemp(prefix="uosc-write-opt-"))
-        self.addCleanup(shutil.rmtree, tmp_dir)
-        target = tmp_dir / "uosc-options.json"
-        server = FakeGitHub(self, {"/api": release(), "/uosc.zip": lambda r, s: send(r, GOOD_ZIP)})
-        code, _, _ = run_check(api_url=server.url("/api"), write_options=target)
-        self.assertEqual(0, code)
-        self.assertTrue(target.is_file())
-        content = target.read_text(encoding="utf-8")
-        parsed = json.loads(content)
-        self.assertEqual(content, json.dumps(parsed, indent=2, sort_keys=True) + "\n")
-
-    def test_compare_options_exits_1_on_changed_default(self):
-        tmp_dir = Path(tempfile.mkdtemp(prefix="uosc-comp-opt-"))
-        self.addCleanup(shutil.rmtree, tmp_dir)
-        target = tmp_dir / "uosc-options.json"
-        server = FakeGitHub(self, {"/api": release(), "/uosc.zip": lambda r, s: send(r, GOOD_ZIP)})
-        # First write good options
-        code, _, _ = run_check(api_url=server.url("/api"), write_options=target)
-        self.assertEqual(0, code)
-        # Modify one default
-        parsed = json.loads(target.read_text(encoding="utf-8"))
-        parsed["options"]["controls_size"] = "99"
-        target.write_text(json.dumps(parsed, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        # Run compare
-        code, out, _ = run_check(api_url=server.url("/api"), compare_options=target)
-        self.assertEqual(1, code)
-        self.assertIn("controls_size", out)
+        self.assertEqual("uosc 5.99.0: all 8 anchors of uosc-playlist-reorder match\n", out)
 
     def test_hung_server_stops_at_the_deadline(self):
         def hang(request, server):
@@ -362,17 +216,6 @@ class RunTests(unittest.TestCase):
         for _path, headers in server.seen:
             self.assertNotIn("authorization", {name.lower() for name in headers})
 
-    def test_members_from_zip_reads_only_wanted(self):
-        archive_data = zip_bytes({
-            check.MEMBER: MENU,
-            "scripts/uosc/main.lua": b"-- main\n",
-            "scripts/uosc/extra.lua": b"-- extra\n",
-        })
-        members = check._members_from_zip(archive_data, wanted=(check.MEMBER,))
-        self.assertIn(check.MEMBER, members)
-        self.assertNotIn("scripts/uosc/main.lua", members)
-        self.assertNotIn("scripts/uosc/extra.lua", members)
-
 
 class CliTests(unittest.TestCase):
     def test_cli_smoke_on_the_fixture(self):
@@ -394,7 +237,6 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
         self.assertIn("all 8 anchors", proc.stdout)
-        self.assertIn("option checks skipped", proc.stdout)
 
 
 if __name__ == "__main__":

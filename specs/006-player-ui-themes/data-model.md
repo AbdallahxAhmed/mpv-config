@@ -75,7 +75,7 @@ Shorthands used in `controls`:
 | Key | calm | bar | focus |
 |---|---|---|---|
 | `controls` | `prev,PLAY,next,space,<video,audio>speed,SUBS,button:audio-tracks,COND,items,MORE,fullscreen` | same as calm | `space,prev,PLAY,next,space,items,MORE,fullscreen` |
-| `opacity.controls` | `0` | `0.93` | `0` |
+| `opacity.controls` | `0` | `0.92` | `0` |
 | `controls_persistency` | `idle` | `idle,windowed` | `idle` |
 | `progress` | `always` | `always` | `always` |
 | `progress_size` | `3` | `3` | `3` |

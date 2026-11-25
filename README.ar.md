@@ -101,9 +101,7 @@
 
 <a id="الواجهة"></a>
 ### 🖥️ الواجهة
-- **أنماط واجهة المشغّل والسمات القابلة للتبديل** — ثلاثة أنماط مدمجة لتخطيط الواجهة: **calm** (الافتراضي: أزرار هادئة مع خط تقدم رفيع 3 px يتمدد عند التمرير)، و**bar** (صناديق أزرار معبأة بشفافية 0.93 مع بقاء الأزرار مرئية في وضع النافذة)، و**focus** (أزرار تشغيل متموضعة في المنتصف تماماً دون تشتيت). يمكنك تبديل الأنماط والخلفيات (`dark`، `black`، `slate`) والألوان المميزة (`amber`، `teal`، `violet`، `rose`، `white`) والأحجام (`comfortable` بـ 44 px، و`compact` بـ 36 px) أثناء تشغيل الفيديو عبر **More > Appearance**؛ وتُحفظ الخيارات تلقائياً عبر جلسات التشغيل والتحديثات في `script-opts/ui_appearance.conf` (راجع [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
-- **قائمة More المجمّعة** — قائمة منظمة تضم Appearance، وSubtitles، وAudio، وStream quality (في البث فقط)، وPlayback (يشمل Shuffle وLoop playlist وLoop file وSpeed)، وPicture & sound (يشمل وضع Anime4K وStable volume وVideo track وEditions)، وOpen (يشمل Paste link وOpen file وDownload video)، مع إمكانية الوصول إلى قائمة uosc الكاملة ولوحة الاختصارات.
-- **إعدادات uosc المملوكة للسمة** — تمتلك سمة المشغل مفاتيح uosc التالية وتديرها ديناميكياً، لذا لم تعد التعديلات اليدوية عليها في `uosc.conf` تسري: `controls`، و`color`، و`opacity`، و`controls_size`، و`controls_spacing`، و`controls_margin`، و`controls_persistency`، و`timeline_size`، و`progress`، و`progress_size`، و`menu_item_height`.
+- **شريط أدوات uosc بالفأرة أولاً** — `القائمة · لصق | ترجمة · دبلجة · الجودة · تنزيل | صوت ثابت … ملء الشاشة`؛ لا حاجة للوحة المفاتيح (راجع [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md)).
 - معاينات مصغّرة من **thumbfast** عند المرور على شريط التقدم (مع ترقيعات محلية ضد حالات التسابق).
 - **سجل المشاهدة والملفات الأخيرة** (memo) بزر `h`، وتبديل «صندوق خلفية الترجمة» بهيئة نتفليكس بـ `b` مع رسائل واضحة على الشاشة.
 - قوائم التشغيل والإصدارات ومحددات الجودة تظهر حسب السياق؛ ويغلق إغلاق النافذة المشغّل فوراً.
@@ -240,7 +238,7 @@
 | نقر مزدوج بالأيمن | مُهمَل |
 | إغلاق النافذة (X) | إنهاء mpv فوراً (`CLOSE_WIN quit`) |
 
-> لكل ما سبق مكافئ بالفأرة في عناصر تحكم uosc وقائمة More — راجع [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
+> لكل ما سبق مكافئ بالفأرة في شريط uosc — راجع [docs/YOUTUBE_GUI.md](docs/YOUTUBE_GUI.md).
 
 <a id="التوائم-العربية-نفس-المفتاح-الفيزيائي"></a>
 ### التوائم العربية (نفس المفتاح الفيزيائي)
@@ -419,8 +417,6 @@ mpv-config download --watch
 | `scripts/display_fps_guard.lua` | على Wayland: يثبّت `display-fps-override` على تردد الشاشة الذي يبلّغ عنه المؤلّف، فقط للوضع المكتشف عند التثبيت |
 | `scripts/keyboard_layout.lua` | مشغّل صامت غير متزامن عبر Win32 الأصلي لمساعد AutoHotkey العربي |
 | `scripts/help_overlay.lua` | لوحة مرجع المفاتيح المرسومة بنواقل ASS على `?` / `F9` |
-| `scripts/ui_appearance.lua` | محرك سمات واجهة المشغل، تبديل المظهر والأنماط أثناء التشغيل، وقائمة More |
-| `scripts/modules/looks.lua` | تعريفات السمات، لوحات الألوان، مولد خيارات uosc، ومنشئ قائمة More |
 | `scripts/player-toolbar.lua` | زر «الصوت الثابت» في شريط الأدوات وتبديل الجودة بحسب أولوية الترميز (AV1 > VP9 > H.264) |
 | `scripts/modules/stream_policy.lua` | وحدة سياسة يوتيوب/البث المشتركة |
 

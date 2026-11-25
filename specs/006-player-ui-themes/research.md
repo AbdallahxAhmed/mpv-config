@@ -138,7 +138,7 @@ deployed copy carries the spec 005 patch, and its line numbers differ. The
     | Hint on the hover row | 3.0 |
     | `000000` on the active row (accent at 0.8 over the surface) | 4.5 |
     | Accent icon on the surface | 4.5 |
-    | Accent icon on a bar box (Background at 0.93 over black, and over white) | 4.5 |
+    | Accent icon on a bar box (Background at 0.92 over black, and over white) | 4.5 |
     | Background-coloured icon on the accent | 4.5 |
 
   - Exempt: a hint on the active row.

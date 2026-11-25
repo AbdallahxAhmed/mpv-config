@@ -1,99 +1,39 @@
 # Mouse-first MPV controls, captions and dubs
 
-## Player UI styles and controls — no keyboard required
+## Use the icons — no keyboard required
 
-Move the pointer towards the bottom of the player to reveal the controls. The player includes three switchable styles configured via **More > Appearance > Style**:
-
-### 1. calm (default)
-Clean, minimalist layout with uncluttered controls and no button background boxes. A thin 3 px progress line stays visible at the bottom and expands to full height with timestamps when the pointer comes near.
-- **Left**: Previous (`prev`), Play/Pause (`PLAY`, round icon), Next (`next`)
-- **Center**: Expanding space
-- **Right**: Playback speed slider (`<video,audio>speed`), Subtitles (`SUBS`), Audio tracks (`button:audio-tracks`), conditional controls (`<has_many_video>video`, `<has_many_edition>editions`, `<stream>button:stream-quality`, `<stream>button:download-video`), Playlist (`items`), More menu (`MORE`), Fullscreen (`fullscreen`)
-
-### 2. bar
-Same button order and timeline behavior as **calm**, but each button sits on a translucent filled box (opacity 0.93) and the controls remain visible in windowed mode as well as when idle.
-
-### 3. focus
-Centered playback controls focused on essential navigation, keeping the interface distraction-free. Secondary controls (subtitles, audio, speed, quality, download) are accessed through the **More** menu.
-- **Left / Center**: Expanding space, Previous (`prev`), Play/Pause (`PLAY`), Next (`next`), Expanding space
-- **Right**: Playlist (`items`), More menu (`MORE`), Fullscreen (`fullscreen`)
-
-### Button order reference
-
-| Style | Controls order |
-| --- | --- |
-| **calm** / **bar** | `prev,PLAY,next,space,<video,audio>speed,SUBS,button:audio-tracks,COND,items,MORE,fullscreen` |
-| **focus** | `space,prev,PLAY,next,space,items,MORE,fullscreen` |
-
-Where `PLAY` is the round play/pause cycle button, `SUBS` opens subtitles, `COND` provides contextual video track, editions, stream quality, and download buttons, and `MORE` opens the grouped More menu.
-
-### Control sizes
-
-Configured via **More > Appearance > Size**:
-- **comfortable** (default): 44 px buttons with 4 px spacing and 8 px margin; 40 px timeline size.
-- **compact**: 36 px buttons with 2 px spacing and 6 px margin; 32 px timeline size.
-
-Both sizes feature a 3 px slim progress line when hidden and 40 px menu item height.
-
-### Grouped More menu
-
-The **More** button (`MORE`, hamburger icon) opens a structured in-player menu:
+Move the pointer towards the bottom of the player to reveal the toolbar. Its groups are:
 
 ```text
-Appearance       > Style (calm · bar · focus)
-                   Background (dark · black · slate)
-                   Accent (amber · teal · violet · rose · white)
-                   Size (comfortable · compact)
-Subtitles        (opens caption / subtitle menu)
-Audio            (opens audio tracks & dubs menu)
-Stream quality   (streams only; opens quality menu)
-Playback         > Shuffle (toggle, marked when ON)
-                   Loop playlist (toggle, marked when active)
-                   Loop file (toggle, marked when active)
-                   Speed (0.5× · 0.75× · 1× · 1.25× · 1.5× · 1.75× · 2×)
-Picture & sound  > Anime4K mode (off · fast · A · B · C · A+A · B+B · C+A)
-                   Stable volume (toggle, marked when ON)
-                   Video track (listed when file has multiple video tracks)
-                   Editions (listed when file has multiple editions)
-Open             > Paste link (Ctrl+V hint, opens clipboard URL/path)
-                   Open file (file picker)
-                   Download video (streams only)
-Full uosc menu   (opens uosc's full built-in menu)
-All shortcuts    (F9 / ? cheat sheet overlay)
+Menu · Paste  |  CC · Headphones · Quality  |  Stable Volume          Fullscreen
 ```
 
-Active values across Appearance, Playback, and Picture & sound are dynamically marked. Appearance adjustments switch live within 1 second while playing without reloading, and persist in `script-opts/ui_appearance.conf`.
-
-| Icon / Button | Mouse action |
+| Icon | Mouse action |
 | --- | --- |
-| Prev / Next | Previous or next playlist entry / chapter. |
-| Play / Pause | Play or pause video (round icon). |
-| Speed slider | Adjust playback speed interactively (`calm` and `bar`; in `focus`, reached via **More > Playback > Speed**). |
-| Subtitles | Open subtitles and captions. On YouTube, choose creator, auto-generated or auto-translated captions. For local media, opens the subtitle menu (in `focus`, reached via **More > Subtitles**). |
-| Audio tracks | Open audio tracks and choose the available dub/language (in `focus`, reached via **More > Audio**). |
-| Video track | Contextual: appears when the file has multiple video tracks (in `focus`, reached via **More > Picture & sound > Video track**). |
-| Editions | Contextual: appears when the file has multiple editions (in `focus`, reached via **More > Picture & sound > Editions**). |
-| Quality | Contextual: appears on network streams. Dynamic resolution badge (e.g. 1080p, 720p, 4K). Click to open the stream quality menu with *Set as default* and *Just this video* submenus (in `focus`, reached via **More > Stream quality**). Rows marked **●** are formats the stream really offers; rows marked **○** are ceiling-only choices the stream doesn't list (hint *cap only · not in stream*) — picking one caps the extractor, so playback falls to the best the video actually has. |
-| Download | Contextual: appears on network streams. Download the playing video directly using yt-dlp (in `focus`, reached via **More > Open > Download video**). |
-| Playlist (`items`) | Open the playlist / file items menu with drag-and-drop reordering. |
-| Anime detection & Anime4K mode (More > Picture & sound > Anime4K mode) | `scripts/profile_picker.lua` decides per file whether the file is anime (release group, Japanese audio track, episode marker, multi-language tag, or a title from your own `script-opts/anime_series.conf` list) and applies the **anime** profile (Anime4K on the default "A+A (Ultra Sharp)" preset with an on-screen verification badge) or the light **live-action** one. `Ctrl+g` cycles the Anime4K mode, `Ctrl+Shift+t` overrides the detection by hand, and `Ctrl+1`…`Ctrl+6` (`Ctrl+0` for off) pick a mode directly — any shortcut automatically saves the choice as default to `script-opts/anime4k.conf`. The installer asks which preset to ship (`off`, `fast`, `A`, `A+A`, `B`, `B+B`, `C`, `C+A`), where `A+A` is the recommended default. Default preset can also be updated anytime via `deployer --update --anime-preset <MODE>` or by editing `script-opts/anime4k.conf`. |
-| Stable volume (More > Picture & sound) | Toggle Stable Volume. The row is marked while the preset is on. |
-| More | Open the grouped More menu (Appearance, Subtitles, Audio, Stream quality, Playback, Picture & sound, Open, Full uosc menu, All shortcuts). |
-| Fullscreen | Enter or leave fullscreen, at the far-right edge of the toolbar. |
+| Menu | Open the normal uosc menu. |
+| Clipboard | Open the link or file path currently copied to the clipboard. |
+| CC | Open subtitles and captions. On YouTube, choose creator, auto-generated or auto-translated captions. For local media, use the normal subtitle menu. |
+| Headphones | Open audio tracks and choose the available dub/language. This does not toggle Stable Volume. |
+| Quality | Dynamic resolution badge (e.g. 1080p, 720p, 4K). Click to open the actual available qualities for the current video with a selection indicator. Rows marked **●** are formats the stream really offers; rows marked **○** are ceiling-only choices the stream doesn't list (hint *cap only · not in stream*) — picking one caps the extractor, so playback falls to the best the video actually has. This keeps, say, a 4K row visible for a 1080-max video without pretending it exists. When nothing is known about the stream yet (a local file, a non-YouTube source, or a switch that just failed) the rows carry **no marker** at all: the menu never claims a height is missing when it has not actually checked. |
+| Anime detection & Anime4K mode | `scripts/profile_picker.lua` decides per file whether the file is anime (release group, Japanese audio track, episode marker, multi-language tag, or a title from your own `script-opts/anime_series.conf` list) and applies the **anime** profile (Anime4K on the default "A+A (Ultra Sharp)" preset with an on-screen verification badge) or the light **live-action** one. `Ctrl+g` cycles the Anime4K mode, `Ctrl+Shift+t` overrides the detection by hand, and `Ctrl+1`…`Ctrl+6` (`Ctrl+0` for off) pick a mode directly — any shortcut automatically saves the choice as default to `script-opts/anime4k.conf`. The installer asks which preset to ship (`off`, `fast`, `A`, `A+A`, `B`, `B+B`, `C`, `C+A`), where `A+A` is the recommended default. Default preset can also be updated anytime via `deployer --update --anime-preset <MODE>` or by editing `script-opts/anime4k.conf`. |
 | Quality menu · Set as default (row submenu) | Each resolution row opens a two-action submenu. *Set as default* persists that resolution as the streaming ceiling (`script-opts/stream_quality.conf`, e.g. *720p ▸ Set as default*) **and** re-drives the playing video at it. Future streams start at it; rows marked *Default* show what is saved. One submenu action — two clicks, no reopen. |
 | Quality menu · Just this video (row submenu) | Plays this video at the chosen resolution only — session override, saved default untouched. Switches happen without re-extraction: the last yt-dlp pass already holds signed stream URLs, so a switch loads the chosen video + audio URLs directly (the ~3 s extraction round-trip is skipped); if those URLs have gone stale, the switch automatically falls back to the full reload. The playlist entry keeps the canonical page URL, so replaying the video later re-extracts it instead of replaying an expired link. A height the stream does not offer (a **○** row) caps the extraction instead of demanding a format that isn't there, so it still plays the best the video actually has — the OSD then names the height that is really played, not the unreachable ceiling. After a fast switch the cached extraction is restored, so every later switch in that video stays fast and the menu keeps its real rows. The OSD after any quality change names the rescale (*720p (upscale: 1920x1080 display)*) because stats-for-nerds *Display: Resolution* is the window size, not the stream — the **Video** section shows the real source resolution. |
 | Quality menu · Apply default now | Drops any session override and reloads at the saved default. |
 | Quality menu · Default: any resolution | Removes the cap entirely — yt-dlp picks the best available source quality. |
+| Compress / inward arrows | Toggle Stable Volume. The active styling, **ON** badge and hover text reflect the actual preset state. No badge is shown while Off. |
+| Fullscreen | Enter or leave fullscreen, at the far-right edge of the toolbar. |
 
-The toolbar remains accessible while idle. Fullscreen/display scaling still applies; extremely narrow windows or unusually large custom scaling can cause uosc to hide middle controls. Widen the window if a control is missing.
+CC and headphones are separate, always-available buttons, not instructions to press a shortcut. Stable Volume no longer shares the audio-track waveform icon. The audio-count badge is omitted to avoid distracting numbers such as `147` on the toolbar; track names and choices remain in the audio menu. The ordinary volume slider is still separate and unchanged.
+
+The layout uses uosc's expanding `space` element for right alignment, not an oversized fixed gap. Default buttons remain 44 pixels with 4-pixel spacing and an 8-pixel margin. The toolbar remains accessible while idle. Fullscreen/display scaling still applies; extremely narrow windows or unusually large custom scaling can cause uosc to hide middle controls. Widen the window if a control is missing.
 
 ### Turn on generated captions while watching
 
-1. Copy a YouTube link and open it via **More > Open > Paste link** (or press `Ctrl+V`). Quoted links, `youtu.be`, `watch?v=...` and `shorts/...` fragments are normalized before extraction. Existing local files are not converted into URLs.
-2. Once playback starts, click **Subtitles** (or **More > Subtitles** in `focus`).
+1. Copy a YouTube link and click the **clipboard icon**. Quoted links, `youtu.be`, `watch?v=...` and `shorts/...` fragments are normalized before extraction. Existing local files are not converted into URLs.
+2. Once playback starts, click **CC**.
 3. Open **Auto-generated** and click the language you want. Creator captions and auto-translations are separate groups when supplied by YouTube/yt-dlp.
-4. To turn captions off, click **Subtitles → Subtitles off** (or **More > Subtitles → Subtitles off**). This also cancels an in-flight caption request.
-5. To change the dub, click **Audio** (or **More > Audio** in `focus`), then the desired audio track. No keyboard action is needed for either menu.
+4. To turn captions off, click **CC → Subtitles off**. This also cancels an in-flight caption request.
+5. To change the dub, click **headphones**, then the desired audio track. No keyboard action is needed for either menu.
 
 Only captions actually returned by YouTube/yt-dlp are listed. This does not generate missing captions using a separate speech-recognition service. Caption selection is per playback session; reopening a video may require selecting an on-demand caption again.
 
@@ -129,32 +69,65 @@ The playback hook filters its already-extracted format list before building mpv'
 
 This is conservative metadata-based filtering, not another extraction or a background probe of every dub. Ambiguous formats may remain duplicated. Higher bitrate is not a universal guarantee of better perceived quality across codecs.
 
-## Stable Volume and Picture & sound controls
+## Stable Volume without the icon confusion
 
-Stable Volume uses the existing normalization/limiter settings:
+The new button uses the existing normalization/limiter settings:
 
 ```text
 dynaudnorm=f=500:g=15:p=0.95:m=10
 alimiter=limit=0.9:level=false
 ```
 
-It is toggled from **More > Picture & sound > Stable volume** (or shortcut `F8`), where its active state is clearly marked. It does not change audio filters at startup. Toggling it adds or removes its named preset while retaining unrelated filters. It also recognizes the exact adjacent, unlabelled pair from the shipped F8 preset, so toggling an already-active legacy preset turns it off rather than adding another copy. Differently labelled user filters are left alone; a conflicting reserved filter name is not overwritten.
+It does not change audio filters at startup. Clicking it adds or removes its named preset while retaining unrelated filters. It also recognizes the exact adjacent, unlabelled pair from the shipped F8 preset, so clicking an already-active legacy preset turns it off rather than adding another copy. Differently labelled user filters are left alone; a conflicting reserved filter name is not overwritten.
 
-Anime4K mode is also selectable and saved from **More > Picture & sound > Anime4K mode** (in addition to `Ctrl+1`..`Ctrl+6`, `Ctrl+0`, `Ctrl+g`).
+The icon state follows actual filter changes and is republished when uosc starts. It does not emulate F8. The old F8 shortcut itself is unchanged and still has its original whole-filter-list behavior; use the new button when preserving custom filters matters.
 
-## Theme management & uosc configuration ownership
+## Existing installations: update scripts, then activate the layout
 
-The theme script (`scripts/ui_appearance.lua`) dynamically owns and manages the following uosc configuration options:
+**Normal updates intentionally preserve your personal `script-opts/uosc.conf`. Updating the repository or scripts alone does not replace your installed toolbar.**
 
-```text
-controls, color, opacity, controls_size, controls_spacing, controls_margin, controls_persistency, timeline_size, progress, progress_size, menu_item_height
+With mpv closed, back up and update these five files together from the same reviewed revision, keeping their paths under your active mpv configuration directory:
+
+- `scripts/ytdl_hook.lua`
+- `scripts/ytdl-sub-menu.lua`
+- `scripts/smart-paste.lua`
+- `scripts/modules/stream_policy.lua`
+- `scripts/player-toolbar.lua`
+
+Use your normal asset update process, or copy these files manually. Use a uosc release that supports managed buttons (the API was checked against uosc 5.13.0 source), and keep its bundled fonts installed with it. Boxes or literal icon names usually indicate missing/mismatched fonts; check the configuration's `fonts` directory and restart mpv. Use normal configuration loading: `--no-config` also disables discovery of this configuration's caption helper module.
+
+From the checkout containing this update, preview the toolbar migration:
+
+```console
+python tools/apply_youtube_gui.py --config-dir "<active mpv config directory>"
 ```
 
-Because these keys are set dynamically via mpv's runtime `script-opts`, manual edits to them in `uosc.conf` no longer take effect. All appearance customizations (styles, backgrounds, accents, and sizes) are made inside mpv via **More > Appearance** and persist in `script-opts/ui_appearance.conf`.
+Replace the placeholder with the directory containing your active `mpv.conf` and `script-opts` folder. A portable installation may use a different directory from the normal user configuration. After reviewing the preview, apply it with mpv closed:
 
-All other `uosc.conf` options (such as animation durations, fonts, and volume controls) remain fully under user control.
+```console
+python tools/apply_youtube_gui.py --config-dir "<active mpv config directory>" --apply
+```
 
-On fresh installs and updates, configurations move to the default look (**calm**, **dark**, **amber**, **comfortable**) automatically.
+The helper:
+
+- Recognizes both earlier stock toolbar layouts and upgrades them to the icon-first layout.
+- Checks that the five GUI scripts exist before activating new controls; it does not install those scripts or verify their version.
+- Changes only recognized stock toolbar/spacing values in `uosc.conf`, retaining other custom values, comments and line endings.
+- Makes a unique `uosc.conf.pre-youtube-*.bak` backup before replacing the file.
+- Refuses custom/duplicate toolbar definitions and symlinked targets instead of overwriting them.
+- Does not touch `mpv.conf`, `input.conf`, shaders or language preferences.
+
+Restart mpv after applying. Confirm that headphones and the compress icon are distinct and fullscreen is at the right. To undo the layout change, close mpv and restore the printed backup.
+
+### Custom toolbar: merge deliberately
+
+If you maintain a custom layout, back up `uosc.conf` and merge the following entries into its **single** `controls=` line. Replace the old subtitle/audio/Stable Volume entries rather than appending duplicates; move fullscreen to the end after `space`. A complete reference layout is:
+
+```ini
+controls=menu,command:content_paste:script-binding smart_paste/paste-to-open?Paste link,gap,command:closed_caption:script-binding ytdl_sub_menu/open?Subtitles and captions,gap,button:audio-tracks,gap,<stream>button:stream-quality,gap,button:stable-volume,space,fullscreen
+```
+
+Retain your other custom controls and settings as needed. Do not paste a second `controls=` line. New installations receive this default automatically; existing installations require the explicit activation above.
 
 ## Preserved performance settings and opt-outs
 

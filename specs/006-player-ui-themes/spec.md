@@ -29,7 +29,7 @@ colour. Two other styles exist for other tastes.
 | Style | Left / centre | Right | Timeline | Button boxes |
 |---|---|---|---|---|
 | **calm** (default) | prev, play/pause (round icon), next, on the left | speed, subtitles, audio, conditional controls, playlist, More, fullscreen | a 3 px line when the controls are hidden; grows to full size when the pointer comes near | none |
-| **bar** | as calm | as calm | as calm | every button sits on a filled box (opacity 0.93; the requested "about 0.92" raised to 0.93 on 2026-11-24 so every icon pair passes 4.5:1); in windowed mode the controls stay visible |
+| **bar** | as calm | as calm | as calm | every button sits on a filled box (opacity 0.92); in windowed mode the controls stay visible |
 | **focus** | prev, play/pause, next, centred exactly in the window | playlist, More, fullscreen | as calm | none |
 
 "Conditional controls" are stream quality and download (streams only), video
