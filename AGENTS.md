@@ -15,7 +15,7 @@ at specs/006-control-bar-cleanup/plan.md
 
 ### State of main
 - Up to date on `main`, deployed to `%APPDATA%\mpv`. Tests green: all Python suites + all Lua suites.
-- Spec 006 (control bar cleanup): control bar cleanup shipped in 03a1a9f and 0dc357c; themes dropped (66e11bc); manual T014 playback check pending.
+- Spec 006 (control bar cleanup): control bar cleanup shipped in 03a1a9f and 0dc357c; leftover theme scripts removed on update (990a3df); themes dropped (66e11bc); T014 playback check passed on KDE Wayland (delayed 2 at window open in both runs, drop 0).
 
 ### Arabic keyboard — what works NOW (deployed, verified in live headless mpv)
 | User presses (Arabic layout) | Delivers to mpv | Fires |

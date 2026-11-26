@@ -39,4 +39,13 @@ description: "Task list for spec 006: control bar cleanup"
 - [x] T012 Both suites green (757 Python tests, all Lua suites).
 - [x] T013 Does "thumbfast: pipe open failed" happen before spec 006 (`eb6cd4c`)? Headless check; if it cannot reproduce, give the maintainer steps.
   Result (2026-11-25): yes. Headless mpv with `eb6cd4c` scripts and with the P5 config each log it once per file load: thumbfast respawns its helper and writes to `/tmp/thumbfast<pid>_1` about 1 ms before the helper creates that socket. Later requests succeed. `scripts/thumbfast.lua` is unchanged since `eb6cd4c`, so spec 006 is not the cause.
-- [ ] T014 (manual, maintainer, last) Playback check on KDE Wayland, two runs from `--start=5:00`: A no UI use, B bar and More menu. Pass: `delayed=0` and `drop=0` in both.
+- [x] T014 (manual, maintainer, last) Playback check on KDE Wayland, two runs from `--start=5:00`: A no UI use, B bar and More menu. Pass: `delayed=0` and `drop=0` in both.
+  Result (recorded 2026-11-26, on `990a3df`, KDE Wayland 143.981 Hz, 23.976 fps HEVC 1080p with Anime4K, `--fs --no-resume-playback --start=5:00 --length=90`):
+
+  | Run | ratio | jitter | avsync | drop | delayed | mistimed |
+  |---|---|---|---|---|---|---|
+  | A, no UI use | 6 | 0.3817 | +0 | 0 | 2 | 0 |
+  | B, bar, More menu, episode switch | 6 | 0.4272 | +0 | 0 | 2 | 3 |
+  | B, next episode, ~40 s, window already open | 6 | 0.4843 | +0.00064 | 0 | 0 | 1 |
+
+  `delayed` was 2 in both runs, not 0. The 2 frames come at the initial window open: A and B show the same count, and it stays 0 once the window is open. So using the UI adds no delayed or dropped frames. The maintainer accepted T014 as passed on KDE Wayland; playback was visually smooth.
