@@ -38,10 +38,10 @@
 # │ b           │  Subtitle backdrop box on/off (Netflix look)     │
 # │ RIGHT       │  Fast-forward (evafast)                          │
 # ├─────────────┼───────────────────────────────────────────────────┤
-# │             │  ⏭️  SmartSkip (>, <, ?, Ctrl/Shift/Alt+N)       │
+# │             │  ⏭️  SmartSkip (/, >, <, Ctrl/Shift/Alt+N)       │
 # │ >           │  Smart next (skip intro/outro/silence)           │
 # │ <           │  Smart previous                                  │
-# │ ?           │  Trigger silence skip                            │
+# │ /           │  Manual skip: jump to the next silence           │
 # │ Ctrl+.      │  Toggle autoskip on/off                          │
 # │ Alt+.       │  Toggle category autoskip                        │
 # │ Ctrl+RIGHT  │  Next chapter                                    │
@@ -105,8 +105,11 @@ Ctrl+Shift+t no-osd script-message-to profile_picker toggle-manual
 # "?" is a punctuation key, so it works in every layout.
 ? no-osd script-message-to help_overlay help
 F9 no-osd script-message-to help_overlay help
-# Prevent accidental volume drop when pressing physical '/' without Shift
-/ ignore
+# Manual skip: bare '/' runs SmartSkip's silence skip (fast-forward to the
+# next silence = end of the intro/outro; press again or Esc to cancel).
+# Shift+/ ('?') stays the cheat sheet. Owning '/' here also keeps mpv's
+# built-in '/ = volume down' away. Arabic twin (ظ) is generated below.
+/ script-binding SmartSkip/silence-skip
 
 
 # **----- اختصارات مفيدة إضافية (تم التصحيح) -----**

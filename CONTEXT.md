@@ -143,7 +143,7 @@ runs all three.
 | `profile_picker.lua` (custom) | Anime detection (offline signals: release group 4, user series list 4, jpn-audio+episode 3, jpn+multi 2, weaker singles; threshold 3) → applies `[anime]`/`[live-action]`; default preset is `A+A` (ultra sharp) with on-screen badge; reads and persists the Anime4K mode to `script-opts/anime4k.conf`. |
 | `smart_motion.lua` (custom) | Runtime motion controller: per-file cadence analysis picks presentation clock/interpolation/tscale; `stream_web_parity` for streams; ships `oversample` at runtime (see traps). Toggle `Ctrl+Alt+m`. |
 | `smart-paste.lua` (custom) | `Ctrl+V` paste-to-open / `Ctrl+Shift+V` to playlist, with URL normalization and local-file protection. |
-| `SmartSkip.lua` (vendored) | Intro/outro/silence/chapter skipping (`>` `<` `?` `Ctrl+.` …). |
+| `SmartSkip.lua` (vendored) | Intro/outro/silence/chapter skipping (`/` `>` `<` `Ctrl+.` …); chapter detection in `scripts/modules/skip_detect.lua`. |
 | `memo` (fetched) | Watch history menu (`h`). |
 | `evafast` (fetched) | Hybrid fast-forward on `RIGHT`. |
 | `sponsorblock` (fetched) | Segment marking/voting (`g` `G` `B` `Ctrl+B`). |

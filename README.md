@@ -120,7 +120,7 @@ Recent work now on `main` (unreleased in the changelog):
 ### 🧰 Player utilities
 - **Stable Volume / night mode** (`F8` or the More menu) — `dynaudnorm` + `alimiter` chain that lifts quiet dialogue without pumping or clipping.
 - **Subtitle sync menu** (`n`, autosubsync + optional `alass`), screenshots with/without subtitles (`F1`/`F2`, PNG → `Pictures/mpv-screenshots`).
-- **SmartSkip** (`>` `<` `?`) — smart intro/outro/silence skipping, auto-skip countdowns, and chapter add/remove/save.
+- **SmartSkip** (`/` `>` `<`) — smart intro/outro/silence skipping (case-insensitive chapter names in English/Japanese/Arabic, plus ~1:30-length detection of the OP/ED in unnamed chapters), auto-skip countdowns, and chapter add/remove/save.
 - **evafast** hybrid fast-forward on `Right`; `autoload` fills the playlist from the folder; playback pauses when the window is minimized.
 - **Paste-to-open** inside the player (`Ctrl+V`) — normalizes `youtu.be`, `watch?v=`, `shorts/…` fragments and quoted paths; local files are never rewritten into URLs.
 
@@ -208,7 +208,8 @@ The quick-reference below ships inside `config/input.conf.template`; SmartSkip's
 | --- | --- |
 | `>` | Smart next (skip intro/outro/silence) |
 | `<` | Smart previous |
-| `?` | Trigger silence skip |
+| `/` | Manual skip — fast-forward to the next silence (end of the intro/outro) |
+| `?` | Cheat sheet (all shortcuts) |
 | `Ctrl+.` | Toggle auto-skip on/off |
 | `Alt+.` | Toggle category auto-skip |
 | `Esc` | Cancel an active skip / countdown |
@@ -289,7 +290,7 @@ menu carries those actions.
 | `ء` | X | Add chapter (same as `Shift+N`) |
 | `ق` | R | Remove chapter (same as `Alt+N`) |
 | `ك` | `;` | Save chapters (same as `Ctrl+N`) |
-| `؟` | `?` | Trigger silence skip |
+| `ظ` | `/` | Manual skip (same as `/`) |
 
 > Modified Arabic combos (`Ctrl`/`Alt`/`Shift` + Arabic letter) are unreachable on Windows — every modified shortcut is owned by its Latin twin (`Ctrl+C`, `Ctrl+V`, `Ctrl+N`, …).
 

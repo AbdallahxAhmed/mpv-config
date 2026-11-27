@@ -37,6 +37,15 @@ local SECTIONS = {
         },
     },
     {
+        title = "SKIPPING",
+        rows = {
+            { "/", "manual skip: fast-forward to the next silence (again / Esc = cancel)" },
+            { "> / <", "smart next / previous (chapter, silence, next file)" },
+            { "Ctrl+. / Alt+.", "auto-skip on/off / this chapter in or out of auto-skip" },
+            { "Esc / Enter", "cancel / skip now during the auto-skip countdown" },
+        },
+    },
+    {
         title = "SUBTITLES & MENUS",
         rows = {
             { "c / Ctrl+c", "caption menu / YouTube subtitle menu" },

@@ -54,13 +54,48 @@ class TestAutoHotkeyIntegration(unittest.TestCase):
         self.assertNotIn('"؟"', value, "SmartSkip silence_skip must not hijack '؟' from Help")
         self.assertIn("ctrl+?", value)
 
-    def test_input_conf_has_slash_ignore(self):
+    def test_input_conf_binds_slash_to_manual_skip(self):
+        """Bare '/' is the manual skip; binding it also blocks mpv's '/ = volume down'."""
         with open(self.input_conf_path, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertTrue(
-            bool(re.search(r"^[ \t]*/[ \t]+ignore", content, re.MULTILINE)),
-            "input.conf must contain '/ ignore' to prevent accidental volume drop",
+        self.assertRegex(content, r"(?m)^[ \t]*/[ \t]+script-binding SmartSkip/silence-skip[ \t]*$")
+        self.assertNotRegex(content, r"(?m)^[ \t]*/[ \t]+ignore")
+        self.assertNotRegex(content, r"(?m)^[ \t]*/[ \t]+add volume")
+
+    def test_migrate_input_conf_turns_slash_ignore_into_manual_skip(self):
+        from deploy.deployer import _migrate_input_conf
+
+        legacy = (
+            "? no-osd script-message-to help_overlay help\n"
+            "F9 no-osd script-message-to help_overlay help\n"
+            "# Prevent accidental volume drop when pressing physical '/' without Shift\n"
+            "/ ignore\n"
         )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write(legacy)
+            self.assertTrue(_migrate_input_conf(conf_path))
+            with open(conf_path, "r", encoding="utf-8") as f:
+                updated = f.read()
+            self.assertRegex(updated, r"(?m)^/ script-binding SmartSkip/silence-skip$")
+            self.assertRegex(updated, r"(?m)^ظ\s+script-binding SmartSkip/silence-skip$")
+            self.assertNotRegex(updated, r"(?m)^/ ignore")
+            self.assertNotIn("Prevent accidental volume drop", updated)
+            self.assertFalse(_migrate_input_conf(conf_path), "migration must be idempotent")
+
+    def test_migrate_input_conf_keeps_a_custom_slash_binding(self):
+        from deploy.deployer import _migrate_input_conf
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf_path = os.path.join(tmpdir, "input.conf")
+            with open(conf_path, "w", encoding="utf-8") as f:
+                f.write("/ cycle pause\n")
+            _migrate_input_conf(conf_path)
+            with open(conf_path, "r", encoding="utf-8") as f:
+                updated = f.read()
+            self.assertRegex(updated, r"(?m)^/ cycle pause$")
+            self.assertNotIn("SmartSkip/silence-skip", updated)
 
     def test_migrate_smartskip_conf_updates_silence_skip(self):
         from deploy.deployer import _migrate_smartskip_conf

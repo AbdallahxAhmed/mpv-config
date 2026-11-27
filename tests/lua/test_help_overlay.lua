@@ -73,7 +73,7 @@ end)
 test('the cheat sheet lists the sections a user needs', function()
     local _, help = load_script()
     local text = help.build()
-    for _, needle in ipairs({ "PLAYBACK", "VIDEO", "SUBTITLES", "MOUSE", "LAYOUT" }) do
+    for _, needle in ipairs({ "PLAYBACK", "VIDEO", "SKIPPING", "SUBTITLES", "MOUSE", "LAYOUT" }) do
         assert(text:find(needle, 1, true), "missing section: " .. needle)
     end
     for _, needle in ipairs({ "Ctrl+1..Ctrl+6", "Ctrl+g", "cycle", "Ctrl+Shift+" }) do

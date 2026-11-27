@@ -1982,12 +1982,32 @@ def _migrate_input_conf(input_conf_path, audit_log=None):
         updated_content = (
             updated_content.rstrip() + "\nF9 no-osd script-message-to help_overlay help\n"
         )
-    if not re.search(r"^[ \t]*/[ \t]+ignore", updated_content, re.MULTILINE):
-        updated_content = (
-            updated_content.rstrip()
-            + "\n# Prevent accidental volume drop when pressing physical '/' without Shift\n"
-            + "/ ignore\n"
-        )
+    #    Manual skip on bare '/': SmartSkip's silence skip lost its key when
+    #    '?' went to the cheat sheet, and '/' was parked on "ignore" (only to
+    #    block mpv's '/ = volume down'). Binding '/' to the skip blocks the
+    #    volume default just the same; the layout-twin pass below adds ظ.
+    slash_skip = "/ script-binding SmartSkip/silence-skip"
+    slash_comment = (
+        "# Manual skip: bare '/' runs SmartSkip's silence skip (fast-forward to the\n"
+        "# next silence = end of the intro/outro; press again or Esc to cancel).\n"
+        "# Shift+/ ('?') stays the cheat sheet. Owning '/' here also keeps mpv's\n"
+        "# built-in '/ = volume down' away. Arabic twin (ظ) is generated below.\n"
+    )
+    updated_content = re.sub(
+        r"^[ \t]*# Prevent accidental volume drop when pressing physical '/' without Shift[ \t]*\r?\n"
+        r"[ \t]*/[ \t]+ignore[ \t]*$",
+        lambda _m: slash_comment + slash_skip,
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    updated_content = re.sub(
+        r"^[ \t]*/[ \t]+ignore[ \t]*$",
+        lambda _m: slash_skip,
+        updated_content,
+        flags=re.MULTILINE,
+    )
+    if not re.search(r"^[ \t]*/[ \t]+\S", updated_content, re.MULTILINE):
+        updated_content = updated_content.rstrip() + "\n" + slash_comment + slash_skip + "\n"
 
     #    Manual anime-detection override: ensure it on deployed files that
     #    predate the profile-picker bindings (moved here from Ctrl+Shift+g:

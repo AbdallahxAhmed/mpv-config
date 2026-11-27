@@ -42,6 +42,15 @@ local o = {
     skip_once = false,
 	categories=[[ [ ["internal-chapters", "prologue>Prologue/^Intro; opening>^OP/ OP$/^Opening; ending>^ED/ ED$/^Ending/Credits Start; preview>PV/ PV$/^Preview/Preview Start"], ["external-chapters", "idx->0/2"] ] ]],
 	skip=[[ [ ["internal-chapters", "toggle;toggle_idx;opening;ending;preview"], ["external-chapters", "toggle;toggle_idx"] ] ]],
+	-----Smart Detection Settings (mpv-config: scripts/modules/skip_detect.lua)-----
+	smart_detect = true,
+	smart_detect_heuristics = true,
+	smart_detect_song_min = 75,
+	smart_detect_song_max = 105,
+	smart_detect_intro_max = 120,
+	smart_detect_preview_max = 40,
+	smart_detect_episode_min = 600,
+	smart_detect_episode_max = 2700,
 	invert_autoskip_exclusion = false,
 	autoskip_exclusion=[[
 	[""]
@@ -111,6 +120,26 @@ o.cancel_silence_skip_keybind = utils.parse_json(o.cancel_silence_skip_keybind)
 o.autoskip_exclusion = utils.parse_json(o.autoskip_exclusion) --1.3.4# option autoskip_exclusion parsing
 
 package.path = mp.command_native({"expand-path", "~~/script-modules/?.lua;"}) .. package.path
+
+-- mpv-config: smarter intro/outro detection (case-insensitive names, more
+-- languages, and chapter-length guessing for unnamed chapter lists).
+-- Missing module = stock SmartSkip behaviour.
+local skip_detect = nil
+do
+	local candidates = {}
+	if mp.find_config_file then
+		local found = mp.find_config_file('scripts/modules/skip_detect.lua')
+		if found then candidates[#candidates + 1] = found end
+	end
+	local here = debug.getinfo(1, 'S').source:match('^@?(.*[/\\])')
+	if here then candidates[#candidates + 1] = here .. 'modules/skip_detect.lua' end
+	for _, path in ipairs(candidates) do
+		local ok, mod = pcall(dofile, path)
+		if ok and type(mod) == 'table' and mod.classify then skip_detect = mod break end
+		if not ok then msg.warn('skip_detect failed to load: ' .. tostring(mod)) end
+	end
+	if not skip_detect then msg.verbose('skip_detect module not found: name patterns only') end
+end
 local user_input_module, input = pcall(require, "user-input-module")
 
 mp.set_property('user-data/smartskip/silence-skip', 'no')
@@ -978,6 +1007,56 @@ end
 
 --modified fork of chapterskip.lua--
 
+-- mpv-config: detected category per chapter (1-based like chapter-list),
+-- recomputed only when the file or its chapter list changes.
+local g_detect = { sig = nil, cats = {}, sources = {} }
+local g_detect_off = {} -- chapters the user took out of auto-skip (alt+.)
+
+function detected_categories()
+	if not skip_detect or not o.smart_detect then return {}, {} end
+	local chapters = mp.get_property_native("chapter-list") or {}
+	local duration = (mp.get_property_native("duration") or 0)
+	local parts = { g_filepath, tostring(math.floor(duration)) }
+	for _, c in ipairs(chapters) do
+		parts[#parts + 1] = string.format('%.3f=%s', c.time or 0, c.title or '')
+	end
+	local sig = table.concat(parts, '|')
+	if sig ~= g_detect.sig then
+		local result = skip_detect.classify(chapters, duration, {
+			heuristics = o.smart_detect_heuristics,
+			song_min = o.smart_detect_song_min,
+			song_max = o.smart_detect_song_max,
+			intro_max = o.smart_detect_intro_max,
+			preview_max = o.smart_detect_preview_max,
+			episode_min = o.smart_detect_episode_min,
+			episode_max = o.smart_detect_episode_max,
+		})
+		g_detect = { sig = sig, cats = result.categories, sources = result.sources }
+		g_detect_off = {}
+		if #chapters > 0 then
+			local line = skip_detect.describe(result)
+			msg.info('detected chapters: ' .. (line ~= '' and line or 'none'))
+		end
+	end
+	return g_detect.cats, g_detect.sources
+end
+
+function detected_category(i)
+	if i == 0 then i = 1 end
+	if g_detect_off[i] then return nil end
+	local cats = detected_categories()
+	return cats[i]
+end
+
+-- " · opening" for the chapter mpv is on now, for the auto-skip OSD
+function detected_suffix()
+	local current = mp.get_property_number("chapter")
+	if not current then return '' end
+	local cat = detected_category(current + 1)
+	if not cat then return '' end
+	return ' · ' .. cat
+end
+
 function matches(i, title)
 	local opt_skip = o.skip
 	if type(o.skip) == 'table' then
@@ -989,7 +1068,9 @@ function matches(i, title)
 		end
 	end
 
+	local detected = detected_category(i)
     for category in string.gmatch(opt_skip, " *([^;]*[^; ]) *") do
+		if detected and category:lower() == detected then return true end
 		if categories[category:lower()] then
             if category:lower() == "idx-" or category:lower() == "toggle_idx" then
 			   for pattern in string.gmatch(categories[category:lower()], "([^/]+)") do
@@ -1112,7 +1193,7 @@ function chapterskip(_, current, countdown)
 				end
 				prompt_msg('● Auto-Skip'..autoskip_osd_string, o.osd_duration, o.autoskip_osd)
 			else
-				prompt_msg('➤ Auto-Skip: Chapter '.. mp.command_native({'expand-text', '${chapter}'}), o.osd_duration, o.autoskip_osd)
+				prompt_msg('➤ Auto-Skip: Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), o.osd_duration, o.autoskip_osd)
 			end
 			mp.commandv('no-osd', 'set', 'chapter', i-1)
             skipped[skip] = true
@@ -1137,9 +1218,9 @@ function chapterskip(_, current, countdown)
 					start_chapterskip_countdown(autoskip_graceful_osd..'○ Auto-Skip'..' in "%countdown%"'..autoskip_osd_string, 2000, o.autoskip_osd)
 				end)
 			else
-				prompt_msg(autoskip_graceful_osd..'▷ Auto-Skip in "'..o.autoskip_countdown..'": Chapter '.. mp.command_native({'expand-text', '${chapter}'}), 2000, o.autoskip_osd)
+				prompt_msg(autoskip_graceful_osd..'▷ Auto-Skip in "'..o.autoskip_countdown..'": Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), 2000, o.autoskip_osd)
 				g_autoskip_timer = mp.add_periodic_timer(1, function ()
-					start_chapterskip_countdown(autoskip_graceful_osd..'▷ Auto-Skip in "%countdown%": Chapter '.. mp.command_native({'expand-text', '${chapter}'}), 2000, o.autoskip_osd)
+					start_chapterskip_countdown(autoskip_graceful_osd..'▷ Auto-Skip in "%countdown%": Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), 2000, o.autoskip_osd)
 				end)
 			end
 
@@ -1158,7 +1239,7 @@ function chapterskip(_, current, countdown)
 					end
 					prompt_msg('● Auto-Skip'..autoskip_osd_string, o.osd_duration, o.autoskip_osd)
 				else
-					prompt_msg('➤ Auto-Skip: Chapter '.. mp.command_native({'expand-text', '${chapter}'}), o.osd_duration, o.autoskip_osd)
+					prompt_msg('➤ Auto-Skip: Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), o.osd_duration, o.autoskip_osd)
 				end
 
 				if consecutive_i > 1 and o.autoskip_countdown_bulk then
@@ -1199,9 +1280,9 @@ function chapterskip(_, current, countdown)
 				start_chapterskip_countdown(autoskip_graceful_osd..'○ Auto-Skip'..' in "%countdown%"'..autoskip_osd_string, 2000, o.autoskip_osd)
 			end)
 		else
-			prompt_msg(autoskip_graceful_osd..'▷ Auto-Skip in "'..o.autoskip_countdown..'": Chapter '.. mp.command_native({'expand-text', '${chapter}'}), 2000, o.autoskip_osd)
+			prompt_msg(autoskip_graceful_osd..'▷ Auto-Skip in "'..o.autoskip_countdown..'": Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), 2000, o.autoskip_osd)
 			g_autoskip_timer = mp.add_periodic_timer(1, function ()
-				start_chapterskip_countdown(autoskip_graceful_osd..'▷ Auto-Skip in "%countdown%": Chapter '.. mp.command_native({'expand-text', '${chapter}'}), 2000, o.autoskip_osd)
+				start_chapterskip_countdown(autoskip_graceful_osd..'▷ Auto-Skip in "%countdown%": Chapter '.. mp.command_native({'expand-text', '${chapter}'})..detected_suffix(), 2000, o.autoskip_osd)
 			end)
 		end
 		function proceed_autoskip(force)
@@ -1257,6 +1338,24 @@ function toggle_category_autoskip()
 	local chapter_title = tostring(current_chapter)
 	if current_chapter > 0 and chapters[current_chapter].title and chapters[current_chapter].title ~= '' then
 		chapter_title = chapters[current_chapter].title
+	end
+
+	-- mpv-config: a detected (not pattern-matched) chapter is toggled on
+	-- its own list, so alt+. can take a wrong guess out of auto-skip.
+	local detected_cats = detected_categories()
+	local detected_cat = current_chapter > 0 and detected_cats[current_chapter] or nil
+	if detected_cat then
+		if g_detect_off[current_chapter] then
+			g_detect_off[current_chapter] = nil
+			prompt_msg('● Added to Auto-Skip\n  ➔ Chapter: '..chapter_title..' · '..detected_cat, o.osd_duration, o.autoskip_osd)
+			return
+		end
+		g_detect_off[current_chapter] = true
+		if not matches(current_chapter, chapter_title) then
+			prompt_msg('○ Removed from Auto-Skip\n  ▷ Chapter: '..chapter_title..' · '..detected_cat, o.osd_duration, o.autoskip_osd)
+			if g_autoskip_countdown_flag then kill_chapterskip_countdown() end
+			return
+		end
 	end
 
 	local found_i = 0
@@ -1339,6 +1438,7 @@ mp.register_event('file-loaded', function()
 	initial_chapter_count = mp.get_property_number("chapter-list/count")
 	if initial_chapter_count > 0 and chapter_state ~= 'external-chapters' then chapter_state = 'internal-chapters' end
 	prep_chapterskip_var()
+	if chapter_state ~= 'no-chapters' then detected_categories() end
 end)
 
 mp.add_hook("on_load", 50, function()
